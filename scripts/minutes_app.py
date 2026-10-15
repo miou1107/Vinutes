@@ -1,0 +1,1835 @@
+"""Everything the recorder app's window shows and changes: the meeting list, one meeting with its Google Doc,
+edits, Claude rewrites, comments, the activity log, and what the AI learns from the user's own edits.
+
+Usage (the app runs these; each prints one last line `JSON {...}`, or exits with a message the window shows):
+  minutes_app.py list                              every recording, newest first
+  minutes_app.py open <job>                        sync with the Google Doc, then all the window shows for it
+  minutes_app.py save <job> <edited.html> [shown]  the preview as the user typed it -> Markdown -> changed paragraphs
+                                                   (shown: the token of the preview the user was editing)
+  minutes_app.py learn <job>                       what the user changed by hand since the last time -> glossary / notes
+  minutes_app.py unlearn <job> <id> | relearn <job> <id>
+  minutes_app.py ask <job> <request>               Claude changes the minutes as asked (restricted, file tools only)
+  minutes_app.py quick <job> <name>                the same with a preset request (精簡摘要, 完整詳盡, ...)
+  minutes_app.py undo <job>                        back to the minutes before the last Claude change
+  minutes_app.py reply <job> <comment id> <text>   answer a comment on the Google Doc
+  minutes_app.py resolve <job> <comment id>        mark a comment resolved
+  minutes_app.py confirm <job> <item>              the user checked one of Claude's guesses (待確認)
+  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」 (attachments.py)
+  minutes_app.py log <job>                         the activity log, newest first
+  minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
+                                                   learns the user's own edits; the side panel's lists again
+  minutes_app.py locate <job> <words>              how far down the Doc those words are ({"at": 0.0–1.0})
+  minutes_app.py speaker <job> <group> <name> [line]  the user named a voice (講者 A -> Alex), or one line's
+  minutes_app.py version <installed>               the app's version and the newest on GitHub (looked up once a day)
+  minutes_app.py update                            git pull this folder, then recorder/install.sh in the background,
+                                                   which quits the app, builds the new one and opens it
+Commands that change a job wait for each other (a lock file per job), so a save never overlaps a rewrite;
+refresh, asked every few seconds, answers {"busy": true} instead of waiting.
+
+Files in the job folder, next to what auto_minutes.py writes:
+  同步.json         the Doc revision last synced, comments already seen, confirmed guesses, learned items
+  同步基準.md       the minutes as the Doc last had them; edits made while offline are sent from here on
+  學習基準.md       the minutes after the last change that was not the user's own (pull, Claude, undo);
+                    `learn` compares it with the minutes to see what the user typed
+  復原.md           the minutes before the last Claude change, for undo (復原後.md: Claude's version)
+  預覽基準/         what the window's editor held, read back to Markdown, by token: each preview it was sent and
+                    each page it saved; a save is compared with that, not with what the minutes became meanwhile
+  操作紀錄.jsonl    the activity log, one JSON object per line: {"at", "who", "text", "kind"}
+What is learned goes to $MINUTES_HOME/glossary.md (words) and notes.md (wording), which the next minutes read.
+"""
+from __future__ import annotations
+
+import hashlib
+import html
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.parse
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import doc_sync  # noqa: E402
+import speakers  # noqa: E402
+from google_setup import CONFIG, owner, sender_name  # noqa: E402
+
+SCRIPTS = Path(__file__).resolve().parent
+RECORDINGS = CONFIG / 'recordings'
+WEEKDAY = '一二三四五六日'
+BLANK = '[__]'
+AI_TIMEOUT = 10 * 60
+QUICK = {
+    '精簡摘要': '把整份紀錄改得精簡：每一節只留結論、決定和數字，刪掉重複的說明。七節的標題和表格的欄位不變。',
+    '完整詳盡': '照 逐字稿.txt 把討論摘要寫完整：補回討論過程、每個人的說法和理由。其他節不變。',
+    '正式嚴謹': '把用語改成正式的書面語氣，口語說法全部換掉。內容和格式不變。',
+    '視覺呈現': '能做成表格的內容改成表格，例如決議、負責人與時程；時程照時間先後排。',
+    '對外版本': '改成可以給公司外部的人看的版本：刪掉只適合內部看的討論，人名改成單位名稱。',
+}
+CHINESE_NUMBER = re.compile(r'[\d一二三四五六七八九十百千萬兩]')
+NO_FILE = '這台電腦上找不到這場會議的紀錄檔，現在沒辦法修改。'
+
+
+def out(data: dict):
+    print('JSON ' + json.dumps(data, ensure_ascii=False))
+
+
+def read_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_json(path: Path, data: dict):
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    tmp.replace(path)
+
+
+def now() -> datetime:
+    return datetime.now().astimezone()
+
+
+def me() -> str:
+    """How the log names the user: the sender name from settings.json, else the part of the address before @."""
+    return sender_name() or (owner() or '你').split('@')[0]
+
+
+# --- one job ---------------------------------------------------------------------------------
+
+class Job:
+    def __init__(self, path: Path):
+        self.dir = path.expanduser().resolve()
+        if not (self.dir / 'job.json').is_file():
+            sys.exit('找不到這場錄音。')
+        self.meta = read_json(self.dir / 'job.json')
+        self.status = read_json(self.dir / 'status.json')
+        self.result = read_json(self.dir / 'result.json')
+        self.state_file = self.dir / '同步.json'
+        self.state = read_json(self.state_file)
+
+    @property
+    def id(self) -> str:
+        return self.dir.name
+
+    @property
+    def md_path(self) -> Path | None:
+        md = self.result.get('minutes_md')
+        return Path(md) if md and Path(md).is_file() else None
+
+    @property
+    def missing(self) -> bool:
+        """The minutes file was moved or renamed outside the app: nothing is synced from or to it."""
+        return bool(self.result.get('minutes_md')) and self.md_path is None
+
+    @property
+    def md(self) -> str:
+        return self.md_path.read_text(encoding='utf-8') if self.md_path else ''
+
+    def write_md(self, text: str):
+        if not self.md_path:
+            sys.exit(NO_FILE)
+        tmp = self.md_path.with_suffix('.tmp')
+        tmp.write_text(text, encoding='utf-8')
+        tmp.replace(self.md_path)
+
+    @property
+    def synced_md(self) -> str:
+        """The minutes as the Google Doc last had them; the local file differs only by edits not sent yet."""
+        path = self.dir / '同步基準.md'
+        return path.read_text(encoding='utf-8') if path.is_file() else self.md
+
+    def write_synced(self, text: str):
+        (self.dir / '同步基準.md').write_text(text, encoding='utf-8')
+
+    @property
+    def doc_id(self) -> str:
+        found = re.search(r'/document/d/([A-Za-z0-9_-]+)', self.result.get('doc_url') or '')
+        return found.group(1) if found else ''
+
+    def save_state(self):
+        write_json(self.state_file, self.state)
+
+    def started(self) -> datetime | None:
+        try:
+            return datetime.fromisoformat(self.meta.get('started') or '')
+        except ValueError:
+            return None
+
+    def status_word(self) -> str:
+        step = self.status.get('step', '')
+        if step == 'failed':
+            return 'failed'
+        if step != 'done':
+            return 'working'
+        return 'sent' if self.result.get('sent_at') else 'ready'
+
+    def log(self, who: str, text: str, kind: str = '', at: datetime | None = None):
+        line = {'at': (at or now()).isoformat(timespec='seconds'), 'who': who, 'text': text, 'kind': kind}
+        with (self.dir / '操作紀錄.jsonl').open('a', encoding='utf-8') as f:
+            f.write(json.dumps(line, ensure_ascii=False) + '\n')
+
+    def log_entries(self) -> list[dict]:
+        entries = []
+        path = self.dir / '操作紀錄.jsonl'
+        if path.is_file():
+            for line in path.read_text(encoding='utf-8').splitlines():
+                try:
+                    entries.append(json.loads(line))
+                except ValueError:
+                    pass
+        if not any(e.get('text') == '開始錄音' for e in entries):
+            entries += derived_log(self)
+        entries.sort(key=lambda e: e.get('at', ''), reverse=True)
+        return entries
+
+
+def derived_log(job: Job) -> list[dict]:
+    """The log of a recording made before the app kept one, rebuilt from its files."""
+    found, who = [], me()
+    started, ended = job.meta.get('started'), job.meta.get('ended')
+    if started:
+        found.append({'at': started, 'who': who, 'text': '開始錄音', 'kind': ''})
+    if ended and started:
+        try:
+            minutes = round((datetime.fromisoformat(ended) - datetime.fromisoformat(started)).total_seconds() / 60)
+            found.append({'at': ended, 'who': who, 'text': f'結束錄音，長度 {length_words(minutes)}', 'kind': ''})
+        except ValueError:
+            pass
+    if job.status.get('step') == 'done' and job.status.get('at'):
+        found.append({'at': job.status['at'], 'who': ai_name(), 'text': '整理完會議記錄，發成 Google 文件', 'kind': ''})
+    sent = job.result.get('sent_at')
+    if sent:
+        people = '、'.join(name_of(job, a) for a in (job.result.get('mail') or {}).get('to', []))
+        found.append({'at': sent, 'who': who, 'text': f'已寄給 {people}，附件是 {format_words(job.result.get("sent_format"))}',
+                      'kind': 'sent'})
+    return found
+
+
+def length_words(minutes: int) -> str:
+    if minutes < 60:
+        return f'{max(minutes, 1)} 分鐘'
+    h, m = divmod(minutes, 60)
+    return f'{h} 小時' + (f' {m} 分鐘' if m else '')
+
+
+def format_words(fmt: str | None) -> str:
+    return {'word': 'Word 檔', 'pdf': 'PDF 檔'}.get(fmt or '', 'Google 文件連結')
+
+
+def calendar_people(job: Job) -> dict[str, str]:
+    """Address -> name of the people on that day's calendar, from the 行事曆.txt the job wrote."""
+    people = {}
+    path = job.dir / '行事曆.txt'
+    if path.is_file():
+        for line in path.read_text(encoding='utf-8').splitlines():
+            m = re.match(r'\s*與會:\s*(.*?)\s+(\S+@\S+)', line)
+            if m:
+                people[m.group(2).lower()] = m.group(1).strip()
+    return people
+
+
+def name_of(job: Job, address: str) -> str:
+    address = address.lower()
+    if address == (owner() or '').lower():
+        return me()
+    known = {**calendar_people(job), **job.state.get('names', {})}
+    return known.get(address) or address
+
+
+def day_words(when: datetime) -> str:
+    year = '' if when.year == now().year else f'{when:%Y}/'
+    return f'{year}{when:%m/%d}（{WEEKDAY[when.weekday()]}）'
+
+
+def short_time(iso: str) -> str:
+    try:
+        when = datetime.fromisoformat(iso.replace('Z', '+00:00')).astimezone()
+    except ValueError:
+        return iso[:16]
+    return f'{when:%m/%d %H:%M}'
+
+
+# --- the list --------------------------------------------------------------------------------
+
+def all_jobs() -> list[Job]:
+    names = sorted((p.name for p in RECORDINGS.iterdir() if (p / 'job.json').is_file()), reverse=True) \
+        if RECORDINGS.is_dir() else []
+    return [Job(RECORDINGS / n) for n in names]
+
+
+def summary(job: Job) -> dict:
+    started = job.started() or datetime.fromtimestamp((job.dir / 'job.json').stat().st_mtime).astimezone()
+    try:
+        ended = f"{datetime.fromisoformat(job.meta.get('ended') or ''):%H:%M}"
+    except ValueError:
+        ended = ''
+    return {'id': job.id, 'day': day_words(started), 'date': f'{started:%Y-%m-%d}', 'time': f'{started:%H:%M}',
+            'started': started.isoformat(),
+            'ended_time': ended,
+            'title': job.result.get('title') or '', 'project': (job.result.get('project') or '').strip(),
+            'status': job.status_word(), 'step': job.status.get('step', ''), 'message': job.status.get('message', ''),
+            'sent_at': job.result.get('sent_at') or '', 'sent_count': len((job.result.get('mail') or {}).get('to', [])),
+            'sent_format': job.result.get('sent_format') or '',
+            'has_audio': (job.dir / (job.meta.get('audio') or '錄音.m4a')).is_file(),
+            'has_transcript': (job.dir / '逐字稿.txt').is_file()}
+
+
+def cmd_list():
+    out({'jobs': [summary(j) for j in all_jobs()]})
+
+
+# --- the app's version -------------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parent.parent
+APP_UPDATE = CONFIG / 'vinutes-update.json'   # the newest version on GitHub and when it was looked up
+
+
+def cmd_version(installed: str):
+    """The list's corner: the version this app was built from, and whether GitHub has a newer one. GitHub is asked
+    at most once a day; offline, the last answer stands. Only the public VERSION file is fetched."""
+    import check_update
+    try:
+        state = json.loads(APP_UPDATE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    if datetime.now().timestamp() - float(state.get('checked_at') or 0) > 24 * 3600:
+        try:
+            newest = check_update.version_of(check_update.fetch('VERSION'))
+            state = {'checked_at': datetime.now().timestamp(), 'newest': '.'.join(map(str, newest)) if newest else ''}
+            APP_UPDATE.write_text(json.dumps(state), encoding='utf-8')
+        except Exception:                         # offline, GitHub down: no button today, try again later
+            pass
+    have = check_update.version_of(f'version: "{installed}"') if installed else \
+        check_update.version_of((ROOT / 'VERSION').read_text(encoding='utf-8'))
+    newest = check_update.version_of(f'version: "{state.get("newest") or ""}"')
+    out({'version': '.'.join(map(str, have)) if have else installed, 'newest': state.get('newest') or '',
+         'update': bool(have and newest and newest > have)})
+
+
+def cmd_update():
+    """版本更新: the Vinutes folder takes the new version from GitHub, then install.sh runs on its own (it quits this
+    app, which ends this script's parent) and opens the new app."""
+    if not (ROOT / '.git').exists():
+        sys.exit('Vinutes 當初不是用 git clone 裝的，沒辦法自動更新。請照 README 的安裝方法重新安裝一次。')
+    try:
+        pull = subprocess.run(['git', '-C', str(ROOT), 'pull', '--ff-only'], capture_output=True, text=True,
+                              timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        sys.exit('沒辦法下載新版，請確認網路連線正常後，再按一次版本更新。')
+    if pull.returncode != 0:
+        sys.exit('沒辦法下載新版。可能是網路不通，或有人改過 Vinutes 資料夾裡的檔案。網路正常卻還是失敗，請照 README 的安裝方法重新安裝一次。')
+    (CONFIG / 'open-window-after-update').touch()   # the new app opens the meeting window again
+    log = (CONFIG / 'update.log').open('w', encoding='utf-8')
+    subprocess.Popen(['/bin/bash', str(ROOT / 'recorder' / 'install.sh')], stdin=subprocess.DEVNULL,
+                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    out({'started': True})
+
+
+# --- what is still open: 待補充 and 待確認 ----------------------------------------------------
+
+def find_words(plains: list[str], *candidates: str) -> str:
+    """What to type into the Google Doc's find box to land on an item: the first candidate one paragraph or cell
+    of the minutes holds, else the longest stretch of a candidate (3 characters or more) one of them holds."""
+    for c in candidates:
+        c = (c or '').strip()
+        if c and any(c in p for p in plains):
+            return c
+    best = ''
+    for c in candidates:
+        c = (c or '').strip()
+        for i in range(len(c)):
+            for j in range(len(c), i + max(len(best), 2), -1):
+                piece = c[i:j].strip()
+                if len(piece) > len(best) and any(piece in p for p in plains):
+                    best = piece
+                    break
+    return best
+
+
+def todo_items(job: Job, md: str) -> list[dict]:
+    """A 待補充 item stays until the blank it points at is filled."""
+    _, blocks = doc_sync.parse(md)
+    plains = [b.plain for b in blocks]
+    rows: dict[tuple, str] = {}
+    for b in blocks:
+        if b.kind == 'cell':
+            rows[(b.table, b.row)] = rows.get((b.table, b.row), '') + ' | ' + b.plain
+    units = [rows[(b.table, b.row)] if b.kind == 'cell' else b.plain for b in blocks]
+    units = list(dict.fromkeys(units))
+    any_blank = any(BLANK in u for u in units)
+    items = []
+    for raw in job.result.get('todo') or []:
+        label, anchor = (raw.get('label', ''), raw.get('line', '')) if isinstance(raw, dict) else (str(raw), '')
+        label = label.strip()
+        if not label:
+            continue
+        hits = [u for u in units if anchor and anchor in u] or [u for u in units if label in u]
+        still = any(BLANK in u for u in hits) if hits else any_blank
+        if still:
+            items.append({'label': label, 'anchor': anchor or label, 'find': find_words(plains, anchor, label)})
+    return items
+
+
+GUESS = re.compile(r'「(.+?)」\s*(?:推測是|推測為|應該是|可能是|改為|改成|暫寫成|寫成)\s*「?([^「」，。,]+?)」?\s*$')
+
+
+def check_items(job: Job) -> list[dict]:
+    """Claude's guesses the user has not confirmed yet. Word guesses carry what was heard and what is meant."""
+    done = set(job.state.get('confirmed', []))
+    plains = [] if job.missing or not job.md_path else [b.plain for b in doc_sync.parse(job.md)[1]]
+    items = []
+    for raw in job.result.get('check') or []:
+        if isinstance(raw, dict):
+            text, heard, meant = raw.get('text', ''), raw.get('heard', ''), raw.get('meant', '')
+        else:
+            text, heard, meant = str(raw), '', ''
+            m = GUESS.search(text)
+            if m and len(m.group(2).strip()) <= 20:
+                heard, meant = m.group(1).strip(), m.group(2).strip()
+        if text and text not in done:
+            items.append({'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)})
+    return items
+
+
+# --- preview ---------------------------------------------------------------------------------
+
+MARK_OPEN, MARK_MID, MARK_CLOSE = '', '', ''
+ANCHOR_OPEN, ANCHOR_MID, ANCHOR_CLOSE = '', '', ''
+
+
+PRIVATE = re.compile('[\ue000-\ue0ff]')
+LINE_MARK = re.compile(r'^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?|\|)')   # never mark a list number or a heading's #
+
+
+def wrap_in_lines(lines: list[str], first: int, last: int, words: str, opener: str, closer: str) -> bool:
+    """Put markers around the first place `words` appears, reading past markers already there; a place that would
+    cut across another marked stretch is skipped, so the spans always nest."""
+    for i in range(first, last + 1):
+        line = lines[i]
+        keep = [k for k, ch in enumerate(line) if not PRIVATE.match(ch)]
+        clean = ''.join(line[k] for k in keep)
+        lead = LINE_MARK.match(clean)
+        hidden = re.sub(r'\]\([^)]*\)|<[^>\s]+>', lambda m: '\0' * len(m.group(0)), clean)   # link addresses
+        at = hidden.find(words, lead.end() if lead else 0)
+        if at < 0:
+            continue
+        start, end = keep[at], keep[at + len(words) - 1] + 1
+        inside = line[start:end]
+        opens = len(re.findall('[\ue000\ue003]', inside))
+        closes = len(re.findall('[\ue002\ue005]', inside))
+        if opens != closes:
+            continue
+        lines[i] = line[:start] + opener + inside + closer + line[end:]
+        return True
+    return False
+
+
+def preview(md: str, marks: list[dict], anchors: list[dict]) -> str:
+    """The minutes as HTML for the window's editor: colleagues' changes underlined, commented words highlighted,
+    blanks tinted. Raw HTML in the Markdown is shown as text, never run."""
+    from markdown_it import MarkdownIt
+    lines, blocks = doc_sync.parse(md)
+    for a in anchors:
+        quote = a['quote'].strip().split('\n')[0][:120]
+        if quote:
+            wrap_in_lines(lines, 0, len(lines) - 1, quote, f'{ANCHOR_OPEN}{a["n"]}{ANCHOR_MID}', ANCHOR_CLOSE)
+    for n, mark in enumerate(marks):
+        words = mark['after'].strip()
+        if not words:
+            continue
+        b = blocks[mark['block']] if 0 <= mark.get('block', -1) < len(blocks) else None
+        first, last = (b.first, b.last) if b else (0, len(lines) - 1)
+        wrap_in_lines(lines, first, last, words, f'{MARK_OPEN}{n}{MARK_MID}', MARK_CLOSE)
+    body = MarkdownIt('commonmark', {'html': False}).enable('table').render('\n'.join(lines))
+    body = body.replace(BLANK, f'<span class="blank">{BLANK}</span>')
+
+    def mark_span(m):
+        mark = marks[int(m.group(1))]
+        who = html.escape(mark.get('who') or '')
+        return f'<span class="edited" title="{who} 在 Google 文件上修改">{m.group(2)}</span>'
+
+    body = re.sub(f'{MARK_OPEN}(\\d+){MARK_MID}(.*?){MARK_CLOSE}', mark_span, body, flags=re.S)
+    body = re.sub(f'{ANCHOR_OPEN}(\\d+){ANCHOR_MID}(.*?){ANCHOR_CLOSE}',
+                  lambda m: f'<span class="anchor" data-c="{m.group(1)}">{m.group(2)}</span>'
+                            f'<sup class="cnum" data-ui="1" contenteditable="false">{m.group(1)}</sup>',
+                  body, flags=re.S)
+    for ch in (MARK_OPEN, MARK_MID, MARK_CLOSE, ANCHOR_OPEN, ANCHOR_MID, ANCHOR_CLOSE):
+        body = body.replace(ch, '')
+    # pictures from the internet are not loaded in the window; data: images and nothing else
+    body = re.sub(r'<img [^>]*src="(?!data:)[^"]*"[^>]*>', '', body)
+    return body
+
+
+# --- sync with the Google Doc ----------------------------------------------------------------
+
+OFFLINE_SAVED = '沒有連上 Google 文件，改過的內容先存在這台電腦，下次存檔或打開這場會議時會再存回。'
+NO_DOCS_API = ('這台電腦的 Google 連線還沒開啟 Google Docs API，改過的內容先存在這台電腦。'
+               '到「環境設定自檢」的第 8 項按「開啟」就可以補上。')
+LOGIN_SAVED = ('Google 登入已經失效，改過的內容先存在這台電腦。'
+               '到「環境設定自檢」的第 7 項重新登入之後，下次存檔會一起存回。')
+NO_RIGHT_SAVED = ('你的 Google 帳號沒有這份 Google 文件的編輯權限，改過的內容先存在這台電腦。'
+                  '文件擁有者開放編輯權限之後，下次存檔會一起存回。')
+GONE_SAVED = '找不到這份 Google 文件，可能已經被刪除。改過的內容存在這台電腦的紀錄檔裡。'
+OFFLINE_OPEN = '沒有連上 Google 文件，畫面上是這台電腦上的版本。'
+LOGIN_OPEN = 'Google 登入已經失效，畫面上是這台電腦上的版本。到「環境設定自檢」的第 7 項就可以重新登入。'
+NO_RIGHT_OPEN = '你的 Google 帳號沒有這份 Google 文件的權限，畫面上是這台電腦上的版本。'
+GONE_OPEN = '找不到這份 Google 文件，可能已經被刪除，畫面上是這台電腦上的版本。'
+OFFLINE_CONFLICT = '你離線時改的幾段，同事也在 Google 文件上改過，這幾段保留同事的版本：'
+TABLES_CHANGED = '有人在 Google 文件改了表格的列數，紀錄已換成 Google 文件上的版本。'
+TABLE_SHAPE = '表格的列或欄沒辦法在這裡增減，這次的修改沒有存。要增減表格的列或欄，請到 Google 文件修改。'
+AI_TABLES_OFFLINE = '{ai} 這次的修改會增減表格的列或欄，要連上 Google 文件才能存。紀錄沒有變動。'
+AI_TABLES_COMMENTS = ('{ai} 這次的修改會增減表格的列或欄，要把整份文件重新上傳。Google 文件上還有沒處理的留言，'
+                      '重新上傳之後留言會對不到原文，所以紀錄沒有變動。處理完留言再試一次。')
+AI_TABLES_COLLEAGUE = '同事在 {ai} 修改的同時改了 Google 文件，所以 {ai} 這次的修改沒有存。再試一次，{ai} 會從最新的版本開始改。'
+WHOLE_COMMENTS = 'Google 文件上剛有人留言，這次增減表格的修改沒有存回，紀錄已換成 Google 文件上的版本。'
+WHOLE_COLLEAGUE = '同事剛好也在 Google 文件上修改，這次增減表格的修改沒有存回，紀錄已換成 Google 文件上的版本。'
+REJECTED_SAVED = ('Google 文件沒有接受這次的修改，改過的內容先存在這台電腦。'
+                  '重新打開這場會議再試一次；還是不行的話，請直接到 Google 文件修改。')
+REJECTED_OPEN = 'Google 文件沒有接受這台電腦上還沒存回的修改，畫面上是這台電腦上的版本。'
+
+
+def linked_files(job: Job, md: str) -> list[str]:
+    """The Drive files 「八、補充資訊」 still links to (cmd_attach keeps their ids in the Doc's record): the mail opens
+    these to its recipients (workspace.linked_files)."""
+    record = read_json(job.md_path.with_name(job.md_path.name + '.gdoc.json')) if job.md_path else {}
+    return [f for f in record.get('attach_files', []) if f'/file/d/{f}/' in md]
+
+
+def ai_name() -> str:
+    """Claude, Codex or Antigravity: the AI that writes and changes the minutes on this computer (ai_runner.py)."""
+    import ai_runner
+    return ai_runner.name()
+
+
+def ai_choice() -> dict:
+    """For the AI menu left of the prompt box: the one in use and the ones this computer has."""
+    import ai_runner
+    key = ai_runner.chosen()
+    return {'ai': key, 'ai_name': ai_runner.name(key), 'ai_installed': ai_runner.installed()}
+
+
+def ai_words(text: str) -> str:
+    return text.replace('{ai}', ai_name())
+
+
+def connect() -> str:
+    """'' when this computer can talk to Google, else what went wrong."""
+    try:
+        doc_sync.authorize()
+        return ''
+    except SystemExit as err:
+        return str(err) or 'OFFLINE'
+
+
+def trouble(err, saving: bool = True) -> str:
+    """What went wrong with Google, in words for the window: while saving (the edit stays here) or opening."""
+    text = str(err)
+    if text == doc_sync.BUSY or text in (OFFLINE_SAVED, NO_DOCS_API, LOGIN_SAVED, NO_RIGHT_SAVED, GONE_SAVED,
+                                         REJECTED_SAVED):
+        return text
+    if 'DOCS API DISABLED' in text:
+        return NO_DOCS_API
+    if re.search(r'GOOGLE LOGIN EXPIRED|NO GOOGLE LOGIN|HTTP 401', text):
+        return LOGIN_SAVED if saving else LOGIN_OPEN
+    if 'HTTP 403' in text:
+        return NO_RIGHT_SAVED if saving else NO_RIGHT_OPEN
+    if 'HTTP 404' in text:
+        return GONE_SAVED if saving else GONE_OPEN
+    if 'HTTP 400' in text:                           # Google refused the requests themselves
+        return REJECTED_SAVED if saving else REJECTED_OPEN
+    return OFFLINE_SAVED if saving else OFFLINE_OPEN
+
+
+def google_says(err, what: str) -> str:
+    """A comment action that did not go through."""
+    text = str(err)
+    if re.search(r'GOOGLE LOGIN EXPIRED|NO GOOGLE LOGIN|HTTP 401', text):
+        return f'Google 登入已經失效，{what}。到「環境設定自檢」的第 7 項重新登入。'
+    if text.startswith('OFFLINE'):
+        return f'沒有連上 Google，{what}，請再試一次。'
+    return f'{what}，請再試一次。'
+
+
+def revisions(job: Job) -> list[dict]:
+    """Drive's revisions of the Doc since the last sync, oldest first ([] when Drive cannot be asked)."""
+    since = job.state.get('synced_at') or job.status.get('at') or ''
+    try:
+        return doc_sync.revisions_since(job.doc_id, to_utc(since))
+    except SystemExit:
+        return []
+
+
+def edits_listed(job: Job, revs: list[dict]) -> bool:
+    """Drive lists a revision a little after the edit itself. Until the newest one reaches the Doc's last change,
+    the names it gives are not the whole story: the user's typing would be put down to nobody, or a colleague's to
+    the user. True when the list has caught up, or when it has been waiting for two minutes (then the names are
+    taken as they are)."""
+    newest = max((r.get('modifiedTime', '') for r in revs), default='')
+    try:
+        last = doc_sync.modified_time(job.doc_id)
+    except SystemExit:
+        return True
+    a, b = parse_time(newest), parse_time(last)
+    if a and b and (b - a).total_seconds() <= 2:
+        job.state.pop('waiting_since', None)
+        return True
+    started = parse_time(job.state.get('waiting_since'))
+    if not started:
+        job.state['waiting_since'] = now().isoformat(timespec='seconds')
+        return False
+    if (now() - started).total_seconds() >= 120:
+        job.state.pop('waiting_since', None)
+        return True
+    return False
+
+
+def authors_since(job: Job, before: datetime | None = None, revs: list[dict] | None = None) -> list[str]:
+    """Who changed the Doc since the last sync ('你' for the user), from Drive's revision list (or `revs`, when the
+    caller already asked). With `before`, the user's own revisions from then on (the push that just ran) are left
+    out."""
+    cutoff = to_utc((before - timedelta(seconds=2)).isoformat()) if before else ''
+    own = to_utc(job.state.get('own_until') or '')  # the app's own blank colours and pictures (own_write)
+    found = []
+    revisions = revs if revs is not None else globals()['revisions'](job)
+    for r in revisions:
+        user = r.get('lastModifyingUser') or {}
+        if cutoff and user.get('me') and r.get('modifiedTime', '') >= cutoff:
+            continue
+        if own and user.get('me') and r.get('modifiedTime', '') <= own:
+            continue
+        name = '你' if user.get('me') else (user.get('displayName') or user.get('emailAddress') or '有人')
+        if user.get('emailAddress') and not user.get('me'):
+            job.state.setdefault('names', {})[user['emailAddress'].lower()] = name
+        if name not in found:
+            found.append(name)
+    return found
+
+
+def names(authors: list[str]) -> str:
+    return '、'.join(me() if a == '你' else a for a in authors) or '有人'
+
+
+def note_remote(job: Job, changes: list, authors: list[str], before: str, after: str) -> list[dict]:
+    """Changes that just came in from the Doc. Colleagues' are logged under their names, kept out of what is
+    learned, and returned as marks for the preview. The user's own (typed into the Doc the window shows) are logged
+    the same way and stay unlearned, so the next `learn` learns them like anything typed here."""
+    who = names(authors)
+    for ch in changes[:5]:
+        job.log(who, change_words(ch.kind, ch.before, ch.after, '在 Google 文件'))
+    if len(changes) > 5:
+        job.log(who, f'在 Google 文件還改了 {len(changes) - 5} 處')
+    if authors != ['你']:
+        relearn(job, before, after)
+    warn_after_send(job, who)
+    return [{'after': ch.after, 'block': ch.block, 'who': who} for ch in changes if ch.kind != 'remove' and ch.after]
+
+
+def relearn(job: Job, before: str, after: str):
+    """The minutes went from `before` to `after` by someone other than the user (a colleague, Claude, an undo).
+    What `learn` compares with becomes `after` without the user's own edits it has not learned yet, so those are
+    still learned and nothing else ever is: a paragraph the change touched keeps the change."""
+    path = job.dir / '學習基準.md'
+    if not path.is_file():
+        return
+    try:
+        path.write_text(doc_sync.carry(after, before, path.read_text(encoding='utf-8'))[0], encoding='utf-8')
+    except doc_sync.Structural:
+        path.write_text(after, encoding='utf-8')
+
+
+def warn_after_send(job: Job, who: str):
+    """After the minutes went out as a Word or PDF file, the first later change says the file is now old."""
+    fmt, sent = job.result.get('sent_format'), job.result.get('sent_at')
+    if sent and fmt in ('word', 'pdf') and job.state.get('warned_after_send') != sent:
+        job.log(who, f'在寄出之後改了內容，寄出去的 {format_words(fmt)}還是修改前的版本', 'warn')
+        job.state['warned_after_send'] = sent
+
+
+def synced(job: Job, md: str, revision: str):
+    """The Doc and the local Markdown agree from here on."""
+    job.write_md(md)
+    job.write_synced(md)
+    job.state['revision'] = revision
+    job.state['synced_at'] = now().isoformat(timespec='seconds')
+
+
+OWN_GRACE = 5            # seconds after the app's own change to the Doc in which Drive may still list it
+
+
+def own_write(job: Job, revision: str):
+    """The app itself changed the Doc (blank colours, a picture) on top of the revision just synced: the minutes still
+    match it, and Drive's listing of that change is never taken for an edit of the user's or a colleague's."""
+    job.state['revision'] = revision
+    job.state['synced_at'] = now().isoformat(timespec='seconds')
+    job.state['own_until'] = (now() + timedelta(seconds=OWN_GRACE)).isoformat(timespec='seconds')
+
+
+def after_sync(job: Job, doc: dict | None) -> list[str]:
+    """Once the minutes match the Doc: links left open by a picture are closed, the Doc's [__] turn red and words
+    typed into one plain again (doc_sync.blank_requests), and pictures waiting for this go in. Only on the Doc the
+    minutes were just synced with, read again with colleagues' suggestions in place, so that nothing a colleague types
+    is put down to the user and nothing lands on the wrong characters. What went wrong, in words for the window."""
+    if not doc or not job.doc_id or doc.get('revisionId') != job.state.get('revision'):
+        return []
+    close_links(job)
+    if not doc_sync.blank_requests(doc) and not doc_sync.title_requests(doc) and not job.state.get('pictures'):
+        return []
+    try:
+        full = doc_sync.get_doc_inline(job.doc_id)
+    except SystemExit:
+        return []
+    if full.get('revisionId') != job.state.get('revision') or doc_sync.has_suggestions(full):
+        return []
+    revision = doc_sync.paint_blanks(job.doc_id, full)
+    if revision:
+        own_write(job, revision)
+    return place_pictures(job)
+
+
+def place_pictures(job: Job) -> list[str]:
+    """Pictures from 「八、補充資訊」 that are not in the Doc yet (cmd_attach): each one in a paragraph of its own under
+    its line. One that fails for now waits for the next sync; after three tries its line keeps just the link."""
+    import attachments
+    warnings, left = [], []
+    for pic in job.state.get('pictures') or []:
+        try:
+            doc = doc_sync.get_doc_inline(job.doc_id)
+        except SystemExit:
+            left.append(pic)
+            continue
+        if doc.get('revisionId') != job.state.get('revision') or doc_sync.has_suggestions(doc):
+            left.append(pic)                          # a colleague's change comes in with the next sync first
+            continue
+        got = attachments.show_picture(job.doc_id, doc, pic['id'], pic.get('width') or attachments.WIDEST_PT)
+        if got.get('open'):
+            job.state.setdefault('open_links', []).append(got['open'])
+        if got.get('revision'):
+            own_write(job, got['revision'])
+        elif got.get('why') == 'shared':
+            warnings.append(attachments.NO_PUBLIC)
+        elif got.get('why') == 'line':
+            warnings.append(attachments.NO_LINE.format(name=pic['name']))
+        elif pic.get('tries', 0) >= 2:
+            warnings.append(attachments.NOT_PLACED.format(name=pic['name']))
+        else:
+            left.append({**pic, 'tries': pic.get('tries', 0) + 1})
+    job.state['pictures'] = left
+    return list(dict.fromkeys(warnings))
+
+
+def close_links(job: Job):
+    """Pictures' 'anyone with the link' that Google could not close the first time: closed now."""
+    if not job.state.get('open_links'):
+        return
+    import attachments
+    job.state['open_links'] = [x for x in job.state['open_links'] if not attachments.close_link(x['file'], x['perm'])]
+
+
+def fresh() -> dict:
+    """What an edit reports back: see sync_up."""
+    return {'conflicts': [], 'reload': False, 'held': '', 'why': '', 'marks': [], 'warning': '', 'skipped': [],
+            'dropped': False}
+
+
+def held(result: dict, err, job: 'Job | None' = None) -> dict:
+    result['held'], result['why'] = trouble(err), str(err)
+    if job is not None:
+        with (job.dir / 'log.txt').open('a', encoding='utf-8') as f:
+            f.write(f'[{now():%H:%M:%S}] sync held: {str(err)[:1500]}\n')
+    return result
+
+
+def keep_spare(job: Job, text: str) -> Path:
+    """Edits that could not go into the minutes, kept next to them so that nothing typed is lost."""
+    spare = job.md_path.with_name(job.md_path.stem + '_沒存回的修改.md')
+    spare.write_text(text, encoding='utf-8')
+    return spare
+
+
+def pull(job: Job, patient: bool = False) -> dict:
+    """Bring the Doc's current paragraphs into the Markdown; report who changed what since the last sync.
+    Only when everything typed here already reached the Doc (sync_up goes first). `patient` (the window's refresh,
+    which comes again in a few seconds): leave the changes for later while Drive has not listed who made them."""
+    info = {'marks': [], 'editors': [], 'edits': 0, 'warning': '', 'skipped': []}
+    if job.missing or not job.doc_id or job.md != job.synced_md:
+        return info
+    doc = doc_sync.get_doc(job.doc_id)
+    info['doc'] = doc
+    revision = doc.get('revisionId', '')
+    if revision == job.state.get('revision'):
+        return info
+    md = job.md
+    first_sync = not job.state.get('revision')
+    try:
+        merged, changes = doc_sync.merge_remote(md, doc)
+    except doc_sync.Structural:
+        r = rebase(job, doc, fresh(), True)
+        info['warning'], info['skipped'] = r['warning'], r['skipped']
+        return info
+    if changes and not first_sync:
+        revs = revisions(job)
+        if patient and not edits_listed(job, revs):
+            return info
+        authors = authors_since(job, revs=revs)
+        info['editors'], info['edits'] = authors, len(changes)
+        info['marks'] = note_remote(job, changes, authors, md, merged)
+    elif merged != md:
+        relearn(job, md, merged)
+    synced(job, merged, revision)
+    return info
+
+
+def rebase(job: Job, doc: dict, result: dict, again: bool) -> dict:
+    """A colleague added or removed table rows in the Doc, which paragraphs cannot follow. The Doc as it is now
+    becomes the minutes, and the edits this computer has not sent yet go back on top of it, paragraph by paragraph."""
+    base, local = job.synced_md, job.md
+    rebuilt = doc_sync.doc_to_md(doc)
+    who = names(authors_since(job))
+    job.log(who, '在 Google 文件改了表格的列數')
+    warn_after_send(job, who)
+    learn_base = job.dir / '學習基準.md'
+    learned_so_far = learn_base.read_text(encoding='utf-8') if learn_base.is_file() else base
+    new_md, warning = rebuilt, TABLES_CHANGED
+    if local != base:
+        try:
+            new_md, skipped = doc_sync.carry(rebuilt, base, local)
+            result['skipped'] = [typed for _, typed in skipped]
+        except doc_sync.Structural:
+            spare = keep_spare(job, local)
+            warning += f'你還沒存回的修改另外存在「{spare.name}」，請對照之後再改一次。'
+            result['dropped'] = True
+    try:
+        learn_now = doc_sync.carry(rebuilt, base, learned_so_far)[0]
+    except doc_sync.Structural:
+        learn_now = rebuilt
+    synced(job, rebuilt, doc.get('revisionId', ''))
+    learn_base.write_text(learn_now, encoding='utf-8')
+    if new_md != rebuilt:
+        job.write_md(new_md)
+    job.save_state()
+    result.update(reload=True, warning=warning)
+    if again and new_md != rebuilt:
+        sent = sync_up(job, again=False)
+        for key in ('conflicts', 'held', 'why', 'marks'):
+            result[key] = sent[key]
+        result['skipped'] += sent['skipped']
+        result['warning'] = ' '.join(w for w in (warning, sent['warning']) if w)
+    return result
+
+
+def to_utc(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso.replace('Z', '+00:00')).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+    except ValueError:
+        return ''
+
+
+def change_words(kind: str, before: str, after: str, where: str) -> str:
+    cut = lambda t: t if len(t) <= 24 else t[:24] + '…'   # noqa: E731
+    if kind == 'add':
+        return f'{where}加了一段：「{cut(after)}」'
+    if kind == 'remove':
+        return f'{where}刪掉一段：「{cut(before)}」'
+    if not before:
+        return f'{where}補上「{cut(after)}」'
+    if not after:
+        return f'{where}刪掉「{cut(before)}」'
+    return f'{where}把「{cut(before)}」改成「{cut(after)}」'
+
+
+def comment_list(job: Job, md: str) -> tuple[list[dict], list[dict], int]:
+    """(comments for the side column, anchors for the preview, how many are new since the last open)."""
+    seen = job.state.setdefault('seen_comments', {})
+    found, new = [], 0
+    for c in doc_sync.comments(job.doc_id):
+        if c.get('deleted'):
+            continue
+        author = c.get('author') or {}
+        who = me() if author.get('me') else author.get('displayName') or '有人'
+        replies = [r for r in c.get('replies', []) if not r.get('deleted')]
+        known = seen.get(c['id'])
+        if known is None and not author.get('me'):
+            new += 1
+            job.log(who, f'在 Google 文件留言：「{c.get("content", "")[:40]}」', at=parse_time(c.get('createdTime')))
+        known_replies = set((known or {}).get('replies', []))
+        for r in replies:
+            ra = r.get('author') or {}
+            if r['id'] not in known_replies and known is not None and not ra.get('me'):
+                rwho = ra.get('displayName') or '有人'
+                if r.get('action') == 'resolve':
+                    job.log(rwho, f'把 {who} 的留言標為已解決', at=parse_time(r.get('createdTime')))
+                elif r.get('content'):
+                    job.log(rwho, f'回覆 {who} 的留言：「{r["content"][:40]}」', at=parse_time(r.get('createdTime')))
+        seen[c['id']] = {'replies': [r['id'] for r in replies]}
+        if c.get('resolved'):
+            continue
+        found.append({'id': c['id'], 'who': who, 'at': short_time(c.get('createdTime', '')),
+                      'quote': (c.get('quotedFileContent') or {}).get('value', ''), 'text': c.get('content', ''),
+                      'replies': [{'who': me() if (r.get('author') or {}).get('me') else
+                                   (r.get('author') or {}).get('displayName', ''), 'text': r.get('content', '')}
+                                  for r in replies if r.get('content')]})
+    # number them in reading order of their quoted words
+    plain = doc_sync.plain(md)
+    found.sort(key=lambda c: (plain.find(c['quote'].strip()) if c['quote'].strip() and
+                              plain.find(c['quote'].strip()) >= 0 else 10 ** 9))
+    for n, c in enumerate(found, 1):
+        c['n'] = n
+    anchors = [{'n': c['n'], 'quote': c['quote']} for c in found if c['quote'].strip()]
+    return found, anchors, new
+
+
+def parse_time(iso: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat((iso or '').replace('Z', '+00:00')).astimezone()
+    except ValueError:
+        return None
+
+
+def check_bounces(job: Job):
+    """After a send: Gmail's bounce notices for this mail become warnings in the log, once each. Gmail files a
+    bounce in the thread of the mail it bounced, so only that thread is read."""
+    sent = parse_time(job.result.get('sent_at'))
+    sent_id = job.result.get('sent_id') or ''
+    if not sent or (now() - sent).days > 30 or not re.fullmatch(r'[0-9a-f]+', sent_id):
+        return
+    import workspace
+    workspace.AUTH['Authorization'] = 'Bearer ' + doc_sync.AUTH['Authorization'].split(' ', 1)[1]
+    seen = set(job.state.get('bounces', []))
+    rcpts = [a.lower() for a in (job.result.get('mail') or {}).get('to', [])]
+    thread = workspace.call(f'{workspace.GMAIL}/messages/{sent_id}?format=minimal').get('threadId', '')
+    if not re.fullmatch(r'[0-9a-f]+', thread):
+        return
+    messages = workspace.call(f'{workspace.GMAIL}/threads/{thread}?format=metadata&metadataHeaders=From').get('messages', [])
+    for m in messages:
+        heads = {h['name'].lower(): h['value'] for h in m.get('payload', {}).get('headers', [])}
+        if m['id'] in seen or m['id'] == sent_id or not re.search(r'mailer-daemon|postmaster', heads.get('from', ''), re.I):
+            continue
+        seen.add(m['id'])
+        msg = workspace.call(f'{workspace.GMAIL}/messages/{m["id"]}?format=metadata'
+                             '&metadataHeaders=X-Failed-Recipients&metadataHeaders=Subject')
+        heads = {h['name'].lower(): h['value'] for h in msg.get('payload', {}).get('headers', [])}
+        text = (heads.get('x-failed-recipients', '') + ' ' + msg.get('snippet', '')).lower()
+        failed = [a for a in rcpts if a in text]
+        if failed:
+            why = '，信箱地址不存在' if re.search(r'5\.1\.1|does not exist|not found|找不到', text) else ''
+            job.log('Gmail', f'收到退信：寄給 {"、".join(name_of(job, a) for a in failed)} 的信沒有送到{why}', 'warn',
+                    at=parse_time(msg.get('internalDate') and datetime.fromtimestamp(
+                        int(msg['internalDate']) / 1000, timezone.utc).isoformat()))
+    job.state['bounces'] = sorted(seen)
+
+
+# --- learning from the user's own edits --------------------------------------------------------
+
+word_span = doc_sync.changed_words
+
+
+def classify(before: str, after: str, base: str, heard: str) -> str:
+    """term: a word the transcript has, written another way (a misheard name) -> glossary.
+    pref: a short phrase the minutes keep repeating, deleted -> notes. style: other rewording -> notes as an example.
+    once: facts of this meeting (numbers, places, filled blanks, one-off deletions) -> nothing is kept."""
+    if not before or BLANK in before:
+        return 'once'
+    if not after:
+        return 'pref' if len(before) <= 12 and (base.count(before) >= 2 or before.endswith(('：', ':'))) else 'once'
+    if CHINESE_NUMBER.search(before + after) or max(len(before), len(after)) <= 1:
+        return 'once'
+    if len(before) <= 12 and len(after) <= 12 and before in heard:
+        return 'term'
+    return 'style'
+
+
+def lesson_text(kind: str, before: str, after: str) -> str:
+    cut = lambda t: t if len(t) <= 16 else t[:16] + '…'   # noqa: E731
+    if kind == 'once' and not before:
+        return f'補上「{cut(after)}」'
+    if kind == 'once' and not after:
+        return f'刪掉「{cut(before)}」'
+    return {'term': f'以後「{before}」寫成「{after}」', 'pref': f'以後不寫「{before}」',
+            'style': f'照你的寫法：「{cut(after)}」'}.get(kind, f'「{cut(before)}」改成「{cut(after)}」')
+
+
+def glossary_line(heard: str, meant: str) -> str:
+    return f'| {heard} | {meant} | {me()} {now():%Y-%m-%d} 在錄音程式確認 |'
+
+
+def add_line(path: Path, line: str, section: str | None):
+    """Append a line to the user's glossary table or under a section of notes.md; nothing twice."""
+    text = path.read_text(encoding='utf-8') if path.is_file() else ''
+    if line in text.splitlines():
+        return
+    if section is None:                                  # glossary.md: a table with a header
+        if not text.strip():
+            text = ('audience: agent\n\n# 公司自己的詞彙表\n\n跨專案都會出現的辨識錯字。\n\n'
+                    '| 逐字稿可能出現 | 正確名稱 | 說明 |\n|---|---|---|\n')
+        path.write_text(text.rstrip('\n') + '\n' + line + '\n', encoding='utf-8')
+        return
+    lines = text.split('\n') if text else ['# 補充規則', '']
+    head = f'## {section}'
+    if head not in lines:
+        lines += ['', head, '']
+    at = lines.index(head) + 1
+    while at < len(lines) and not lines[at].startswith('## '):
+        at += 1
+    while at > 0 and not lines[at - 1].strip():
+        at -= 1
+    lines.insert(at, line)
+    path.write_text('\n'.join(lines).rstrip('\n') + '\n', encoding='utf-8')
+
+
+def remove_line(path: Path, line: str):
+    if path.is_file():
+        lines = path.read_text(encoding='utf-8').split('\n')
+        if line in lines:
+            lines.remove(line)
+            path.write_text('\n'.join(lines), encoding='utf-8')
+
+
+def remember(job: Job, kind: str, before: str, after: str, source: str) -> dict:
+    """Write one lesson where the next minutes will read it, and keep it so the user can take it back."""
+    if kind == 'term':
+        path, line, section = CONFIG / 'glossary.md', glossary_line(before, after), None
+        if source == 'edit':
+            line = line.replace('在錄音程式確認', '在錄音程式預覽改的')
+    elif kind == 'pref':
+        path, section = CONFIG / 'notes.md', '偏好與語氣'
+        line = f'- {now():%Y-%m-%d} 在錄音程式預覽刪掉「{before}」，以後不寫。'
+    else:
+        path, section = CONFIG / 'notes.md', '實例'
+        line = f'- {now():%Y-%m-%d} 在錄音程式預覽把「{before}」改成「{after}」。'
+    add_line(path, line, section)
+    learned = job.state.setdefault('learned', [])
+    item = {'id': len(learned) + 1, 'kind': kind, 'text': lesson_text(kind, before, after), 'file': str(path),
+            'line': line, 'section': section, 'off': False}
+    learned.append(item)
+    where = '詞彙表' if kind == 'term' else '個人偏好'
+    job.log(ai_name(), f'記進{where}：{item["text"]}')
+    return item
+
+
+def public(item: dict) -> dict:
+    return {k: item[k] for k in ('id', 'kind', 'text', 'off')}
+
+
+def cmd_learn(job: Job, quiet: bool = False, where: str = '在預覽', log: bool = True) -> list[dict]:
+    base_file = job.dir / '學習基準.md'
+    md = job.md
+    if not md:
+        return []
+    if not base_file.is_file():
+        base_file.write_text(md, encoding='utf-8')
+        return []
+    base = base_file.read_text(encoding='utf-8')
+    if base == md:
+        return []
+    _, old_blocks = doc_sync.parse(base)
+    _, new_blocks = doc_sync.parse(md)
+    import difflib
+    pairs = []
+    sm = difflib.SequenceMatcher(None, [b.key for b in old_blocks], [b.key for b in new_blocks], autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == 'equal':
+            pairs += [(old_blocks[i1 + k].plain, new_blocks[j1 + k].plain) for k in range(i2 - i1)
+                      if old_blocks[i1 + k].kind == 'cell' and old_blocks[i1 + k].plain != new_blocks[j1 + k].plain]
+        elif tag == 'replace':
+            pairs += [(old_blocks[i1 + k].plain, new_blocks[j1 + k].plain) for k in range(min(i2 - i1, j2 - j1))
+                      if doc_sync.similar(old_blocks[i1 + k].plain, new_blocks[j1 + k].plain)]
+    items = []
+    heard = (job.dir / '逐字稿.txt').read_text(encoding='utf-8') if (job.dir / '逐字稿.txt').is_file() else ''
+    for old, new in pairs:
+        before, after = word_span(old, new)
+        if not before and not after:
+            continue
+        if before.replace(BLANK, '').strip() == '' and BLANK in before:    # a blank filled in: a fact, nothing to learn
+            if log:
+                job.log(me(), change_words('edit', '', after, where))
+            continue
+        kind = classify(before, after, base, heard)
+        if log:
+            job.log(me(), change_words('edit', before, after, where))
+        if kind == 'once':
+            items.append({'id': 0, 'kind': 'once', 'text': lesson_text('once', before, after), 'off': False})
+        else:
+            items.append(public(remember(job, kind, before, after, 'edit')))
+    base_file.write_text(md, encoding='utf-8')
+    job.save_state()
+    return items
+
+
+def cmd_unlearn(job: Job, item_id: int, off: bool):
+    for item in job.state.get('learned', []):
+        if item['id'] == item_id:
+            if off:
+                remove_line(Path(item['file']), item['line'])
+                job.log(me(), f'不要記：{item["text"]}')
+            else:
+                add_line(Path(item['file']), item['line'], item.get('section'))
+                job.log(me(), f'改回要記：{item["text"]}')
+            item['off'] = off
+            job.save_state()
+            out({'learned': public(item)})
+            return
+    sys.exit('找不到這一筆。')
+
+
+# --- pushing an edit -------------------------------------------------------------------------
+
+def push_edit(job: Job, new_md: str, who: str | None = None) -> dict:
+    """Keep the edit on this computer first, then send the Doc exactly the paragraphs that changed."""
+    if new_md.strip() != job.md.strip():
+        job.write_md(new_md)
+    return sync_up(job, who)
+
+
+def sync_up(job: Job, who: str | None = None, again: bool = True) -> dict:
+    """Whatever the local Markdown has that the Doc has not yet: send it, then take in what colleagues changed
+    meanwhile. A paragraph both sides changed keeps the colleague's words and comes back as a conflict."""
+    result = fresh()
+    if job.missing or not job.doc_id:
+        return result
+    base, local = job.synced_md, job.md
+    if base == local:
+        return result
+    started = now()
+    try:
+        plan, after, as_planned = doc_sync.push(job.doc_id, base, local)
+    except doc_sync.Structural:
+        try:
+            doc = doc_sync.get_doc(job.doc_id)
+        except SystemExit as err:
+            return held(result, err, job)
+        if doc_sync.tables_changed(doc, base):
+            return rebase(job, doc, result, again)
+        return full_upload(job, base, local, result)
+    except SystemExit as err:
+        return held(result, err, job)
+    if plan.requests:
+        warn_after_send(job, who or me())
+    try:
+        merged, remote = doc_sync.merge_remote(local, after)
+    except doc_sync.Structural:                      # a colleague changed a table while the edit went in
+        synced(job, local, after.get('revisionId', ''))
+        result['conflicts'] = plan.conflicts
+        return rebase(job, after, result, False)
+    if remote:
+        result['marks'] = note_remote(job, remote, authors_since(job, before=started), local, merged)
+    if not as_planned:
+        result['warning'] = '存回 Google 文件之後，有幾段跟預期的不一樣，預覽已經換成 Google 文件上的版本。'
+    synced(job, merged, after.get('revisionId', ''))
+    job.save_state()
+    result.update(conflicts=plan.conflicts, reload=bool(remote) or bool(plan.conflicts) or not as_planned)
+    return result
+
+
+def open_comment_count(job: Job) -> int:
+    return sum(1 for c in doc_sync.comments(job.doc_id) if not c.get('resolved') and not c.get('deleted'))
+
+
+def full_upload(job: Job, base: str, new_md: str, result: dict) -> dict:
+    """Table rows or columns changed on this computer. Only a Claude rewrite does that (the preview refuses to), and
+    ai_edit checked first that the whole Doc can be uploaded: no comment open, no colleague edit since the last
+    sync. If either turned up in the seconds since, Claude's change is dropped instead of overwriting them."""
+    import md_to_gdoc
+    try:
+        doc = doc_sync.get_doc(job.doc_id)
+        blocked = WHOLE_COMMENTS if open_comment_count(job) else ''
+    except SystemExit as err:
+        return held(result, err)
+    if not blocked:
+        try:
+            _, remote = doc_sync.merge_remote(base, doc)
+        except doc_sync.Structural:
+            remote = ['changed']
+        blocked = WHOLE_COLLEAGUE if remote else ''
+    if blocked:
+        return drop_rewrite(job, base, doc, result, blocked)
+    md_to_gdoc.AUTH['Authorization'] = doc_sync.AUTH['Authorization']
+    try:
+        refresh_record(job)
+    except Exception as err:                         # the Drive calls md_to_gdoc makes raise urllib's own errors
+        return held(result, f'OFFLINE: {err}')
+    done = subprocess.run([sys.executable, str(SCRIPTS / 'md_to_gdoc.py'), str(job.md_path), '--update'],
+                          capture_output=True, text=True, timeout=300, env={**os.environ, 'MINUTES_NO_SEND': '1'})
+    if done.returncode:
+        return held(result, done.stdout + done.stderr, job)
+    try:
+        doc = doc_sync.get_doc(job.doc_id)
+    except SystemExit as err:
+        return held(result, err)
+    synced(job, new_md, doc.get('revisionId', ''))
+    after_sync(job, doc)
+    job.save_state()
+    result.update(reload=True, whole=True)            # a Doc open in the window loads again
+    return result
+
+
+def drop_rewrite(job: Job, base: str, doc: dict, result: dict, why: str) -> dict:
+    """A change to the tables cannot reach the Doc: the minutes go back to the Doc as it is now, and the change is
+    kept in a file next to them."""
+    spare = keep_spare(job, job.md)
+    try:
+        merged, _ = doc_sync.merge_remote(base, doc)
+    except doc_sync.Structural:
+        merged = doc_sync.doc_to_md(doc)
+    synced(job, merged, doc.get('revisionId', ''))
+    (job.dir / '學習基準.md').write_text(merged, encoding='utf-8')
+    for name in ('復原.md', '復原後.md'):
+        (job.dir / name).unlink(missing_ok=True)
+    job.log(me(), '這次增減表格的修改沒有存回 Google 文件', 'warn')
+    job.save_state()
+    result.update(reload=True, warning=why + f'這次的修改另外存在「{spare.name}」。', dropped=True)
+    return result
+
+
+def whole_upload_blocked(job: Job) -> str:
+    """Why a change to table rows or columns cannot go to the Doc right now ('' when it can)."""
+    if connect() or job.md != job.synced_md:
+        return ai_words(AI_TABLES_OFFLINE)
+    try:
+        if open_comment_count(job):
+            return ai_words(AI_TABLES_COMMENTS)
+        doc = doc_sync.get_doc(job.doc_id)
+    except SystemExit:
+        return ai_words(AI_TABLES_OFFLINE)
+    try:
+        _, remote = doc_sync.merge_remote(job.synced_md, doc)
+    except doc_sync.Structural:
+        remote = ['changed']
+    return ai_words(AI_TABLES_COLLEAGUE) if remote else ''
+
+
+def refresh_record(job: Job):
+    """md_to_gdoc.py keeps its own idea of the Doc's last known state; bring it up to date right before a full
+    upload, which the caller has just checked against the local copy."""
+    import md_to_gdoc
+    sidecar = md_to_gdoc.sidecar_for(job.md_path)
+    if sidecar.is_file():
+        rec = json.loads(sidecar.read_text())
+        rec.update(sha256=md_to_gdoc.sha(md_to_gdoc.export_text(job.doc_id)), modifiedTime=md_to_gdoc.modified_time(job.doc_id))
+        md_to_gdoc.write_record(sidecar, rec)
+
+
+# --- the preview the window shows --------------------------------------------------------------
+
+def remember_shown(job: Job, page_md: str) -> str:
+    """What the window's editor holds (a preview it is about to get, or the page it just saved), read back to
+    Markdown, kept under a token: the next save is compared with exactly that, so only what was typed since counts,
+    and what the minutes became meanwhile (a colleague's words) is never typed back over."""
+    token = hashlib.sha1(page_md.encode('utf-8')).hexdigest()[:16]
+    folder = job.dir / '預覽基準'
+    folder.mkdir(exist_ok=True)
+    path = folder / f'{token}.md'
+    if path.is_file():
+        path.touch()
+    else:
+        path.write_text(page_md, encoding='utf-8')
+    for old in sorted(folder.glob('*.md'), key=lambda f: f.stat().st_mtime)[:-20]:
+        old.unlink(missing_ok=True)
+    return token
+
+
+def page_token(job: Job, html_text: str) -> str:
+    """The token for a preview as it is sent to the window."""
+    import minutes_html
+    return remember_shown(job, minutes_html.back(html_text))
+
+
+def shown_token(job: Job, md: str) -> str:
+    return page_token(job, preview(md, [], []))
+
+
+def shown_md(job: Job, token: str) -> str | None:
+    if not re.fullmatch(r'[0-9a-f]{16}', token or ''):
+        return None
+    path = job.dir / '預覽基準' / f'{token}.md'
+    return path.read_text(encoding='utf-8') if path.is_file() else None
+
+
+def answer(job: Job, result: dict, html: bool = False, **extra):
+    """What every edit returns to the window."""
+    md = job.md
+    skipped = list(extra.pop('skipped', [])) + list(result.get('skipped', []))
+    data = {'saved_at': f'{now():%H:%M}', 'conflicts': result['conflicts'], 'held': result['held'],
+            'warning': result['warning'], 'todo': todo_items(job, md), 'skipped': skipped, **extra}
+    if result['reload'] or skipped or html:
+        data['html'] = preview(md, result['marks'], current_anchors(job, md))
+        data['shown'] = page_token(job, data['html'])
+    data['can_undo'] = (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()
+    data['reload_doc'] = bool(result.get('whole'))
+    out(data)
+
+
+def cmd_save(job: Job, edited: Path, token: str = ''):
+    """What the user typed: the preview read back now, against the preview they were looking at read back the same
+    way, so only paragraphs the user touched change, nothing the read-back drops is lost, and nothing a colleague
+    changed meanwhile is typed back over."""
+    import minutes_html
+    md = job.md
+    shown = shown_md(job, token)
+    after = minutes_html.back(edited.read_text(encoding='utf-8'))
+    before = shown if shown is not None else minutes_html.back(preview(md, [], []))
+    try:
+        new_md, skipped = doc_sync.carry(md, before, after)
+    except doc_sync.Structural:
+        result = fresh()
+        result.update(reload=True, warning=TABLE_SHAPE)
+        answer(job, result, unsaved=True)
+        return
+    typed = remember_shown(job, after)               # the page as saved: the next save starts from here
+    result = push_edit(job, new_md)
+    if minutes_html.back(preview(job.md, [], [])) != after:
+        result['reload'] = True                       # the page shows something the minutes no longer say
+    answer(job, result, skipped=[t for _, t in skipped], typed=typed)
+
+
+def current_anchors(job: Job, md: str) -> list[dict]:
+    try:
+        return comment_list(job, md)[1]
+    except SystemExit:
+        return []
+
+
+# --- files, links and pictures for 「八、補充資訊」 ---------------------------------------------------
+
+def cmd_attach(job: Job, note: str, raw: str):
+    """What the user picked in the box under the Doc, with the sentence they wrote about it, as lines of the
+    minutes' last section (attachments.py). Every item is checked first, the Doc's latest version comes in, files
+    and pictures go to Drive, then the lines go into the Doc; pictures follow once the Doc is synced (after_sync)."""
+    import tempfile
+    import attachments
+    items = attachments.items_from(raw)
+    if not job.doc_id or job.missing:
+        sys.exit(attachments.NO_DOC)
+    if connect():
+        sys.exit(attachments.OFFLINE)
+    work = Path(tempfile.mkdtemp(prefix='attach-'))
+    try:
+        for it in items:                             # a picture the Doc cannot take stops everything before upload
+            if it['kind'] == 'image':
+                it['path'] = attachments.doc_ready_picture(it['path'], work)
+                it['name'] = it['path'].name
+                it['width'] = attachments.width_pt(it['path'])
+        sent = sync_up(job)                          # the lines go after what colleagues wrote meanwhile
+        if not sent['held']:
+            pull(job)
+        folder = None
+        for it in items:
+            if it['kind'] == 'link':
+                it['link'] = it['url']
+                continue
+            folder = folder or attachments.folder_for(job.state, job.doc_id)
+            it.update(attachments.upload(it['path'], folder, it['name'], attachments.mime_of(it['path'])))
+            if it['kind'] == 'image':
+                it['local'] = attachments.keep_beside(job.md_path, it['path'])
+    except SystemExit as err:
+        job.save_state()
+        sys.exit(attachments.drive_trouble(err))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    lines = attachments.lines_for(items, note)
+    result = push_edit(job, attachments.add_lines(job.md, lines))
+    if any(line not in job.md for line in lines if not line.startswith('![')):
+        result['warning'] = attachments.CROWDED      # a colleague changed the end of the minutes at that moment
+        attachments.throw_away([it['id'] for it in items if it.get('id')])
+        for it in items:
+            if it.get('local') and it['local'] not in job.md:
+                (job.md_path.parent / urllib.parse.unquote(it['local'])).unlink(missing_ok=True)
+        job.save_state()
+        return answer(job, result, html=True, reply='', changed=False)
+    files = [it['id'] for it in items if it.get('id')]
+    if files:                                        # for the mail: the files whoever gets the minutes can open
+        import md_to_gdoc
+        sidecar = md_to_gdoc.sidecar_for(job.md_path)
+        if sidecar.is_file():
+            record = read_json(sidecar)
+            md_to_gdoc.write_record(sidecar, {**record, 'attach_files': list(dict.fromkeys(
+                record.get('attach_files', []) + files))})
+    job.state['pictures'] = (job.state.get('pictures') or []) + [
+        {'id': it['id'], 'name': it['name'], 'width': it['width']} for it in items if it['kind'] == 'image']
+    warnings = [result['warning']] if result['warning'] else []
+    if not result['held'] and job.state['pictures']:
+        try:
+            warnings += after_sync(job, doc_sync.get_doc(job.doc_id))
+        except SystemExit:
+            pass                                     # they go in with the next refresh
+    result['warning'] = ' '.join(warnings)
+    names = '、'.join(it['name'] for it in items)
+    job.log(me(), f'在第八章「補充資訊」加了 {names}')
+    job.save_state()
+    answer(job, result, html=True, reply=f'已加進第八章「補充資訊」：{names}', changed=False)
+
+
+# --- Claude changes the minutes --------------------------------------------------------------
+
+def ai_edit(job: Job, request: str, label: str):
+    sys.path.insert(0, str(SCRIPTS))
+    import ai_runner
+    from auto_minutes import env
+    ai = ai_name()
+    if not ai_runner.find():
+        sys.exit(f'找不到 {ai_runner.AIS[ai_runner.chosen()]}。請到「環境設定自檢」的第 5 項安裝並登入。')
+    learned = cmd_learn(job)                         # the user's own typing first, so it is never mixed with Claude's
+    opened = job.md
+    if job.doc_id and not connect():                 # Claude starts from the Doc as it is now
+        sync_up(job)
+        try:
+            pull(job)
+        except SystemExit:
+            pass
+    md = job.md
+    work = job.dir / '工作'
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    (work / '紀錄.md').write_text(md, encoding='utf-8')
+    for src, name in ((job.dir / '逐字稿.txt', '逐字稿.txt'), (CONFIG / 'notes.md', '使用者規則.md'),
+                      (CONFIG / 'glossary.md', '公司詞彙表.md')):
+        if src.is_file():
+            shutil.copy(src, work / name)
+    prompt = (
+        '你在幫使用者修改一份會議紀錄，紀錄是這個資料夾裡的 紀錄.md。\n'
+        f'使用者的要求：{request}\n'
+        '規則：\n'
+        '- 直接修改 紀錄.md，只改要求提到的地方，其他段落一個字都不要動。\n'
+        '- 保留原本的格式：標題用 #、##、###，條列用 - 或 1.，表格用 |。\n'
+        '- 要求裡沒有說的事不要自己補，不確定的資訊寫 [__]。\n'
+        '- 用語照 使用者規則.md 與 公司詞彙表.md（有的話）；需要原話時看 逐字稿.txt。\n'
+        '- 改完在 說明.txt 寫一句 30 個字以內的繁體中文，說你改了什麼，例如「主持人填入王小明」。\n'
+        '- 這個要求做不到時不要改 紀錄.md，在 說明.txt 寫做不到的原因。\n'
+        '這個模式不能執行指令也不能連網，只能讀寫這個資料夾裡的檔案。')
+    try:
+        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env())
+    except subprocess.TimeoutExpired:
+        sys.exit(f'{ai} 改了 10 分鐘還沒改完，已經停止，紀錄沒有變動。')
+    with (job.dir / 'log.txt').open('a', encoding='utf-8') as f:
+        f.write(f'[{now():%H:%M:%S}] ask {label}: exit {done.returncode}\n{(done.stdout + done.stderr)[-1500:]}\n')
+    if done.returncode:
+        from auto_minutes import friendly
+        sys.exit(friendly(done.stdout + done.stderr, f'{ai} 修改時出錯，紀錄沒有變動。'))
+    new = (work / '紀錄.md').read_text(encoding='utf-8') if (work / '紀錄.md').is_file() else md
+    note = (work / '說明.txt').read_text(encoding='utf-8').strip().split('\n')[0][:60] if (work / '說明.txt').is_file() else ''
+    if new.strip() == md.strip():
+        answer(job, fresh(), html=md != opened, reply=note or '紀錄沒有需要修改的地方', changed=False, learned=learned)
+        return
+    if not re.search(r'(?m)^#{1,3} ', new) or len(new) < len(md) * 0.15:
+        sys.exit(f'{ai} 改出來的紀錄格式不完整，沒有存。')
+    if ai_runner.new_leaks(md, new):
+        sys.exit(f'{ai} 改出來的紀錄裡有看起來像登入資料的文字，為了安全沒有存。')
+    if job.doc_id and doc_sync.shapes(doc_sync.parse(md)[1]) != doc_sync.shapes(doc_sync.parse(new)[1]):
+        why = whole_upload_blocked(job)              # checked before anything is written, so a refusal changes nothing
+        if why:
+            sys.exit(why)
+    (job.dir / '復原.md').write_text(md, encoding='utf-8')          # before Claude
+    (job.dir / '復原後.md').write_text(new, encoding='utf-8')       # Claude's version, to undo only what Claude did
+    relearn(job, md, new)
+    result = push_edit(job, new, who=ai)
+    if result['dropped']:                            # the Doc changed shape meanwhile: Claude's change is in a side file
+        for name in ('復原.md', '復原後.md'):
+            (job.dir / name).unlink(missing_ok=True)
+        reply, result['warning'] = result['warning'], ''
+        answer(job, result, reply=reply, changed=False, learned=learned)
+        return
+    job.log(ai, f'照「{label}」改寫內容' if label in QUICK else f'照指示修改：「{cut_words(request)}」')
+    job.save_state()
+    said = (note or '已照你的話修改') + ('，已存回 Google 文件' if not result['held'] else '')
+    answer(job, result, html=True, reply=said, changed=True, learned=learned)
+
+
+def cut_words(text: str, n: int = 16) -> str:
+    return text if len(text) <= n else text[:n] + '…'
+
+
+def cmd_undo(job: Job):
+    """Take back what Claude changed, and only that: paragraphs someone touched after Claude stay as they are."""
+    backup, claude_said = job.dir / '復原.md', job.dir / '復原後.md'
+    if not backup.is_file() or not claude_said.is_file():
+        sys.exit('沒有可以復原的修改。')
+    learned = cmd_learn(job)
+    before, after = claude_said.read_text(encoding='utf-8'), backup.read_text(encoding='utf-8')
+    md = job.md
+    try:
+        new_md, kept = doc_sync.carry(md, before, after)
+    except doc_sync.Structural:
+        sys.exit(f'{ai_name()} 改過表格的列數，沒辦法只復原它改的部分；要改回來請直接到 Google 文件修改。')
+    relearn(job, md, new_md)
+    result = push_edit(job, new_md)
+    backup.unlink(missing_ok=True)
+    claude_said.unlink(missing_ok=True)
+    job.log(me(), f'復原 {ai_name()} 上一次的修改')
+    job.save_state()
+    answer(job, result, html=True, kept=[claude for claude, _ in kept], learned=learned)
+
+
+# --- comments and guesses --------------------------------------------------------------------
+
+def cmd_reply(job: Job, cid: str, text: str):
+    text = text.strip()
+    if not text:
+        sys.exit('回覆是空的。')
+    try:
+        r = doc_sync.reply(job.doc_id, cid, text)
+    except SystemExit as err:
+        sys.exit(google_says(err, '回覆沒有送出'))
+    seen = job.state.setdefault('seen_comments', {}).setdefault(cid, {'replies': []})
+    seen['replies'].append(r.get('id'))
+    try:
+        author = next((c for c in doc_sync.comments(job.doc_id) if c['id'] == cid), {}).get('author', {})
+    except SystemExit:
+        author = {}
+    who = '自己' if author.get('me') else author.get('displayName', '')
+    job.log(me(), f'回覆 {who} 的留言：「{cut_words(text, 40)}」' if who else f'回覆留言：「{cut_words(text, 40)}」')
+    job.save_state()
+    out({'reply': {'who': me(), 'text': text}})
+
+
+def cmd_resolve(job: Job, cid: str):
+    try:
+        doc_sync.resolve(job.doc_id, cid)
+    except SystemExit as err:
+        sys.exit(google_says(err, '留言沒有標成已解決'))
+    try:
+        comment = next((c for c in doc_sync.comments(job.doc_id) if c['id'] == cid), {})
+    except SystemExit:
+        comment = {}
+    seen = job.state.setdefault('seen_comments', {}).setdefault(cid, {'replies': []})
+    seen['replies'] = [r['id'] for r in comment.get('replies', [])]
+    author = comment.get('author') or {}
+    who = '自己' if author.get('me') else author.get('displayName', '')
+    job.log(me(), f'把 {who} 的留言標為已解決' if who else '把一則留言標為已解決')
+    job.save_state()
+    out({'resolved': cid})
+
+
+def cmd_confirm(job: Job, label: str):
+    item = next((c for c in check_items(job) if c['label'] == label), None)
+    if not item:
+        sys.exit('找不到這一項。')
+    job.state.setdefault('confirmed', []).append(label)
+    job.log(me(), f'確認無誤：{label}')
+    learned = []
+    heard, meant = item['heard'], item['meant']
+    tidy = all(0 < len(w) <= 30 and not re.search(r'[|\n\r]', w) for w in (heard, meant))
+    if tidy and heard != meant and heard in label and meant in label:
+        learned.append(public(remember(job, 'term', heard, meant, 'confirm')))
+    job.save_state()
+    out({'check': check_items(job), 'learned': learned})
+
+
+# --- open ------------------------------------------------------------------------------------
+
+def transcript(job: Job) -> list[dict]:
+    lines = []
+    path = job.dir / '逐字稿.txt'
+    voices = speakers.load(job.dir)
+    if path.is_file():
+        for line in path.read_text(encoding='utf-8').splitlines():
+            m = re.match(r'\[(?:(\d+):)?(\d+):(\d{2})\]\s*(.*)', line)
+            if m:
+                h, mi, s = int(m.group(1) or 0), int(m.group(2)), int(m.group(3))
+                item = {'at': line[1:line.index(']')], 'sec': h * 3600 + mi * 60 + s, 'text': m.group(4)}
+                if voices:
+                    n = len(lines)
+                    item['group'] = voices['lines'][n] if n < len(voices['lines']) else ''
+                    item['who'] = speakers.name_of(voices, n)
+                lines.append(item)
+    return lines
+
+
+def voices_view(job: Job) -> list[dict]:
+    """The voices in the transcript, most talk first: who (a name or 講者 X), how long, a stretch to listen to."""
+    data = speakers.load(job.dir)
+    return [{'group': k, 'name': g.get('name') or '', 'label': g.get('name') or f'講者 {k}',
+             'minutes': max(1, round(g.get('seconds', 0) / 60)), 'sample': g.get('sample') or [0, 0]}
+            for k, g in (data.get('groups') or {}).items()]
+
+
+def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
+    """The user named a voice in the transcript: every line of it, or one line."""
+    speakers.set_name(job.dir, group, name, int(line) if line.isdigit() else None)
+    who = name.strip()[:30]
+    lines = transcript(job)
+    what = (f'{lines[int(line)]["at"]} 的句子' if int(line) < len(lines) else '一句') if line.isdigit() else f'講者 {group}'
+    job.log(me(), f'把{what}標成 {who}', 'speaker')
+    out({'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
+         'remembered': who})
+
+
+def finished_body(body: str) -> str:
+    """The mail goes out when the minutes are done (Vin 2026-10-15): a paragraph asking the recipients to fill the
+    [__] blanks is dropped."""
+    kept = [p for p in re.split(r'\n\s*\n', body) if BLANK not in p]
+    return '\n\n'.join(kept).strip()
+
+
+def mail_defaults(job: Job) -> dict | None:
+    mail = job.result.get('mail')
+    if not isinstance(mail, dict):
+        return None
+    mine = (owner() or '').lower()
+    known = set(calendar_people(job))
+    # only the user and people on that day's calendar; anything else Claude wrote is left for the user to add
+    to = [a.lower() for a in mail.get('to', []) if a.lower() == mine or a.lower() in known]
+    if mine and mine not in to:
+        to.append(mine)
+    body = (job.dir / '信件內文.txt').read_text(encoding='utf-8').strip() if (job.dir / '信件內文.txt').is_file() else ''
+    body = finished_body(body)
+    return {'to': to, 'subject': mail.get('subject', ''), 'body': body,
+            'from': f'{sender_name()} <{owner()}>' if sender_name() else owner()}
+
+
+def neighbours(job: Job) -> dict:
+    """The same meeting before and after: same title in the same project."""
+    title, project = job.result.get('title') or '', (job.result.get('project') or '').strip()
+    series = [j for j in all_jobs() if j.status_word() in ('ready', 'sent') and (j.result.get('title') or '') == title
+              and (j.result.get('project') or '').strip() == project]
+    ids = [j.id for j in series]
+    at = ids.index(job.id) if job.id in ids else -1
+    prev = series[at + 1] if 0 <= at < len(series) - 1 else None
+    nxt = series[at - 1] if at > 0 else None
+    label = lambda j: f'{day_words(j.started())} {j.result.get("title", "")}' if j and j.started() else ''   # noqa
+    return {'prev': prev.id if prev else '', 'prev_title': label(prev), 'next': nxt.id if nxt else '',
+            'next_title': label(nxt), 'planned': (job.result.get('next_meeting') or '').strip()}
+
+
+def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
+    """Everything the window shows for one meeting."""
+    audio = job.dir / (job.meta.get('audio') or '錄音.m4a')
+    data = {**base, 'when': job.result.get('when', ''), 'place': job.result.get('place', ''),
+            'doc_url': job.result.get('doc_url', ''), 'account': owner() or '',      # the Doc opens as this account
+            'html': html_text, 'shown': page_token(job, html_text),
+            'news': {'editors': [], 'edits': 0, 'new_comments': 0}, 'warning': '', 'offline': False, 'readonly': False,
+            'comments': [], 'todo': todo_items(job, md), 'check': check_items(job), 'learned': [],
+            'log': job.log_entries()[:200], 'mail': mail_defaults(job),
+            'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
+                     'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
+            'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
+            'attach_files': len(linked_files(job, md)), **ai_choice(),
+            'audio': str(audio) if audio.is_file() else '',
+            'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file(), **neighbours(job)}
+    data.update(over)
+    return data
+
+
+def open_missing(job: Job, base: dict):
+    """The minutes file is not where the app left it: show the Doc, change nothing."""
+    where = Path(job.result['minutes_md'])
+    folder = str(where.parent).replace(str(Path.home()), '~', 1)
+    md = ''
+    if job.doc_id and not connect():
+        try:
+            md = doc_sync.doc_to_md(doc_sync.get_doc(job.doc_id))
+        except SystemExit:
+            md = ''
+    warning = (f'這台電腦上找不到這場會議的紀錄檔「{where.name}」，可能已經被移走或改了檔名。'
+               + ('畫面上是 Google 文件的內容，' if md else '') + f'要在這裡修改，請把紀錄檔放回「{folder}」。')
+    out(page(job, base, md, preview(md, [], []) if md else '', warning=warning, readonly=True, offline=not md,
+             todo=[], can_undo=False))
+
+
+def cmd_open(job: Job):
+    base = summary(job)
+    if job.status_word() in ('working', 'failed'):
+        out({**base, 'log': job.log_entries()[:50]})
+        return
+    if job.missing:
+        return open_missing(job, base)
+    learned = cmd_learn(job, quiet=True)               # what the user typed last time, before anything is pulled
+    info = {'marks': [], 'editors': [], 'edits': 0, 'warning': ''}
+    comments, anchors, new = [], [], 0
+    offline = False
+    if job.doc_id:
+        try:
+            why = connect()
+            if why:
+                raise SystemExit(why)
+            offline_md = job.md
+            sent = sync_up(job)                       # edits made while offline go first
+            if sent['held']:
+                raise SystemExit(sent['why'] or sent['held'])
+            info = pull(job)
+            info['warning'] = ' '.join([w for w in (info['warning'], *after_sync(job, info.get('doc'))) if w])
+            info['marks'] = sent['marks'] + info['marks']
+            learned += cmd_learn(job, log=False)        # what the user typed into the Doc since (pull logged it)
+            notes = []
+            if sent['conflicts']:
+                spare = keep_spare(job, offline_md)
+                notes.append(OFFLINE_CONFLICT + '、'.join('「' + cut_words(c, 20) + '」' for c in sent['conflicts'])
+                             + f'。你離線時的版本另外存在「{spare.name}」。')
+            lost = sent['skipped'] + info.get('skipped', [])
+            if lost:
+                notes.append('你還沒存回的這幾段沒辦法套到 Google 文件上的版本，請再改一次：'
+                             + '、'.join('「' + cut_words(c, 20) + '」' for c in lost))
+            info['warning'] = ' '.join([w for w in (sent['warning'], info['warning']) if w] + notes)
+            comments, anchors, new = comment_list(job, job.md)
+            if job.result.get('sent_at'):
+                try:
+                    check_bounces(job)
+                except (SystemExit, Exception):         # a mail check must never keep the meeting from opening
+                    pass
+        except SystemExit as err:
+            offline = True
+            info['warning'] = trouble(err, saving=False)
+    job.save_state()
+    md = job.md
+    if not (job.dir / '學習基準.md').is_file() and md:
+        (job.dir / '學習基準.md').write_text(md, encoding='utf-8')
+    out(page(job, base, md, preview(md, info['marks'], anchors), learned=learned, comments=comments,
+             news={'editors': info['editors'], 'edits': info['edits'], 'new_comments': new},
+             warning=info['warning'], offline=offline))
+
+
+def cmd_refresh(job: Job):
+    """The window shows the Google Doc itself. Every little while, and before it shows another meeting, what was
+    typed there comes into the minutes: the user's own edits are learned, colleagues' are logged, and the side
+    panel gets its 待補充, 待確認 and 操作紀錄 again."""
+    learned, warning = [], ''
+    if job.doc_id and not job.missing:
+        try:
+            why = connect()
+            if why:
+                raise SystemExit(why)
+            sent = sync_up(job)
+            if sent['held']:
+                raise SystemExit(sent['why'] or sent['held'])
+            info = pull(job, patient=True)
+            placed = after_sync(job, info.get('doc'))
+            learned = cmd_learn(job, log=False)
+            warning = ' '.join(w for w in (sent['warning'], info['warning'], *placed) if w)
+        except SystemExit as err:
+            warning = trouble(err, saving=False)
+            if warning == OFFLINE_OPEN:              # the Doc itself shows it is offline; the next refresh catches up
+                warning = ''
+    job.save_state()
+    md = '' if job.missing else job.md
+    out({'todo': todo_items(job, md) if md else [], 'check': check_items(job), 'learned': learned,
+         'log': job.log_entries()[:200], 'warning': warning,
+         'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()})
+
+
+def cmd_locate(job: Job, words: str):
+    """How far down the Doc the first paragraph or cell holding `words` starts, from 0 to 1: where the window
+    scrolls the Doc when Google Docs' own find does not answer (Google changed its page)."""
+    try:
+        doc = doc_sync.get_doc(job.doc_id) if job.doc_id else {}
+    except SystemExit:
+        doc = {}
+    content = doc.get('body', {}).get('content', [])
+    total = content[-1].get('endIndex', 0) if content else 0
+    for el in content:
+        paragraphs = [el['paragraph']] if 'paragraph' in el else [
+            c['paragraph'] for row in el.get('table', {}).get('tableRows', []) for cell in row.get('tableCells', [])
+            for c in cell.get('content', []) if 'paragraph' in c]
+        for par in paragraphs:
+            elements = par.get('elements', [])
+            text = ''.join(e.get('textRun', {}).get('content', '') for e in elements)
+            if words and words in text and elements and total:
+                return out({'at': round(elements[0].get('startIndex', 0) / total, 4)})
+    out({'at': None})
+
+
+TURN: list = []
+CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh'}
+NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo'}
+
+
+def wait_for_turn(job: Job):
+    """One command per meeting at a time; a rewrite by Claude can take minutes, so wait up to 15."""
+    import fcntl
+    import time
+    lock = open(job.dir / '.app.lock', 'w')
+    deadline = time.time() + 15 * 60
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock
+        except OSError:
+            if time.time() > deadline:
+                sys.exit('這場會議還有別的動作在處理，請稍後再試一次。')
+            time.sleep(0.3)
+
+
+def try_turn(job: Job):
+    """The meeting's lock if nothing else holds it, else None."""
+    import fcntl
+    lock = open(job.dir / '.app.lock', 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock
+    except OSError:
+        lock.close()
+        return None
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv:
+        sys.exit(__doc__)
+    cmd = argv[0]
+    if cmd == 'list':
+        return cmd_list()
+    if cmd == 'version':
+        return cmd_version(argv[1] if len(argv) > 1 else '')
+    if cmd == 'update':
+        return cmd_update()
+    if len(argv) < 2:
+        sys.exit(__doc__)
+    job = Job(Path(argv[1]))
+    rest = argv[2:]
+    if cmd == 'locate':                              # only reads the Doc: no turn to wait for
+        return cmd_locate(job, ' '.join(rest).strip())
+    if cmd == 'refresh':                             # asked every few seconds: never queue behind a Claude rewrite
+        lock = try_turn(job)
+        if not lock:
+            return out({'busy': True})
+        TURN.append(lock)
+    else:
+        TURN.append(wait_for_turn(job))              # held until the process ends
+    job = Job(job.dir)                                # read again: the command before this one may have changed it
+    if cmd in CHANGES and job.status_word() not in ('ready', 'sent'):
+        sys.exit('這場會議還沒整理好，現在不能修改。')
+    if cmd in NEEDS_FILE and not job.md_path:
+        sys.exit(NO_FILE)
+    if cmd == 'log':
+        return out({'log': job.log_entries()[:200]})
+    if cmd == 'open':
+        cmd_open(job)
+    elif cmd == 'refresh':
+        cmd_refresh(job)
+    elif cmd == 'save' and rest:
+        cmd_save(job, Path(rest[0]), rest[1] if len(rest) > 1 else '')
+    elif cmd == 'learn':
+        out({'learned': cmd_learn(job)})
+    elif cmd in ('unlearn', 'relearn') and rest:
+        cmd_unlearn(job, int(rest[0]), cmd == 'unlearn')
+    elif cmd == 'ask' and rest:
+        ai_edit(job, ' '.join(rest).strip(), ' '.join(rest).strip())
+    elif cmd == 'quick' and rest and rest[0] in QUICK:
+        ai_edit(job, QUICK[rest[0]], rest[0])
+    elif cmd == 'undo':
+        cmd_undo(job)
+    elif cmd == 'reply' and len(rest) >= 2:
+        cmd_reply(job, rest[0], ' '.join(rest[1:]))
+    elif cmd == 'resolve' and rest:
+        cmd_resolve(job, rest[0])
+    elif cmd == 'confirm' and rest:
+        cmd_confirm(job, ' '.join(rest))
+    elif cmd == 'attach' and len(rest) >= 2:
+        cmd_attach(job, rest[0], rest[1])
+    elif cmd == 'speaker' and len(rest) >= 2:
+        cmd_speaker(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except subprocess.TimeoutExpired:
+        sys.exit('連線逾時，請稍後再試一次。')
+    except Exception as err:                         # the window shows the last line; a traceback means nothing there
+        sys.exit(f'發生沒有預期的錯誤（{err.__class__.__name__}: {err}）。')

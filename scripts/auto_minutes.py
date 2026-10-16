@@ -26,8 +26,8 @@ The job runs with MINUTES_NO_SEND set, under which workspace.py and notify.py re
 the confirm code of a preview the user approved sends; every format first gives the recipients comment access
 to the Google Doc.
 
-Settings (settings.json): auto_folder, where automatic minutes are written (default ~/會議紀錄);
-drive_folder, the Drive folder for their Docs (default 會議紀錄); claude_path, if claude is not on the PATH.
+Settings (settings.json): auto_folder, where automatic minutes are written (the first run names it ~/會議紀錄 or ~/Meeting Minutes and keeps it);
+drive_folder, the Drive folder for their Docs (the first publish names it 會議紀錄 or Meeting Minutes and keeps it); claude_path, if claude is not on the PATH.
 """
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from google_setup import CONFIG, owner, sender_name, setting  # noqa: E402
+from i18n import minutes_lang, save, t, ui_lang  # noqa: E402
 
 SCRIPTS = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPTS.parent
@@ -52,24 +53,32 @@ from ai_runner import EXTRA_PATH  # noqa: E402  (where claude, codex and agy are
 BODY = '信件內文.txt'
 WORK = '整理'                   # the agent's folder inside the job
 DRAFT = '紀錄.md'               # the minutes as the agent writes them there; the program copies them out
-LINK = '{文件網址}'
+LINKS = ('{文件網址}', '{doc_url}')    # where the Doc's address goes in the mail (Chinese / English guide)
+# the guide the agent writes from, by the minutes' language: (guide, example) in the Vinutes folder
+GUIDES = {'zh-TW': ('SKILL.md', 'references/example-minutes.md'),
+          'en': ('references/minutes-guide-en.md', 'references/example-minutes-en.md')}
+SUFFIX = {'zh-TW': ('_會議紀錄', '_逐字稿'), 'en': ('_Minutes', '_Transcript')}   # minutes and transcript file names
+# languages a meeting may be held in besides Chinese and English, for telling the agent: Whisper's code -> names
+SPOKEN = {'ja': ('日文', 'Japanese'), 'ko': ('韓文', 'Korean'), 'es': ('西班牙文', 'Spanish'), 'fr': ('法文', 'French'),
+          'de': ('德文', 'German'), 'it': ('義大利文', 'Italian'), 'pt': ('葡萄牙文', 'Portuguese'),
+          'ru': ('俄文', 'Russian'), 'vi': ('越南文', 'Vietnamese'), 'id': ('印尼文', 'Indonesian'),
+          'ms': ('馬來文', 'Malay'), 'tl': ('菲律賓文', 'Filipino'), 'th': ('泰文', 'Thai')}
 ATTACH = {'word': 'docx', 'pdf': 'pdf'}
 
 # known failures, in words the user can act on
 FRIENDLY = [
-    ('GOOGLE LOGIN EXPIRED', 'Google 登入已經失效，請到「環境設定自檢」的第 7 項重新登入。'),
-    ('NO GOOGLE LOGIN', '這台電腦還沒有完成 Google 設定，請照「環境設定自檢」的第 6、7 項設定。'),
-    ('already mailed these minutes', '這份紀錄已經寄給其中幾位收件人了。'),
-    ('give plain addresses only', '收件人只能寫信箱，例如 name@example.com，不能加名字。'),
-    ('NOT INSTALLED', '轉逐字稿的套件沒有裝好，請重新執行 recorder/install.sh。'),
-    ('CANNOT READ AUDIO', '錄音檔讀不出來，可能是錄音過程被中斷。'),
-    ('changed since the last upload', '有人已經在 Google 文件上改過，請直接到 Google 文件修改。'),
-    ('open comments', 'Google 文件上有還沒處理的留言，請直接到 Google 文件修改。'),
-    ('GOOGLE DOCS API DISABLED', 'Google Cloud 專案還沒開啟 Google Docs API，請到「環境設定自檢」的第 8 項按「開啟」。'),
-    ('rate limit', '{ai} 的用量已經用完，等額度恢復後再按「重新整理」。'),
-    ('not supported when using Codex with a ChatGPT account',
-     'Codex 的版本太舊，沒辦法用 ChatGPT 帳號整理。請先更新 Codex，再按「重新整理」。'),
-    ('not logged in', '{ai} 還沒登入，請到「環境設定自檢」的第 5 項登入。'),
+    ('GOOGLE LOGIN EXPIRED', 'err_login_expired'),
+    ('NO GOOGLE LOGIN', 'err_no_google'),
+    ('already mailed these minutes', 'err_already_mailed'),
+    ('give plain addresses only', 'err_plain_addresses'),
+    ('NOT INSTALLED', 'err_not_installed'),
+    ('CANNOT READ AUDIO', 'err_cannot_read_audio'),
+    ('changed since the last upload', 'err_doc_changed'),
+    ('open comments', 'err_open_comments'),
+    ('GOOGLE DOCS API DISABLED', 'err_docs_api'),
+    ('rate limit', 'err_rate_limit'),
+    ('not supported when using Codex with a ChatGPT account', 'err_codex_old'),
+    ('not logged in', 'err_not_logged_in'),
 ]
 
 
@@ -77,7 +86,7 @@ def friendly(text: str, default: str) -> str:
     import ai_runner
     for key, words in FRIENDLY:
         if key.lower() in text.lower():
-            return words.replace('{ai}', ai_runner.name())
+            return t(words, ai=ai_runner.name())
     return default
 
 
@@ -148,26 +157,28 @@ def drive():
 def transcribe(job: Path, meta: dict):
     audio = job / (meta.get('audio') or '錄音.caf')
     if not audio.exists():
-        raise Failed('找不到錄音檔。')
+        raise Failed(t('no_audio'))
     if not (job / '操作紀錄.jsonl').exists() and meta.get('started'):
-        activity(job, None, '開始錄音', at=meta['started'])
+        activity(job, None, t('log_started'), at=meta['started'])
         if meta.get('ended'):
             import minutes_app
             minutes = round((datetime.fromisoformat(meta['ended']) - datetime.fromisoformat(meta['started'])).total_seconds() / 60)
-            activity(job, None, f'結束錄音，長度 {minutes_app.length_words(minutes)}', at=meta['ended'])
-    status(job, 'transcribing', '正在把錄音轉成逐字稿')
+            activity(job, None, t('log_ended', length=minutes_app.length_words(minutes)), at=meta['ended'])
+    status(job, 'transcribing', t('status_transcribing'))
     began = time.time()
     try:
         done = script('transcribe.py', audio, job / '逐字稿.txt', timeout=4 * 3600)
     except subprocess.TimeoutExpired:
-        raise Failed('轉逐字稿超過 4 小時還沒完成，已經停止。')
+        raise Failed(t('transcribe_timeout'))
     log(job, (done.stdout + done.stderr).strip()[-1000:])
     if done.returncode or not (job / '逐字稿.txt').exists():
-        raise Failed(friendly(done.stdout + done.stderr, '錄音轉逐字稿失敗。'))
+        raise Failed(friendly(done.stdout + done.stderr, t('transcribe_failed')))
     if not (job / '逐字稿.txt').read_text(encoding='utf-8').strip():
-        raise Failed('錄音裡沒有聽到說話的聲音。請確認錄音時麥克風有收到聲音。')
+        raise Failed(t('no_speech'))
     log(job, f'transcribed in {time.time() - began:.0f}s')
-    activity(job, '助手', '把錄音轉成逐字稿')
+    meta['language'] = spoken_language(job)
+    write_json(job / 'job.json', meta)
+    activity(job, t('assistant'), t('log_transcribed'))
     tell_voices(job)
     if audio.suffix == '.caf':                       # the transcript is safe, keep a small copy of the audio
         small = audio.with_suffix('.m4a')
@@ -179,6 +190,11 @@ def transcribe(job: Path, meta: dict):
             write_json(job / 'job.json', meta)
 
 
+def spoken_language(job: Path) -> str:
+    """The language the meeting was held in, as transcribe.py decided it (Whisper's code); Chinese before it did."""
+    return str(read_json(job / '逐字稿.json').get('language') or 'zh')
+
+
 def tell_voices(job: Path):
     """Each transcript line's speaker by voice (speakers.py). Minutes are still written without it, so a
     missing package or model only costs the names."""
@@ -186,7 +202,7 @@ def tell_voices(job: Path):
     if not speakers.available():
         log(job, 'speakers: not installed')
         return
-    status(job, 'transcribing', '正在分辨每一句的講者')
+    status(job, 'transcribing', t('status_speakers'))
     began = time.time()
     try:
         done = script('speakers.py', job, timeout=1800)
@@ -196,7 +212,7 @@ def tell_voices(job: Path):
     log(job, (done.stdout + done.stderr).strip()[-500:] + f' ({time.time() - began:.0f}s)')
 
 
-def gather(job: Path, meta: dict, folder: Path) -> Path:
+def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
     """Everything the restricted agent may read, copied into its own folder, so it never needs a shell or a token
     and cannot change the job's files or any earlier minutes."""
     work = job / WORK
@@ -209,9 +225,9 @@ def gather(job: Path, meta: dict, folder: Path) -> Path:
     for f in sorted(earlier, key=lambda f: f.stat().st_mtime, reverse=True)[:30]:
         shutil.copy(f, old / f.name)
     import speakers                                  # the transcript with who said each line, when the voices are known
-    (work / '逐字稿.txt').write_text(speakers.labelled_transcript(job), encoding='utf-8')
-    for src in (SKILL_DIR / 'SKILL.md', SKILL_DIR / 'references' / 'glossary.md',
-                SKILL_DIR / 'references' / 'example-minutes.md'):
+    (work / '逐字稿.txt').write_text(speakers.labelled_transcript(job, unnamed(lang)), encoding='utf-8')
+    guide, example = GUIDES[lang]
+    for src in (SKILL_DIR / guide, SKILL_DIR / 'references' / 'glossary.md', SKILL_DIR / example):
         if src.exists():
             shutil.copy(src, ref / src.name)
     for name, target in (('notes.md', '使用者規則.md'), ('glossary.md', '公司詞彙表.md')):
@@ -240,12 +256,19 @@ def gather(job: Path, meta: dict, folder: Path) -> Path:
     return work
 
 
+def unnamed(lang: str) -> str:
+    """A voice without a name in the transcript the agent reads: 講者 A, or Speaker A for English minutes."""
+    return t('speaker', lang)
+
+
 def stamp(meta: dict) -> str:
     """2026-10-14T14:05:00+08:00 -> 20261014_1405, the start of every file name this recording writes."""
     return (meta.get('started') or '')[:16].replace('-', '').replace('T', '_').replace(':', '')
 
 
-def prompt(job: Path, meta: dict, folder: Path) -> str:
+def prompt(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str = 'zh') -> str:
+    if lang == 'en':
+        return prompt_en(job, meta, spoken)
     started, ended = meta.get('started') or '', meta.get('ended') or ''
     try:
         minutes = round((datetime.fromisoformat(ended) - datetime.fromisoformat(started)).total_seconds() / 60)
@@ -255,6 +278,8 @@ def prompt(job: Path, meta: dict, folder: Path) -> str:
     return (
         '自動整理模式：這是錄音程式「Vinutes」在使用者結束錄音後自動啟動的工作，沒有人會回答問題。\n'
         f'先讀 {job}/參考/SKILL.md，照第 0.5 節「錄音程式自動整理」做，其他規則照 SKILL.md 與 參考/使用者規則.md。\n'
+        + (f'這場會議講的是{SPOKEN.get(spoken, (spoken, spoken))[0]}，逐字稿保留原文；會議紀錄、信件內文、result.json 裡的文字'
+           '一律用繁體中文（台灣用語）寫，人名照逐字稿的寫法，金額保留原本的幣別。\n' if spoken not in ('zh', 'yue') else '') +
         f'- 逐字稿：{job}/逐字稿.txt（每行開頭是從錄音開始算的時間，有講者的話接著是講者，見 SKILL.md 第 2 節「辨識講者」）\n'
         f'- 錄音時間：{started} 到 {ended}{length}\n'
         f'- 當天行事曆：{job}/行事曆.txt\n'
@@ -267,23 +292,54 @@ def prompt(job: Path, meta: dict, folder: Path) -> str:
     )
 
 
-def write_minutes(job: Path, work: Path, meta: dict, folder: Path):
+def prompt_en(job: Path, meta: dict, spoken: str) -> str:
+    """The same job for English minutes, from the English guide (references/minutes-guide-en.md)."""
+    started, ended = meta.get('started') or '', meta.get('ended') or ''
+    try:
+        minutes = round((datetime.fromisoformat(ended) - datetime.fromisoformat(started)).total_seconds() / 60)
+        length = f', about {minutes} minutes long'
+    except (TypeError, ValueError):
+        length = ''
+    held = '' if spoken == 'en' else (
+        f'The meeting was held in {SPOKEN.get(spoken, (spoken, spoken))[1]}; the transcript stays in that language. Write the '
+        'minutes, the mail and the text in result.json in English; keep names as the transcript spells them and '
+        'amounts in their own currency.\n')
+    return (
+        'Automatic mode: the recording app Vinutes started this job after the user stopped a recording; nobody will '
+        'answer questions.\n'
+        f'First read {job}/參考/minutes-guide-en.md and follow its section "Automatic mode"; for everything else follow '
+        f'that guide and 參考/使用者規則.md (the user\'s own rules, if present).\n' + held +
+        f'- Transcript: {job}/逐字稿.txt (each line starts with the time from the start of the recording, then the '
+        'speaker when known; see the guide\'s section "Reading the transcript")\n'
+        f'- Recording: {started} to {ended}{length}\n'
+        f'- That day\'s calendar: {job}/行事曆.txt\n'
+        f'- Glossaries and the user\'s settings: {job}/參考/\n'
+        f'- Earlier meeting names and projects: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
+        f'- Earlier minutes, for background: {job}/參考/舊紀錄/\n'
+        f'- Write the minutes to {job}/{DRAFT}; the program files them under the title in result.json.\n'
+        f'- Write the mail text to {job}/{BODY}, and last {job}/result.json.\n'
+        'In this mode you cannot run commands or use the web; the Google Doc, the preview and the mail are done by '
+        'the program after you finish.'
+    )
+
+
+def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str = 'zh'):
     import ai_runner
     ai = ai_runner.chosen()
     # the agent works in its own folder and can write nothing else; the program copies the minutes out
     log(job, f'{ai} in {work}')
     with (job / 'log.txt').open('a', encoding='utf-8') as out:
         try:
-            done = ai_runner.run(prompt(work, meta, folder), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
+            done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
                                  stdout=out, stderr=subprocess.STDOUT)
         except subprocess.TimeoutExpired:
-            raise Failed(f'整理超過 {CLAUDE_TIMEOUT // 60} 分鐘還沒完成，已經停止。逐字稿留在錄音資料夾裡。')
+            raise Failed(t('write_timeout', n=CLAUDE_TIMEOUT // 60))
         except SystemExit as err:
             raise Failed(str(err))
     log(job, f'{ai} exited {done.returncode}')
     if done.returncode:
         raise Failed(friendly((job / 'log.txt').read_text(encoding='utf-8')[-3000:],
-                              f'{ai_runner.name(ai)} 整理時出錯。'))
+                              t('write_error', ai=ai_runner.name(ai))))
 
 
 def strings(value) -> list[str]:
@@ -297,32 +353,31 @@ def line(value, limit: int) -> str:
     return re.sub(r'\s+', ' ', str(value or '')).strip()[:limit]
 
 
-def minutes_path(folder: Path, meta: dict, title: str) -> Path:
+def minutes_path(folder: Path, meta: dict, title: str, lang: str = 'zh-TW') -> Path:
     """Where the minutes go. An earlier, unfinished run of this recording keeps its file, and with it its Doc."""
-    earlier = sorted(folder.glob(f'{stamp(meta)}_*_會議紀錄.md'))
+    earlier = sorted(f for end, _ in SUFFIX.values() for f in folder.glob(f'{stamp(meta)}_*{end}.md'))
     if earlier:
         return earlier[0]
-    topic = re.sub(r'[\\/:*?"<>|\s]+', '', title)[:40] or '會議'
-    return folder / f'{stamp(meta)}_{topic}_會議紀錄.md'
+    topic = re.sub(r'[\\/:*?"<>|\s]+', '', title)[:40] or ('Meeting' if lang == 'en' else '會議')
+    return folder / f'{stamp(meta)}_{topic}{SUFFIX[lang][0]}.md'
 
 
-def check_result(work: Path, meta: dict, folder: Path) -> dict:
+def check_result(work: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> dict:
     """The agent's result.json, trusted only as far as it can be checked."""
     result = read_json(work / 'result.json')
     if not result:
-        raise Failed('整理沒有完成。逐字稿留在錄音資料夾裡，可以按「重新整理」再試一次。')
+        raise Failed(t('not_finished_retry'))
     if result.get('status') != 'ok':
-        raise Failed(str(result.get('error') or '整理沒有完成。'))
+        raise Failed(str(result.get('error') or t('not_finished')))
     draft = work / DRAFT
     if not draft.is_file() or not re.search(r'(?m)^#{1,3} ', draft.read_text(encoding='utf-8')):
-        raise Failed('整理完沒有找到會議紀錄檔。')
+        raise Failed(t('no_minutes_file'))
     import ai_runner
     if ai_runner.leaks(draft.read_text(encoding='utf-8'), (work / BODY).read_text(encoding='utf-8')
                        if (work / BODY).is_file() else '', json.dumps(result, ensure_ascii=False)):
-        raise Failed(f'{ai_runner.name()} 寫出來的紀錄裡有看起來像登入資料的文字，為了安全，這份紀錄沒有發成 Google 文件。'
-                     '逐字稿留在錄音資料夾裡，可以按「重新整理」再試一次。')
-    title = line(result.get('title'), 80) or '會議紀錄'
-    md = minutes_path(folder, meta, title)
+        raise Failed(t('leaks', ai=ai_runner.name()))
+    title = line(result.get('title'), 80) or t('untitled_minutes', lang)
+    md = minutes_path(folder, meta, title, lang)
     mail = result.get('mail') if isinstance(result.get('mail'), dict) else None
     if mail:
         mail = {'to': [t.lower() for t in strings(mail.get('to'))], 'subject': str(mail.get('subject') or '').strip()}
@@ -352,18 +407,23 @@ def items(value, keys: tuple) -> list:
 
 def publish(job: Path, result: dict):
     md = Path(result['minutes_md'])
-    folder = setting('drive_folder', 'MINUTES_DRIVE_FOLDER') or '會議紀錄'
+    folder = setting('drive_folder', 'MINUTES_DRIVE_FOLDER')
+    if not folder:
+        # named in the app's language the first time, then kept, so switching languages later never splits the Docs
+        folder = '會議紀錄' if ui_lang() == 'zh-TW' else 'Meeting Minutes'
+        save('drive_folder', folder)
     done = script('md_to_gdoc.py', md, folder, '--create-folder', timeout=300)
     log(job, 'publish: ' + (done.stdout + done.stderr).strip()[-600:])
     url = read_json(md.with_name(md.name + '.gdoc.json')).get('url')
     if done.returncode or not url:
-        raise Failed(friendly(done.stdout + done.stderr, '會議紀錄寫好了，發成 Google 文件時失敗。'))
+        raise Failed(friendly(done.stdout + done.stderr, t('publish_failed')))
     result['doc_url'] = url
     remember_revision(job, md, doc_id(result))
     body = job / BODY
     if result.get('mail'):                           # the agent cannot know the address; it leaves a placeholder
         text = body.read_text(encoding='utf-8')
-        text = text.replace(LINK, url) if LINK in text else text.rstrip() + f'\n\n{url}\n'
+        link = next((k for k in LINKS if k in text), None)
+        text = text.replace(link, url) if link else text.rstrip() + f'\n\n{url}\n'
         body.write_text(text, encoding='utf-8')
 
 
@@ -388,31 +448,39 @@ def run(job: Path):
     subprocess.Popen(['caffeinate', '-i', '-w', str(os.getpid())])     # a closed lid still sleeps
     try:
         transcribe(job, meta)
-        status(job, 'writing', '正在整理成會議紀錄')
-        folder = Path(setting('auto_folder', 'MINUTES_AUTO_FOLDER') or '~/會議紀錄').expanduser()
+        status(job, 'writing', t('status_writing'))
+        named = setting('auto_folder', 'MINUTES_AUTO_FOLDER')
+        if not named:                                # like the Drive folder: named once, in the app's language
+            named = '~/會議紀錄' if ui_lang() == 'zh-TW' else '~/Meeting Minutes'
+            save('auto_folder', named)
+        folder = Path(named).expanduser()
         folder.mkdir(parents=True, exist_ok=True)
-        work = gather(job, meta, folder)
+        spoken = meta.get('language') or spoken_language(job)
+        lang = minutes_lang(spoken)
+        work = gather(job, meta, folder, lang)
         (job / 'result.json').unlink(missing_ok=True)
-        write_minutes(job, work, meta, folder)
-        result = check_result(work, meta, folder)
+        write_minutes(job, work, meta, folder, lang, spoken)
+        result = check_result(work, meta, folder, lang)
+        result.update(minutes_lang=lang, spoken=spoken)
         if result['mail']:
             shutil.copy(work / BODY, job / BODY)
         md = Path(result['minutes_md'])
         shutil.copy(work / DRAFT, md)
         import speakers
-        md.with_name(md.stem.removesuffix('_會議紀錄') + '_逐字稿.txt').write_text(speakers.labelled_transcript(job),
-                                                                              encoding='utf-8')
+        base = next((md.stem.removesuffix(end) for end, _ in SUFFIX.values() if md.stem.endswith(end)), md.stem)
+        md.with_name(base + SUFFIX[lang][1] + '.txt').write_text(speakers.labelled_transcript(job, unnamed(lang)),
+                                                                 encoding='utf-8')
         publish(job, result)
         write_json(job / 'result.json', result)
         import ai_runner
-        activity(job, ai_runner.name(), '整理完會議記錄，發成 Google 文件')
+        activity(job, ai_runner.name(), t('log_published'))
         status(job, 'done', result['title'])
         log(job, 'done')
     except Failed as err:
         fail(job, str(err))
     except Exception as err:                         # anything unexpected still ends as a visible failure
         log(job, f'UNEXPECTED {err.__class__.__name__}: {err}')
-        fail(job, '整理時發生沒有預期的錯誤。錄音和逐字稿都還在錄音資料夾裡。')
+        fail(job, t('unexpected_run'))
 
 
 def fail(job: Path, message: str):
@@ -427,23 +495,23 @@ def fail(job: Path, message: str):
 def attachment(job: Path, result: dict, fmt: str, make: bool) -> Path | None:
     if fmt == 'gdoc':
         return None
-    name = re.sub(r'[\\/:*?"<>|]+', '_', result.get('title') or '會議紀錄')
+    name = re.sub(r'[\\/:*?"<>|]+', '_', result.get('title') or t('untitled_minutes', result.get('minutes_lang')))
     path = job / '附件' / f'{name}.{ATTACH[fmt]}'
     if not make:
         if not path.is_file():
-            sys.exit('附件不見了，請重新按寄出。')
+            sys.exit(t('attachment_gone'))
         return path
     path.parent.mkdir(exist_ok=True)
     if fmt == 'word':
         latest(job)
         if script('md_to_docx.py', result['minutes_md'], path).returncode:
-            sys.exit('沒辦法產生 Word 檔。')
+            sys.exit(t('no_word'))
     else:
         try:
             pdf = drive().call(f'https://www.googleapis.com/drive/v3/files/{doc_id(result)}/export?mimeType=application/pdf', raw=True)
         except (Exception, SystemExit) as err:
             log(job, f'pdf export failed: {err}')
-            sys.exit(friendly(str(err), '沒辦法產生 PDF 檔。'))
+            sys.exit(friendly(str(err), t('no_pdf')))
         path.write_bytes(pdf)
     return path
 
@@ -458,11 +526,11 @@ def latest(job: Path):
         why = minutes_app.connect()
         sent = minutes_app.sync_up(entry) if not why else None
         if why or sent['held']:
-            sys.exit('沒有連上 Google 文件，沒辦法用最新的內容產生 Word 檔，信沒有寄出。')
+            sys.exit(t('word_offline'))
         try:
             minutes_app.pull(entry)
         except SystemExit:
-            sys.exit('沒有連上 Google 文件，沒辦法用最新的內容產生 Word 檔，信沒有寄出。')
+            sys.exit(t('word_offline'))
         entry.save_state()
     finally:
         lock.close()
@@ -480,9 +548,9 @@ def mail_turn(job: Path, what: str):
             break
         except OSError:
             if who.is_file() and who.read_text(encoding='utf-8').strip() == 'send':
-                sys.exit('這封信正在寄出，請稍等。')
+                sys.exit(t('mail_sending'))
             if time.time() - began > 300:
-                sys.exit('前一個附件準備超過 5 分鐘還沒好，信沒有寄出。請稍後再試一次。')
+                sys.exit(t('mail_attach_slow'))
             time.sleep(0.5)
     who.write_text(what, encoding='utf-8')
     return lock
@@ -493,9 +561,11 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
     lock = mail_turn(job, 'preview' if dry else 'send')  # noqa: F841 (held until this process ends)
     result = read_json(job / 'result.json')
     if result.get('sent_at'):
-        sys.exit(f'這封信已經在 {result["sent_at"][:16].replace("T", " ")} 寄出了。')
+        import minutes_app
+        at = minutes_app.short_time(result['sent_at']) if ui_lang() == 'en' else result['sent_at'][:16].replace('T', ' ')
+        sys.exit(t('mail_already_sent', at=at))
     if not result.get('mail') or not (job / BODY).is_file() or not doc_id(result):
-        sys.exit('這份會議紀錄沒有準備好的信件。')
+        sys.exit(t('mail_none'))
     people = [t.strip().lower() for t in re.split(r'[,，、;\s]+', to or '') if t.strip()] or result['mail']['to']
     subject = (subject or '').strip() or result['mail']['subject']
     attach = attachment(job, result, fmt, make=dry)
@@ -505,7 +575,7 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
     found = re.search(r'確認碼: (\w+)', shown.stdout)
     if shown.returncode or not found:
         log(job, 'preview: ' + (shown.stdout + shown.stderr).strip()[-600:])
-        sys.exit(friendly(shown.stdout + shown.stderr, '信件預覽失敗，信沒有寄出。'))
+        sys.exit(friendly(shown.stdout + shown.stderr, t('mail_preview_failed')))
     code = found.group(1)
     if dry:
         me = owner()
@@ -518,11 +588,11 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
             ensure_ascii=False))
         return
     if confirm != code:
-        sys.exit('信件在預覽之後改過了，請重新按寄出。')
+        sys.exit(t('mail_changed'))
     done = script('workspace.py', *base, '--send', '--confirm', code, no_send=False)
     log(job, 'send: ' + (done.stdout + done.stderr).strip()[-1000:])
     if done.returncode:
-        sys.exit(friendly(done.stdout + done.stderr, '信沒有寄出。'))
+        sys.exit(friendly(done.stdout + done.stderr, t('mail_not_sent')))
     result['mail'].update(to=people, subject=subject)
     result['sent_at'] = datetime.now().isoformat(timespec='seconds')
     gmail_id = re.search(r'^SENT (\w+)', done.stdout, re.M)
@@ -532,8 +602,8 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
     write_json(job / 'result.json', result)
     import minutes_app
     entry = minutes_app.Job(job)
-    names = '、'.join(minutes_app.name_of(entry, p) for p in people)
-    entry.log(minutes_app.me(), f'已寄給 {names}，附件是 {minutes_app.format_words(fmt)}', 'sent')
+    names = t('list_sep').join(minutes_app.name_of(entry, p) for p in people)
+    entry.log(minutes_app.me(), t('log_sent', names=names, format=minutes_app.format_words(fmt)), 'sent')
     print('SENT ' + ', '.join(people))
 
 
@@ -566,6 +636,6 @@ if __name__ == '__main__':
     try:
         main()
     except subprocess.TimeoutExpired:
-        sys.exit('連線逾時，請稍後再試一次。')
+        sys.exit(t('timeout'))
     except Exception as err:                         # the app shows the last line; a traceback means nothing there
-        sys.exit(f'發生沒有預期的錯誤（{err.__class__.__name__}: {err}）。')
+        sys.exit(t('unexpected', err=f'{err.__class__.__name__}: {err}'))

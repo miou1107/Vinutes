@@ -29,6 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from google_setup import CONFIG  # noqa: E402
+from i18n import t  # noqa: E402
+from strings import EN, ZH  # noqa: E402
 
 MODEL = CONFIG / 'models' / 'campplus.onnx'
 VOICES = CONFIG / 'voices'
@@ -240,7 +242,7 @@ def run(job: Path) -> dict:
     audio = job / (meta.get('audio') or '錄音.m4a')
     spans = lines_of(job)
     if not spans or not audio.exists():
-        raise SystemExit('沒有逐字稿或錄音，沒辦法分辨講者。')
+        raise SystemExit(t('speakers_no_input'))
     V, ok = prints(audio, spans)
     np.savez(job / '聲紋.npz', V=V, ok=ok)
     result = label(V, ok, spans, library())
@@ -256,15 +258,18 @@ def load(job: Path) -> dict:
         return {}
 
 
-def name_of(data: dict, i: int) -> str:
-    """The name, or 講者 X, of transcript line i."""
+UNNAMED = (ZH['speaker'], EN['speaker'])    # a voice without a name: 講者 A in Chinese, Speaker A in English
+
+
+def name_of(data: dict, i: int, word: str = ZH['speaker']) -> str:
+    """The name, or 講者 X (`word` X), of transcript line i."""
     fixed = (data.get('fixed') or {}).get(str(i))
     if fixed:
         return fixed
     lines = data.get('lines') or []
     g = lines[i] if i < len(lines) else ''
     info = (data.get('groups') or {}).get(g) or {}
-    return info.get('name') or (f'講者 {g}' if g else '')
+    return info.get('name') or (f'{word} {g}' if g else '')
 
 
 def set_name(job: Path, group_key: str, name: str, line: int | None = None) -> dict:
@@ -273,7 +278,7 @@ def set_name(job: Path, group_key: str, name: str, line: int | None = None) -> d
     data = load(job)
     name = name.strip()[:30]
     if not data or not name:
-        raise SystemExit('這場會議還沒有分辨講者，沒辦法取名字。')
+        raise SystemExit(t('speakers_none'))
     try:
         saved = np.load(job / '聲紋.npz')
         V, ok = saved['V'], saved['ok']
@@ -288,7 +293,7 @@ def set_name(job: Path, group_key: str, name: str, line: int | None = None) -> d
     if line is None:
         g = (data.get('groups') or {}).get(group_key)
         if g is None:
-            raise SystemExit('找不到這位講者。')
+            raise SystemExit(t('speaker_missing'))
         before = g.get('name') or ''
         if before and before != name:
             forget(before, job=job.name)
@@ -298,9 +303,9 @@ def set_name(job: Path, group_key: str, name: str, line: int | None = None) -> d
             remember(name, np.array([V[i] for i in mine]), [f'{job.name}:{i}' for i in mine], replace_job=job.name)
     else:
         if not 0 <= line < len(data.get('lines') or []):
-            raise SystemExit('找不到這一句。')
+            raise SystemExit(t('line_missing'))
         before = name_of(data, line)
-        if before and before != name and not before.startswith('講者 '):
+        if before and before != name and not before.startswith(tuple(w + ' ' for w in UNNAMED)):
             forget(before, [f'{job.name}:{line}'])
         fixed[str(line)] = name
         if usable(line):
@@ -309,15 +314,16 @@ def set_name(job: Path, group_key: str, name: str, line: int | None = None) -> d
     return data
 
 
-def labelled_transcript(job: Path) -> str:
-    """The transcript with each line's speaker after the time: [mm:ss] Alex：..., for Claude."""
+def labelled_transcript(job: Path, word: str = ZH['speaker']) -> str:
+    """The transcript with each line's speaker after the time: [mm:ss] Alex：..., for Claude. A voice without a
+    name is `word` X (講者 A for Chinese minutes, Speaker A for English ones)."""
     data = load(job)
     out, i = [], 0
     for line in (job / '逐字稿.txt').read_text(encoding='utf-8').splitlines():
         m = LINE.match(line)
         if not m:
             continue
-        who = name_of(data, i) if data else ''
+        who = name_of(data, i, word) if data else ''
         stamp = line[:line.index(']') + 1]
         out.append(f'{stamp} {who}：{m.group(4)}' if who else line)
         i += 1

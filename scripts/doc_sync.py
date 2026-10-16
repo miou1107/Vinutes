@@ -38,6 +38,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+import i18n  # noqa: E402
+
 OBJ = '\ufffc'                  # stands for an inline image or any other Doc element that has no text
 DOCS = 'https://docs.googleapis.com/v1/documents/'
 DRIVE = 'https://www.googleapis.com/drive/v3/files/'
@@ -51,7 +54,7 @@ NAMED = {'h1': 'NORMAL_TEXT', 'h2': 'HEADING_2', 'h3': 'HEADING_3', 'h4': 'HEADI
 PRESET = {'li': 'BULLET_DISC_CIRCLE_SQUARE', 'ol': 'NUMBERED_DECIMAL_ALPHA_ROMAN'}
 LOOK = ('weightedFontFamily', 'fontSize', 'foregroundColor')     # copied onto inserted text from its neighbours
 CJK = re.compile(r'[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef\u3000-\u303f]')
-BUSY = '同事正在 Google 文件上修改，你改的內容先存在這台電腦，下次存檔時會一起存回。'
+BUSY = i18n.t('busy')
 
 
 class Structural(Exception):

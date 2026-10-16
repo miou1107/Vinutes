@@ -1,0 +1,2 @@
+/* What macOS shows when Vinutes first asks for the microphone. */
+"NSMicrophoneUsageDescription" = "Vinutes records the meeting so it can write up the minutes.";

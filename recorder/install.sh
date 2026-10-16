@@ -13,7 +13,8 @@
 #      signs it for this Mac only, and starts it.
 #      Skipped when the sources did not change: every new build is a new app to macOS, which asks for the
 #      microphone again.
-#   5. writes $MINUTES_HOME/recorder.json so the app knows where Python and these scripts are
+#   5. writes $MINUTES_HOME/recorder.json so the app knows where Python and these scripts are, and, once, keeps
+#      Chinese for people who used Vinutes before it spoke English ("language": "zh-TW" in settings.json)
 # One AI CLI must be installed and signed in (Claude Code, Codex or Antigravity); the script says so when none is.
 set -euo pipefail
 
@@ -77,7 +78,7 @@ for cli in claude codex agy; do
 done
 if [[ -z "$FOUND" ]]; then
   echo "MISSING: the recorder needs one of them to write the minutes: Claude Code (claude), Codex (codex) or"
-  echo "Antigravity (agy). Install one and sign in; the app's 環境設定自檢 picks which one it uses."
+  echo "Antigravity (agy). Install one and sign in; the app's Setup Checklist picks which one it uses."
 fi
 
 step "Building $APP"
@@ -91,7 +92,8 @@ make_icon() {
 }
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || true)"
 SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Info.plist" \
-              "$ROOT/recorder/make_icon.swift" "$ROOT"/recorder/app/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}"
+              "$ROOT/recorder/make_icon.swift" "$ROOT"/recorder/app/* \
+              "$ROOT"/recorder/l10n/*.lproj/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}"
 if [[ -x "$APP/Contents/MacOS/MeetingRecorder" && "$(cat "$APP/Contents/Resources/source.sum" 2>/dev/null)" == "$SOURCE_SUM" ]]; then
   echo "unchanged (version ${VERSION:-unknown})"
 else
@@ -103,6 +105,8 @@ else
   mkdir -p "$NEW/Contents/MacOS" "$NEW/Contents/Resources" "$BUILD/AppIcon.iconset"
   cp "$BUILD/MeetingRecorder" "$NEW/Contents/MacOS/MeetingRecorder"
   cp -R "$ROOT/recorder/app" "$NEW/Contents/Resources/app"
+  # the microphone question in English or Chinese, whichever the Mac uses (en.lproj, zh-Hant.lproj)
+  cp -R "$ROOT"/recorder/l10n/*.lproj "$NEW/Contents/Resources/"
   sed "s/__VERSION__/${VERSION:-0}/g" "$ROOT/recorder/Info.plist" > "$NEW/Contents/Info.plist"
   make_icon || echo "(no icon: drawing it failed; the app works without one)"
   echo "$SOURCE_SUM" > "$NEW/Contents/Resources/source.sum"
@@ -126,10 +130,31 @@ else
 fi
 
 step "Settings"
-"$VPY" - "$MINUTES_HOME/recorder.json" "$VPY" "$ROOT" <<'EOF'
-import json, sys
-path, python, root = sys.argv[1:4]
+"$VPY" - "$MINUTES_HOME/recorder.json" "$VPY" "$ROOT" "$MINUTES_HOME" <<'EOF'
+import json, os, sys
+path, python, root, home = sys.argv[1:5]
 open(path, 'w').write(json.dumps({'python': python, 'app_dir': root}, indent=2))
+
+# Vinutes was Chinese only until it learned English. Someone who already has recordings keeps Chinese; a new
+# install writes nothing and follows the Mac's language. Checked once (the marker), so a later run of this script
+# never switches a new user who has started recording to Chinese.
+marker = os.path.join(home, 'language-checked')
+settings = os.path.join(home, 'settings.json')
+if not os.path.exists(marker):
+    if os.path.isdir(os.path.join(home, 'recordings')):
+        data = {}
+        if os.path.exists(settings):
+            try:
+                data = json.load(open(settings, encoding='utf-8'))
+            except (OSError, ValueError):
+                data = None                       # a file we cannot read is left alone
+        if isinstance(data, dict) and 'language' not in data:
+            data['language'] = 'zh-TW'
+            # writing over the file keeps its permissions (600 stays 600)
+            with open(settings, 'w', encoding='utf-8') as f:
+                f.write(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+            print('kept Chinese for this existing install')
+    open(marker, 'w').close()
 EOF
 chmod 600 "$MINUTES_HOME/recorder.json"
 echo "ok"

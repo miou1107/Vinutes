@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import ai_runner  # noqa: E402
 import google_setup as gs  # noqa: E402
+from i18n import t  # noqa: E402
 
 SPEECH = os.environ.get('MINUTES_WHISPER_MODEL') or 'mlx-community/whisper-large-v3-turbo'
 SPEECH_BYTES = 1_620_000_000
@@ -226,11 +227,11 @@ def take_client(path: Path):
     try:
         blob = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
-        sys.exit('這個檔案不是 Google 的用戶端檔案，請選從 Google Cloud 下載的 JSON 檔。')
+        sys.exit(t('client_not_google'))
     if not isinstance(blob, dict) or 'client_secret' not in (blob.get('installed') or blob.get('web') or {}):
-        sys.exit('這個檔案不是 Google 的用戶端檔案，請選從 Google Cloud 下載的 JSON 檔。')
+        sys.exit(t('client_not_google'))
     if 'installed' not in blob:
-        sys.exit('這是「網頁應用程式」的用戶端。請改建一個「電腦版應用程式」的用戶端，再下載一次。')
+        sys.exit(t('client_web'))
     gs.CONFIG.mkdir(parents=True, exist_ok=True)
     gs.CONFIG.chmod(0o700)
     fd = os.open(gs.CLIENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

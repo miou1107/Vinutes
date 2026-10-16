@@ -22,8 +22,11 @@ import urllib.parse
 from pathlib import Path
 
 import doc_sync
+from i18n import t
 
 SECTION = '## 八、補充資訊'
+SECTIONS = {'zh-TW': SECTION, 'en': '## 8. Supporting Materials'}    # the last section, by the minutes' language
+LAST = re.compile(r'##\s*(?:八、|8\.\s)')
 UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
 FOLDER_MIME = 'application/vnd.google-apps.folder'
 PICTURES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif'}
@@ -31,17 +34,16 @@ WIDEST_PT = 400                                  # a picture in the Doc is never
 LONGEST_PX = 4000                                # the Doc refuses pictures over 25 megapixels or 50 MB
 ALL_DRIVES = 'supportsAllDrives=true'            # a Doc on a shared drive keeps its folder there too
 
-NO_ITEMS = '沒有要加進去的檔案、連結或圖片。'
-NO_DOC = '這場會議還沒有 Google 文件，附件和圖片要等會議記錄發成 Google 文件之後才能加。'
-OFFLINE = '沒有連上 Google，檔案和圖片沒辦法存進雲端硬碟，第八章沒有變動。連上網路之後再試一次。'
-NO_PUBLIC = ('圖片沒辦法直接顯示在 Google 文件裡，因為你的 Google 帳號不允許用連結分享檔案。'
-             '圖片已經存進雲端硬碟，第八章放的是圖片的連結。')
-LOGIN = 'Google 登入已經失效，檔案沒有存進雲端硬碟，第八章沒有變動。請到「環境設定自檢」的第 7 項重新登入。'
-NO_RIGHT = '你的 Google 帳號沒有權限把檔案存進這份文件所在的資料夾，第八章沒有變動。'
-FAILED = '檔案沒辦法存進雲端硬碟，第八章沒有變動。請再試一次。'
-CROWDED = '同事剛好也在修改 Google 文件，這次的檔案和連結沒有加進第八章。檔案已經存進雲端硬碟，請再加一次。'
-NO_LINE = '第八章找不到「{name}」這一行，這張圖片沒有放進 Google 文件。'
-NOT_PLACED = '圖片「{name}」沒辦法放進 Google 文件，第八章放的是這張圖片的連結。'
+NO_ITEMS = t('attach_no_items')
+NO_DOC = t('attach_no_doc')
+OFFLINE = t('attach_offline')
+NO_PUBLIC = t('attach_no_public')
+LOGIN = t('attach_login')
+NO_RIGHT = t('attach_no_right')
+FAILED = t('attach_failed')
+CROWDED = t('attach_crowded')
+NO_LINE = t('attach_no_line')                    # .format(name=...)
+NOT_PLACED = t('attach_not_placed')
 
 
 def drive_trouble(err) -> str:
@@ -71,12 +73,12 @@ def items_from(raw: str) -> list[dict]:
         if kind in ('file', 'image'):
             path = Path(str(it.get('path', ''))).expanduser()
             if not path.is_file():
-                raise SystemExit(f'找不到這個檔案：{path.name or "（沒有檔名）"}。')
+                raise SystemExit(t('attach_no_file', name=path.name or t('attach_no_name')))
             checked.append({'kind': kind, 'path': path, 'name': path.name})
         elif kind == 'link':
             url = str(it.get('url', '')).strip()
             if not re.match(r'https?://\S+$', url):
-                raise SystemExit('網址要用 http:// 或 https:// 開頭。')
+                raise SystemExit(t('attach_bad_url'))
             checked.append({'kind': 'link', 'url': url, 'name': url})
     if not checked:
         raise SystemExit(NO_ITEMS)
@@ -111,8 +113,9 @@ def call(url: str, body=None, method: str | None = None, ctype: str = 'applicati
     return json.loads(raw) if raw else {}
 
 
-def folder_for(state: dict, doc_id: str) -> str:
-    """This meeting's folder on Drive, beside its Doc: made the first time, then remembered in `state`."""
+def folder_for(state: dict, doc_id: str, lang: str = 'zh-TW') -> str:
+    """This meeting's folder on Drive, beside its Doc: made the first time, then remembered in `state`.
+    Named after the Doc in the minutes' language: "<Doc>_附件" for Chinese minutes, "<Doc> attachments" for English."""
     known = state.get('attach_folder')
     if known:
         try:
@@ -123,7 +126,8 @@ def folder_for(state: dict, doc_id: str) -> str:
                 raise
     doc = call(doc_sync.DRIVE + doc_id + '?fields=name,parents')
     parent = (doc.get('parents') or ['root'])[0]
-    name = f'{doc.get("name") or "會議紀錄"}_附件'
+    title = doc.get('name') or t('untitled_minutes', lang)
+    name = f'{title} attachments' if lang == 'en' else f'{title}_附件'
     q = (f"name = '{name.replace(chr(39), chr(92) + chr(39))}' and mimeType = '{FOLDER_MIME}' "
          f"and '{parent}' in parents and trashed = false")
     found = call(doc_sync.DRIVE.rstrip('/') + '?fields=files(id)&includeItemsFromAllDrives=true&q='
@@ -165,7 +169,7 @@ def doc_ready_picture(path: Path, work: Path) -> Path:
     photo too big for the Doc made smaller (the copy in Drive is this one too)."""
     w, h = picture_size(path)
     if not w:
-        raise SystemExit(f'「{path.name}」不是圖片，請改用「上傳檔案」加進去。')
+        raise SystemExit(t('attach_not_picture', name=path.name))
     big = w * h > 20_000_000 or path.stat().st_size > 40_000_000
     if path.suffix.lower() in PICTURES and not big:
         return path
@@ -174,7 +178,7 @@ def doc_ready_picture(path: Path, work: Path) -> Path:
           ([] if path.suffix.lower() in PICTURES else ['-s', 'format', 'jpeg']) + [str(path), '--out', str(out)]
     done = subprocess.run(cmd, capture_output=True)
     if done.returncode or not out.is_file():
-        raise SystemExit(f'「{path.name}」沒辦法轉成 Google 文件能顯示的圖片格式。')
+        raise SystemExit(t('attach_cant_convert', name=path.name))
     return out
 
 
@@ -255,9 +259,10 @@ def link_target(url: str) -> str:
     return url.replace(' ', '%20').replace('(', '%28').replace(')', '%29')
 
 
-def lines_for(items: list[dict], note: str) -> list[str]:
+def lines_for(items: list[dict], note: str, lang: str = 'zh-TW') -> list[str]:
     """One list item per file, link or picture; a picture's own paragraph follows its line."""
-    lead = f'{doc_sync.escape_lead(link_text(note.strip()))}：' if note.strip() else ''
+    colon = ': ' if lang == 'en' else '：'
+    lead = f'{doc_sync.escape_lead(link_text(note.strip()))}{colon}' if note.strip() else ''
     out = []
     for it in items:
         out.append(f'- {lead}[{link_text(it["name"])}]({link_target(it["link"])})')
@@ -266,10 +271,13 @@ def lines_for(items: list[dict], note: str) -> list[str]:
     return out
 
 
-def add_lines(md: str, lines: list[str]) -> str:
-    """The lines at the end of 「八、補充資訊」, the section made at the end of the minutes when it is missing."""
+def add_lines(md: str, lines: list[str], lang: str = '') -> str:
+    """The lines at the end of 「八、補充資訊」 (8. Supporting Materials in English minutes), the section made at the
+    end of the minutes when it is missing. Without `lang` the minutes' own headings tell which language they are."""
     rows = md.rstrip('\n').split('\n')
-    head = next((i for i, r in enumerate(rows) if re.match(r'##\s*八、', r)), None)
+    head = next((i for i, r in enumerate(rows) if LAST.match(r)), None)
+    if lang not in SECTIONS:
+        lang = 'en' if re.search(r'(?m)^##\s*1\.\s', md) and not re.search(r'(?m)^##\s*一、', md) else 'zh-TW'
     block: list[str] = []
     for line in lines:                               # a picture is a paragraph of its own: blank lines around it
         if line.startswith('!['):
@@ -277,7 +285,7 @@ def add_lines(md: str, lines: list[str]) -> str:
         else:
             block.append(line)
     if head is None:
-        return '\n'.join(rows + ['', SECTION, ''] + block).rstrip('\n') + '\n'
+        return '\n'.join(rows + ['', SECTIONS[lang], ''] + block).rstrip('\n') + '\n'
     end = next((i for i in range(head + 1, len(rows)) if re.match(r'#{1,2}\s', rows[i])), len(rows))
     while end > head + 1 and not rows[end - 1].strip():
         end -= 1

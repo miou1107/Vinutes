@@ -54,6 +54,7 @@ WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 LINK = colour('link_color', '#1155CC')
 MAX_IMAGE = Cm(15.9)                 # A4 minus the two 2.54 cm margins
 BASE_DIR = [Path('.')]               # folder of the minutes being built, for relative image paths
+ENGLISH = [False]                    # the minutes being built are English (their headings say so)
 # tag -> (size pt, colour, space before twips, space after twips, centred)
 HEADING = {'h1': (17, NAVY, 0, 80, True), 'h2': (14, NAVY, 280, 120, False), 'h3': (12, GREEN, 200, 80, False)}
 CONTENT_DXA = 9026
@@ -146,7 +147,8 @@ def add_image(par, src, alt=''):
         par.add_run().add_picture(io.BytesIO(data), width=width)
     except Exception as err:                       # one bad picture must not stop the whole minutes
         print(f'WARNING: image not placed ({err.__class__.__name__}): {src[:80]}', file=sys.stderr)
-        set_font(par.add_run(f'［圖片無法載入：{alt or src[:60]}］'), 11, False, LINK)
+        words = f'[Picture could not be loaded: {alt or src[:60]}]' if ENGLISH[0] else f'［圖片無法載入：{alt or src[:60]}］'
+        set_font(par.add_run(words), 11, False, LINK)
 
 
 def element(tag, **attrs):
@@ -239,7 +241,9 @@ def page_number_footer(section):
 
 def build(md_path: Path, out_path: Path):
     BASE_DIR[0] = md_path.parent
-    tokens = MarkdownIt('commonmark').enable('table').parse(md_path.read_text(encoding='utf-8'))
+    text = md_path.read_text(encoding='utf-8')
+    ENGLISH[0] = bool(re.search(r'(?m)^##\s*1\.\s*Meeting Details', text))
+    tokens = MarkdownIt('commonmark').enable('table').parse(text)
     doc = Document()
     normal = doc.styles['Normal']
     normal.font.name = FONT

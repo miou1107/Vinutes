@@ -4,7 +4,17 @@
 //   jobs    a recording started, finished or failed: reload the list
 //   select  the user picked a meeting in the menu or a notification: show it
 //   player  the recording's position while it plays
+//   language  the user picked English or 中文: every word on screen is drawn again in that language
 'use strict';
+
+// --- words -----------------------------------------------------------------------------------
+// strings.js (loaded first) holds every word in both languages; the app sets window.VINUTES_LANG before the page
+// loads and sends 'language' when the user switches
+
+let LANG = (window.VINUTES_LANG === 'zh-TW') ? 'zh-TW' : 'en';
+const t = (key, ...a) => { const v = (STRINGS[LANG] && key in STRINGS[LANG] ? STRINGS[LANG] : STRINGS.en)[key]; return typeof v === 'function' ? v(...a) : v; };
+// a text kept in the state as [key, ...args] is turned into words when it is drawn, so it follows a language switch
+const say = (x) => (Array.isArray(x) ? t(...x) : x);
 
 // --- talking to the app ----------------------------------------------------------------------
 
@@ -24,7 +34,7 @@ window.reply = (id, ok, data) => {
   if (!w) return;
   waiting.delete(id);
   if (ok) w.resolve(data || {});
-  else w.reject(new Error((data && data.message) || '沒有完成，請再試一次。'));
+  else w.reject(new Error((data && data.message) || t('err_retry')));
 };
 
 // --- small helpers ---------------------------------------------------------------------------
@@ -52,6 +62,8 @@ const ICON = {
   open: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M10 14l7-7M12 7h5v5"/></svg>',
   sync: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg>',
   spin: '<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a64d8" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>',
+  spinWhite: '<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>',
+  tick: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   checkSmall: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   done: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16 9.8"/></svg>',
@@ -72,28 +84,33 @@ const ICON = {
   prompt: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
 };
 
-const STATUS = { working: '整理中', ready: '待寄出', sent: '已寄出', failed: '沒有整理完成' };
-const QUICK = [
-  ['精簡摘要', '每一節只留結論和數字，刪掉重複的說明'],
-  ['完整詳盡', '照逐字稿補回討論過程、每個人的說法和理由'],
-  ['正式嚴謹', '改成正式的書面語氣，口語說法全部換掉'],
-  ['視覺呈現', '能做成表格的內容改成表格，時程照時間先後排'],
-  ['對外版本', '刪掉只適合內部看的討論，人名改成單位'],
-];
-const FORMATS = [['gdoc', 'Google 文件連結'], ['word', 'Word 檔'], ['pdf', 'PDF 檔']];
+const STATUS = { working: 'st_working', ready: 'st_ready', sent: 'st_sent', failed: 'st_failed' };
+const statusText = (s) => (STATUS[s] ? t(STATUS[s]) : '');
+// the five quick rewrites: the app gets the id, the button shows t('quick_<id>') and t('quick_<id>_hint')
+const QUICK = ['short', 'detail', 'formal', 'visual', 'external'];
+const FORMATS = ['gdoc', 'word', 'pdf'];          // the label is t('fmt_<key>')
+// the project picker's two choices that are not projects (an invisible word joiner first, so no project's name
+// can be the same); the <option> value carries them, its text says them in the window's language
+const ALL = '\u2060all';
+const LOOSE = '\u2060loose';
+const ARCHIVED = '\u2060archived';           // 已封存: the meetings the list hides everywhere else
+const projName = (p) => (p === ALL ? t('proj_all') : p === LOOSE ? t('proj_loose') : p === ARCHIVED ? t('proj_archived') : p);
 
 // --- state -----------------------------------------------------------------------------------
 
 const S = {
-  jobs: [], sel: null, q: '', proj: '全部',
+  jobs: [], sel: null, q: '', proj: ALL,
+  picking: false, picked: new Set(),   // 選取: the list shows a checkbox on each meeting; picked = the ones checked
+  ctx: null,                 // the right-click menu: {ids, x, y}
+  del: null,                 // the 刪除 sheet: {ids, busy, err}
   d: null,                   // the open meeting, as minutes_app.py open returned it
   loadError: '',
   tab: null, railOpen: true, cfocus: null, resolved: new Set(),
   dirty: false, saving: null, saveTimer: null, saveText: '', saveErr: false,
   shown: '',                 // which preview the editor holds, so a save is compared with what the user saw
   giveUp: null,              // the meeting the user clicked once while this one had unsaved text
-  busy: false, asked: '', said: '', saidErr: false, canUndo: false,
-  busyText: '',              // what the line above the box says while busy ('' = Claude is rewriting)
+  busy: false, asked: '', askedQuick: '', said: '', saidErr: false, canUndo: false,
+  busyText: '',              // the key of what the line above the box says while busy ('' = Claude is rewriting)
   setupSeq: 0,               // goes up with every click in 環境設定自檢: an older answer is not shown
   attach: [],                // files, links and pictures picked for 「八、補充資訊」, sent with the next sentence
   urlOpen: false, menuOpen: false,
@@ -158,7 +175,10 @@ function refreshDoc(id = S.sel, again = false) {
   return p;
 }
 // every 15 seconds while the window is on screen; a minimized window waits
-setInterval(() => { if (docsMode() && !S.busy && !document.hidden) refreshDoc(); }, 15000);
+setInterval(() => {
+  const deleting = S.del && S.del.busy && S.del.ids.includes(S.sel);
+  if (docsMode() && !S.busy && !document.hidden && !deleting) refreshDoc();
+}, 15000);
 
 // a 待補充 or 待確認 item: the Doc moves to where it is and selects it (the keyboard stays here, so nothing typed
 // next lands on the selected words)
@@ -182,17 +202,20 @@ function blinkBlanks() {
 // --- the list --------------------------------------------------------------------------------
 
 function projects() {
-  const names = [...new Set(S.jobs.map((j) => j.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-  const loose = S.jobs.some((j) => !j.project && (j.status === 'ready' || j.status === 'sent'));
-  return ['全部', ...names, ...(loose ? ['未分類'] : [])];
+  const live = S.jobs.filter((j) => !j.archived);
+  const names = [...new Set(live.map((j) => j.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const loose = live.some((j) => !j.project && (j.status === 'ready' || j.status === 'sent'));
+  const archived = S.jobs.some((j) => j.archived);
+  return [ALL, ...names, ...(loose ? [LOOSE] : []), ...(archived ? [ARCHIVED] : [])];
 }
 
 function shownJobs() {
   const q = S.q.trim();
   const digits = (t) => t.replace(/[^0-9]/g, '');
   return S.jobs.filter((j) => {
-    if (S.proj === '未分類' && j.project) return false;
-    if (S.proj !== '全部' && S.proj !== '未分類' && j.project !== S.proj) return false;
+    if ((S.proj === ARCHIVED) !== !!j.archived) return false;
+    if (S.proj === LOOSE && j.project) return false;
+    if (S.proj !== ALL && S.proj !== LOOSE && S.proj !== ARCHIVED && j.project !== S.proj) return false;
     if (!q) return true;
     const text = `${j.title} ${j.project} ${j.day} ${j.date} ${j.time}`;
     return text.includes(q) || (digits(q) !== '' && (digits(j.day + j.time).includes(digits(q))
@@ -201,16 +224,22 @@ function shownJobs() {
 }
 
 function titleOf(j) {
-  if (j.status === 'working') return '整理中';
-  if (j.status === 'failed') return '沒有整理完成';
-  return j.title || '會議紀錄';
+  if (j.status === 'working') return t('st_working');
+  if (j.status === 'failed') return t('st_failed');
+  return j.title || t('untitled');
 }
+
+// a meeting still being written up can't be archived or deleted yet: no checkbox, no right-click menu
+const pickable = (j) => j.status !== 'working';
 
 function renderSide() {
   const side = $('#side');
-  const list = shownJobs();
   const opts = projects();
-  if (!opts.includes(S.proj)) S.proj = '全部';
+  if (!opts.includes(S.proj)) S.proj = ALL;
+  const list = shownJobs();
+  const choosable = list.filter(pickable);
+  S.picked = new Set(choosable.filter((j) => S.picked.has(j.id)).map((j) => j.id));   // only what is on screen
+  const allPicked = choosable.length > 0 && S.picked.size === choosable.length;
   const groups = [];
   for (const j of list) {
     let g = groups.find((x) => x.date === j.date);
@@ -220,30 +249,53 @@ function renderSide() {
   const keepFocus = document.activeElement && document.activeElement.id === 'q';
   const scrolled = side.querySelector('.sidelist') ? side.querySelector('.sidelist').scrollTop : 0;
   side.innerHTML = `<div class="sidelist">
-    <h1>所有會議記錄</h1>
-    <div class="search">${ICON.search}<input id="q" aria-label="搜尋會議記錄" placeholder="日期或關鍵字" value="${esc(S.q)}"></div>
-    <div class="proj"><label for="proj">專案</label><select id="proj">${opts.map((p) => `<option${p === S.proj ? ' selected' : ''}>${esc(p)}</option>`).join('')}</select></div>
-    <div class="count">${list.length} 筆</div>
+    <div class="sidehead"><h1>${esc(t('list_title'))}</h1>
+      <button class="pickbtn" id="pickBtn" aria-pressed="${S.picking}">${esc(t(S.picking ? 'pick_done' : 'pick'))}</button></div>
+    <div class="search">${ICON.search}<input id="q" aria-label="${esc(t('search_aria'))}" placeholder="${esc(t('search_ph'))}" value="${esc(S.q)}"></div>
+    <div class="proj"><label for="proj">${esc(t('project'))}</label><select id="proj">${opts.map((p) => `<option value="${esc(p)}"${p === S.proj ? ' selected' : ''}>${esc(projName(p))}</option>`).join('')}</select></div>
+    ${S.picking ? `<button class="pickall" id="pickAll" aria-pressed="${allPicked}"><span class="cbox${allPicked ? ' on' : ''}">${ICON.tick}</span>${esc(t('pick_all', choosable.length))}</button>`
+      : `<div class="count">${esc(t('count', list.length))}</div>`}
     ${groups.map((g) => `
       <div class="day"><span>${esc(g.day)}</span><i></i></div>
       ${g.items.map((j) => `
-        <div class="item${j.id === S.sel ? ' on' : ''}${playingRow(j.id) ? ' playing' : ''}" role="button" tabindex="0" data-id="${esc(j.id)}">
-          <span class="ico">${ICON[j.status] || ICON.ready}</span>
+        <div class="item${S.picking ? ' picking' : j.id === S.sel ? ' on' : ''}${S.picked.has(j.id) ? ' picked' : ''}${playingRow(j.id) ? ' playing' : ''}" role="button" tabindex="0" data-id="${esc(j.id)}"${S.picking && pickable(j) ? ` aria-pressed="${S.picked.has(j.id)}"` : ''}>
+          <span class="ico">${S.picking && pickable(j) ? `<span class="cbox${S.picked.has(j.id) ? ' on' : ''}">${ICON.tick}</span>` : ICON[j.status] || ICON.ready}</span>
           <span class="txt"><span class="t">${esc(titleOf(j))}</span>
-            <span class="s">${esc(j.time)}　${esc(STATUS[j.status] || '')}${S.proj === '全部' && j.project ? '　·　' + esc(j.project) : ''}</span></span>
-          <span class="tools">${j.has_transcript ? `<button class="tb" data-act="read" title="看逐字稿" aria-label="看逐字稿">${ICON.lines}</button>` : ''}${j.has_audio ? playButton(playingRow(j.id)) : ''}</span>
+            <span class="s">${esc(j.time)}　${esc(statusText(j.status))}${S.proj === ALL && j.project ? '　·　' + esc(j.project) : ''}</span></span>
+          <span class="tools">${j.has_transcript ? `<button class="tb" data-act="read" title="${esc(t('read_transcript'))}" aria-label="${esc(t('read_transcript'))}">${ICON.lines}</button>` : ''}${j.has_audio ? playButton(playingRow(j.id)) : ''}</span>
         </div>`).join('')}`).join('')}
-    ${list.length ? '' : '<div class="empty">找不到符合的會議</div>'}</div>
-    <div class="ver" id="ver"></div>`;
+    ${list.length ? '' : `<div class="empty">${esc(t('no_match'))}</div>`}</div>
+    ${S.picking ? `<div class="pickbar"><span>${esc(t('picked', S.picked.size))}</span>
+      <button class="btn ghost" id="pickArchive"${S.picked.size ? '' : ' disabled'}>${esc(t(S.proj === ARCHIVED ? 'unarchive' : 'archive'))}</button>
+      <button class="btn ghost danger" id="pickDelete"${S.picked.size ? '' : ' disabled'}>${esc(t('delete'))}</button></div>`
+      : '<div class="ver" id="ver"></div>'}`;
   side.querySelector('.sidelist').scrollTop = scrolled;
   renderVersion();
+  $('#pickBtn').addEventListener('click', () => { S.picking = !S.picking; S.picked = new Set(); renderSide(); });
+  if (S.picking) {
+    $('#pickAll').addEventListener('click', () => {
+      S.picked = allPicked ? new Set() : new Set(choosable.map((j) => j.id));
+      renderSide();
+    });
+    $('#pickArchive').addEventListener('click', () => { if (S.picked.size) archive([...S.picked], S.proj !== ARCHIVED, true); });
+    $('#pickDelete').addEventListener('click', () => { if (S.picked.size) openDelete([...S.picked], true); });
+  }
   const q = $('#q');
   q.addEventListener('input', () => { S.q = q.value; renderSide(); });
   if (keepFocus) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
   $('#proj').addEventListener('change', (e) => { S.proj = e.target.value; renderSide(); });
   // the meeting already open stays as it is: opening it again would drop what Claude is about to answer
   side.querySelectorAll('.item').forEach((b) => {
-    const go = () => { if (b.dataset.id !== S.sel || !S.d) select(b.dataset.id); };
+    const go = () => {
+      const id = b.dataset.id;
+      if (S.picking) {                           // a click checks or unchecks the meeting instead of opening it
+        const j = S.jobs.find((x) => x.id === id);
+        if (!j || !pickable(j)) return;
+        if (S.picked.has(id)) S.picked.delete(id); else S.picked.add(id);
+        return renderSide();
+      }
+      if (id !== S.sel || !S.d) select(id);
+    };
     b.addEventListener('click', (e) => { if (!e.target.closest('.tb')) go(); });
     b.addEventListener('keydown', (e) => { if (e.target === b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); go(); } });
   });
@@ -254,8 +306,132 @@ $('#side').addEventListener('click', (e) => {
   if (t) rowAction(t.closest('.item').dataset.id, t.dataset.act);
 });
 
+// --- 封存 and 刪除 ------------------------------------------------------------------------------
+// right-click on a meeting: 封存 (取消封存 under 已封存) and 刪除, for that meeting, or for every checked one
+// when it is one of them
+
+$('#side').addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.item');
+  if (!row) return;
+  e.preventDefault();
+  const j = S.jobs.find((x) => x.id === row.dataset.id);
+  if (!j || !pickable(j)) return closeCtx();
+  const onPicked = S.picking && S.picked.has(j.id);
+  S.ctx = { ids: onPicked ? [...S.picked] : [j.id], onPicked, x: e.clientX, y: e.clientY, back: !!j.archived };
+  renderCtx();
+});
+
+function renderCtx() {
+  let el = $('#ctx');
+  if (!S.ctx) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'ctx'; el.className = 'ctxmenu'; el.setAttribute('role', 'menu'); document.body.appendChild(el); }
+  el.innerHTML = `<button role="menuitem" id="ctxArchive">${esc(t(S.ctx.back ? 'unarchive' : 'archive'))}</button>
+    <button role="menuitem" class="danger" id="ctxDelete">${esc(t('delete'))}</button>`;
+  // kept over the list: the Google Doc beside it is drawn by the app on top of the page
+  const side = $('#side').getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = `${Math.max(4, Math.min(S.ctx.x, side.right - w - 6))}px`;
+  el.style.top = `${Math.max(4, Math.min(S.ctx.y, window.innerHeight - h - 6))}px`;
+  const { ids, back, onPicked } = S.ctx;
+  $('#ctxArchive').addEventListener('click', () => archive(ids, !back, onPicked));
+  $('#ctxDelete').addEventListener('click', () => openDelete(ids, onPicked));
+  $('#ctxArchive').focus();
+}
+
+function closeCtx() { if (S.ctx) { S.ctx = null; renderCtx(); } }
+document.addEventListener('mousedown', (e) => { if (S.ctx && !e.target.closest('#ctx')) closeCtx(); }, true);
+window.addEventListener('blur', closeCtx);
+$('#side').addEventListener('scroll', closeCtx, true);
+
+function endPicking() { S.picking = false; S.picked = new Set(); }
+// done with the checked meetings: 選取 ends; done with one meeting right-clicked: the others stay checked
+function afterPicked(onPicked, gone) {
+  if (onPicked) endPicking(); else gone.forEach((id) => S.picked.delete(id));
+}
+
+// after 封存 or 刪除: the list again; the open meeting, if it left the list, gives way to the first one shown
+async function afterListChange(ids) {
+  await loadList();
+  if (!S.sel || !ids.includes(S.sel) || shownJobs().some((j) => j.id === S.sel)) return;
+  const next = shownJobs()[0];
+  if (next) return select(next.id);              // select() first saves what was typed in the one leaving
+  if (S.d) await leave();
+  S.sel = null; S.d = null;
+  renderSide(); renderMain();
+}
+
+async function archive(ids, on, onPicked = false) {
+  closeCtx();
+  let done = [], message = '';
+  try {
+    const r = await call(on ? 'archive' : 'unarchive', { ids });
+    done = r.done || []; message = r.message || '';
+  } catch (e) { message = e.message; }
+  afterPicked(onPicked && !message, done);
+  await afterListChange(done);
+  if (message) showAlert(message);
+}
+
+function openDelete(ids, onPicked = false) {
+  closeCtx();
+  const jobs = ids.map((id) => S.jobs.find((j) => j.id === id)).filter((j) => j && pickable(j));
+  if (!jobs.length) return;
+  S.del = { ids: jobs.map((j) => j.id), busy: false, err: '', onPicked };
+  S.sheet = 'delete';
+  placeDoc();
+  renderDelete();
+}
+
+const monthDay = (j) => `${j.date.slice(5, 7)}/${j.date.slice(8, 10)} ${j.time}`;
+
+function renderDelete() {
+  const m = S.del;
+  const jobs = m.ids.map((id) => S.jobs.find((j) => j.id === id)).filter(Boolean);
+  const shared = jobs.some((j) => j.status === 'sent');
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm" role="alertdialog" aria-label="${esc(t('del_title', jobs.length))}">
+    <h3>${esc(t('del_title', jobs.length))}</h3>
+    <div class="dlist">${jobs.map((j) => `<div class="drow"><span class="dname">${esc(monthDay(j))}　${esc(titleOf(j))}</span>
+      <span class="${j.status === 'sent' ? 'dsent' : 'dst'}">${esc(j.status === 'sent' && j.sent_count ? t('sent_to', j.sent_count) : statusText(j.status))}</span></div>`).join('')}</div>
+    <p class="dnote">${esc(t('del_body'))}</p>
+    ${shared ? `<p class="dwarn">${esc(t('del_warn'))}</p>` : ''}
+    ${m.err ? `<p class="dnote err">${esc(m.err)}</p>` : ''}
+    <div class="dfoot"><button class="btn ghost" id="delCancel"${m.busy ? ' disabled' : ''}>${esc(t('cancel'))}</button>
+      <button class="btn danger-fill" id="delGo"${m.busy ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('del_go', jobs.length))}</button></div>
+  </div></div>`;
+  $('#delCancel').addEventListener('click', closeSheet);
+  $('#delGo').addEventListener('click', doDelete);
+  if (!m.busy) $('#delCancel').focus();
+}
+
+async function doDelete() {
+  const m = S.del;
+  if (!m || m.busy) return;
+  m.busy = true; m.err = '';
+  renderDelete();
+  const open = m.ids.includes(S.sel) ? S.sel : null;
+  if (open) {                                       // the open meeting: what was typed is saved, its recording stops
+    await flush();
+    if (S.player.open) audio('stop');
+  }
+  let gone = [], note = '';
+  try {
+    const r = await call('delete', { ids: m.ids });
+    gone = r.done || []; note = r.message || '';
+  } catch (e) { note = e.message; }
+  m.busy = false;
+  m.ids = m.ids.filter((id) => !gone.includes(id));
+  const stuck = m.ids.length > 0;                   // these stay in the list: the dialog says why, to try again
+  if (stuck) { m.err = note || t('err_retry'); if (S.picking && m.onPicked) S.picked = new Set(m.ids); }
+  else { closeSheet(); afterPicked(m.onPicked, gone); }
+  if (open && gone.includes(open)) { clearTimeout(S.saveTimer); S.dirty = false; S.sel = null; S.d = null; }
+  await loadList();
+  if (stuck) { if (S.sheet === 'delete') renderDelete(); if (!S.sel) renderMain(); return; }
+  if (!S.sel) { const next = shownJobs()[0]; if (next) await select(next.id); else renderMain(); }
+  if (note) showAlert(note);                        // every meeting went, but a file beside one stayed
+}
+
 const playingRow = (id) => id === S.sel && S.player.playing;
-const playButton = (on) => `<button class="tb${on ? ' on' : ''}" data-act="play" title="${on ? '暫停播放' : '聽錄音檔'}" aria-label="${on ? '暫停播放' : '聽錄音檔'}">${on ? ICON.pause : ICON.headset}</button>`;
+const playButton = (on) => { const tip = esc(t(on ? 'pause_play' : 'play_rec')); return `<button class="tb${on ? ' on' : ''}" data-act="play" title="${tip}" aria-label="${tip}">${on ? ICON.pause : ICON.headset}</button>`; };
 
 // the two buttons on a meeting in the list: its transcript, its recording; another meeting opens first
 async function rowAction(id, act) {
@@ -266,7 +442,7 @@ async function rowAction(id, act) {
   }
   if (act === 'read') {
     if ((S.d.transcript || []).length) openTranscript();
-    else showAlert('這場會議還沒有逐字稿。');
+    else showAlert(t('no_transcript'));
   } else if (S.d.audio) {
     audio('play', { at: S.player.open ? S.player.pos : 0 });
   }
@@ -289,8 +465,8 @@ function renderVersion() {
   if (!el) return;
   const v = S.version;
   if (!v || !v.version) { el.innerHTML = ''; return; }
-  const tip = S.recording ? '錄音結束後才能更新' : `更新到 ${v.newest}`;
-  el.innerHTML = `<span>版本 ${esc(v.version)}</span>${v.update ? `<button class="upd${S.updating || S.recording ? ' off' : ''}" id="updBtn" title="${esc(tip)}" aria-disabled="${S.updating || S.recording}">${S.updating ? '更新中⋯' : '版本更新'}</button>` : ''}`;
+  const tip = S.recording ? t('upd_wait') : t('upd_to', v.newest);
+  el.innerHTML = `<span>${esc(t('version', v.version))}</span>${v.update ? `<button class="upd${S.updating || S.recording ? ' off' : ''}" id="updBtn" title="${esc(tip)}" aria-disabled="${S.updating || S.recording}">${esc(t(S.updating ? 'updating' : 'update'))}</button>` : ''}`;
   const b = $('#updBtn');
   if (b) b.addEventListener('click', updateApp);
 }
@@ -336,7 +512,7 @@ async function select(id) {
     await flush();
     if (S.dirty && S.giveUp !== id) {          // a second click on the same meeting leaves the unsaved text behind
       S.giveUp = id;
-      showAlert('這一場改過的內容還沒存好。要放棄這些修改直接換過去，再點一次那場會議。');
+      showAlert(t('unsaved_switch'));
       return;
     }
     S.giveUp = null;
@@ -345,7 +521,7 @@ async function select(id) {
   }
   S.sel = id;
   S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null;
-  S.busy = false; S.asked = ''; S.said = ''; S.canUndo = false; S.learned = []; S.alert = null;
+  S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.alert = null;
   S.attach = []; S.urlOpen = false; S.menuOpen = false;
   S.dirty = false; S.saveText = ''; S.saveErr = false;
   S.docFailed = false; S.docWarning = ''; S.reloadDoc = false;
@@ -361,14 +537,10 @@ async function select(id) {
     S.shown = d.shown || '';
     S.canUndo = !!d.can_undo;
     S.learned = d.learned || [];
-    S.saveText = d.doc_url && !d.offline ? `已同步 Google 文件 ${hhmm()}` : '';
+    S.saveText = d.doc_url && !d.offline ? ['synced', hhmm()] : '';
     const n = d.news || {};
     if ((n.edits || 0) + (n.new_comments || 0) > 0 && !docsMode()) {    // beside the Doc, 操作紀錄 has them
-      const names = (n.editors || []).join('、') || '有人';
-      const parts = [];
-      if (n.edits) parts.push(`${names} 改了 ${n.edits} 處（綠色底線）`);
-      if (n.new_comments) parts.push(`有 ${n.new_comments} 則新留言（黃色標示）`);
-      S.banner = '已載入 Google 文件的最新版本：' + parts.join('，');
+      S.banner = n;                                   // the words are made when it is drawn (newsText)
       S.bannerTimer = setTimeout(() => { S.banner = null; renderBanners(); }, 5000);
     }
     const job = S.jobs.find((j) => j.id === id);
@@ -415,15 +587,15 @@ function renderMain() {
 function drawMain() {
   const main = $('#main');
   const job = S.jobs.find((j) => j.id === S.sel);
-  if (!S.sel) { main.innerHTML = '<div class="state"><div class="sub">還沒有錄音。</div></div>'; return; }
+  if (!S.sel) { main.innerHTML = `<div class="state"><div class="sub">${esc(t('no_recording'))}</div></div>`; return; }
   if (S.loadError) {
     main.innerHTML = `<div class="state"><h2>${esc(job ? titleOf(job) : '')}</h2><div class="banner err"><span>${esc(S.loadError)}</span></div>
-      <div><button class="btn ghost" id="again">再試一次</button></div></div>`;
+      <div><button class="btn ghost" id="again">${esc(t('try_again'))}</button></div></div>`;
     $('#again').addEventListener('click', () => select(S.sel));
     return;
   }
   if (!S.d) {
-    main.innerHTML = `<div class="state"><div class="busy">${ICON.spin}<span>正在讀取 Google 文件的最新版本⋯</span></div></div>`;
+    main.innerHTML = `<div class="state"><div class="busy">${ICON.spin}<span>${esc(t('loading_doc'))}</span></div></div>`;
     return;
   }
   const d = S.d;
@@ -434,8 +606,8 @@ function drawMain() {
       <div class="head" id="head"></div>
       <div class="body">
         <div class="paper docs"><div id="banners"></div>
-          <div id="gdoc" class="gdoc"><div class="busy">${ICON.spin}<span>正在打開 Google 文件⋯</span></div></div></div>
-        <aside class="rail" id="rail" aria-label="待補充、待確認與操作紀錄"></aside>
+          <div id="gdoc" class="gdoc"><div class="busy">${ICON.spin}<span>${esc(t('opening_doc'))}</span></div></div></div>
+        <aside class="rail" id="rail" aria-label="${esc(t('rail_docs_aria'))}"></aside>
       </div>
       <div class="ask" id="ask"></div>
       <div class="foot" id="foot"></div>`;
@@ -446,12 +618,12 @@ function drawMain() {
     <div class="head" id="head"></div>
     <div class="body">
       <div class="paper"><div id="banners"></div><div id="doc" contenteditable="true" spellcheck="false"></div></div>
-      <aside class="rail" id="rail" aria-label="留言與操作紀錄"></aside>
+      <aside class="rail" id="rail" aria-label="${esc(t('rail_aria'))}"></aside>
     </div>
     <div class="ask" id="ask"></div>
     <div class="foot" id="foot"></div>`;
   setDoc(d.html);
-  if (d.readonly) docEl().contentEditable = 'false';
+  if (d.readonly || S.busy) docEl().contentEditable = 'false';
   wireDoc();
   renderHead(); renderBanners(); renderRail(); renderAsk(); renderFoot();
 }
@@ -464,18 +636,18 @@ function renderWorking(main, d) {
     if (n === order) return ['now', ICON.spin];
     return ['later', ICON.dot];
   };
-  const names = ['轉成逐字稿', '整理成會議紀錄', '發成 Google 文件'];
-  main.innerHTML = `<div class="state"><h2>整理中</h2>
-    <div class="sub">錄音 ${esc(d.day)} ${esc(d.time)}${d.ended_time ? '–' + esc(d.ended_time) : ''}</div>
-    <div class="steps">${names.map((n, i) => { const [c, ic] = st(i); return `<div class="${c}">${ic}<span>${n}</span></div>`; }).join('')}</div>
+  const names = [t('step_transcribe'), t('step_write'), t('step_publish')];
+  main.innerHTML = `<div class="state"><h2>${esc(t('st_working'))}</h2>
+    <div class="sub">${t('recorded', esc(d.day), esc(d.time), d.ended_time ? esc(d.ended_time) : '')}</div>
+    <div class="steps">${names.map((n, i) => { const [c, ic] = st(i); return `<div class="${c}">${ic}<span>${esc(n)}</span></div>`; }).join('')}</div>
     ${d.message ? `<div class="sub">${esc(d.message)}</div>` : ''}</div>`;
 }
 
 function renderFailed(main, d) {
-  main.innerHTML = `<div class="state"><h2>沒有整理完成</h2>
-    <div class="sub">錄音 ${esc(d.day)} ${esc(d.time)}</div>
-    <div class="banner err"><span>${esc(d.message || '整理中斷了。')}</span></div>
-    <div class="buttons"><button class="btn primary" id="retry">重新整理</button><button class="btn ghost" id="folder">打開錄音資料夾</button></div></div>`;
+  main.innerHTML = `<div class="state"><h2>${esc(t('st_failed'))}</h2>
+    <div class="sub">${t('recorded', esc(d.day), esc(d.time), '')}</div>
+    <div class="banner err"><span>${esc(d.message || t('stopped'))}</span></div>
+    <div class="buttons"><button class="btn primary" id="retry">${esc(t('retry'))}</button><button class="btn ghost" id="folder">${esc(t('open_folder'))}</button></div></div>`;
   $('#retry').addEventListener('click', async () => {
     try { await call('retry', { id: S.sel }); } catch (e) { /* the list shows what happens */ }
     await loadList();
@@ -488,38 +660,39 @@ function renderHead() {
   const d = S.d;
   const el = $('#head');
   if (!el) return;
-  const planned = d.planned ? `下次會議排在 ${d.planned}，還沒開會` : '之後沒有同名會議';
+  const planned = d.planned ? t('planned', d.planned) : t('no_next');
   el.innerHTML = `
-    <nav class="crumbs" aria-label="目前位置">
-      <button class="crumb" id="toProj">${esc(d.project || '未分類')}</button>${ICON.chevR}
+    <nav class="crumbs" aria-label="${esc(t('crumbs_aria'))}">
+      <button class="crumb" id="toProj">${esc(d.project || t('proj_loose'))}</button>${ICON.chevR}
       <button class="crumb" id="toDate">${esc(shortDay(d))}</button>
-      <b>（${esc(d.title || '會議紀錄')}）</b>
+      <b>${t('crumb_title', esc(d.title || t('untitled')))}</b>
     </nav>
-    <button class="sib${d.prev ? '' : ' off'}" id="prev" title="${esc(d.prev ? d.prev_title : '之前沒有同名會議')}">${ICON.chevL}<span>上次會議</span></button>
-    <button class="sib${d.next ? '' : ' off'}" id="next" title="${esc(d.next ? d.next_title : planned)}"><span>下次會議</span>${ICON.chevR}</button>
-    ${docsMode() ? '' : `<span class="savetext${S.saveErr ? ' err' : ''}" id="savetext">${esc(S.saveText)}</span>`}
-    ${d.doc_url ? `<span class="iconlink" id="openDoc" title="在瀏覽器打開 Google 文件">${ICON.open}</span>` : ''}`;
-  $('#toProj').addEventListener('click', () => { S.proj = d.project || '未分類'; S.q = ''; renderSide(); });
-  $('#toDate').addEventListener('click', () => { S.q = shortDay(d); S.proj = '全部'; renderSide(); });
+    <button class="sib${d.prev ? '' : ' off'}" id="prev" title="${esc(d.prev ? d.prev_title : t('no_prev'))}">${ICON.chevL}<span>${esc(t('prev_meeting'))}</span></button>
+    <button class="sib${d.next ? '' : ' off'}" id="next" title="${esc(d.next ? d.next_title : planned)}"><span>${esc(t('next_meeting'))}</span>${ICON.chevR}</button>
+    ${docsMode() ? '' : `<span class="savetext${S.saveErr ? ' err' : ''}" id="savetext">${esc(say(S.saveText))}</span>`}
+    ${d.doc_url ? `<span class="iconlink" id="openDoc" title="${esc(t('open_doc_tip'))}">${ICON.open}</span>` : ''}`;
+  $('#toProj').addEventListener('click', () => { S.proj = d.project || LOOSE; S.q = ''; renderSide(); });
+  $('#toDate').addEventListener('click', () => { S.q = shortDay(d); S.proj = ALL; renderSide(); });
   $('#prev').addEventListener('click', () => d.prev && select(d.prev));
   $('#next').addEventListener('click', () => d.next && select(d.next));
   if (d.doc_url) $('#openDoc').addEventListener('click', () => call('link', { url: d.doc_url }).catch(() => {}));
 }
 
+// text: words, or [key, ...args] so the line follows a language switch
 function setSave(text, err = false) {
   S.saveText = text; S.saveErr = err;
   const el = $('#savetext');
-  if (el) { el.textContent = text; el.className = 'savetext' + (err ? ' err' : ''); }
+  if (el) { el.textContent = say(text); el.className = 'savetext' + (err ? ' err' : ''); }
 }
 
 function renderBanners() {
   const el = $('#banners');
   if (!el) return;
   const rows = [];
-  if (S.banner) rows.push(`<div class="banner news">${ICON.sync}<span>${esc(S.banner)}</span><button id="seen">知道了</button></div>`);
+  if (S.banner) rows.push(`<div class="banner news">${ICON.sync}<span>${esc(newsText(S.banner))}</span><button id="seen">${esc(t('got_it'))}</button></div>`);
   if (S.d.warning) rows.push(`<div class="banner warn"><span>${esc(S.d.warning)}</span></div>`);
   if (S.docWarning && S.docWarning !== S.d.warning) rows.push(`<div class="banner warn"><span>${esc(S.docWarning)}</span></div>`);
-  if (S.alert) rows.push(`<div class="banner err"><span>${esc(S.alert)}</span><button id="alertOk">知道了</button></div>`);
+  if (S.alert) rows.push(`<div class="banner err"><span>${esc(S.alert)}</span><button id="alertOk">${esc(t('got_it'))}</button></div>`);
   el.innerHTML = rows.join('');
   const seen = $('#seen');
   if (seen) seen.addEventListener('click', () => { clearTimeout(S.bannerTimer); S.banner = null; renderBanners(); });
@@ -529,6 +702,15 @@ function renderBanners() {
 
 function showAlert(text) { S.alert = text; renderBanners(); }
 
+// what a colleague changed in the Google Doc since this meeting was last open (d.news)
+function newsText(n) {
+  const names = (n.editors || []).join(t('list_sep')) || t('someone');
+  const parts = [];
+  if (n.edits) parts.push(t('news_edits', names, n.edits));
+  if (n.new_comments) parts.push(t('news_comments', n.new_comments));
+  return t('news', parts);
+}
+
 // --- the editable minutes --------------------------------------------------------------------
 
 function docEl() { return $('#doc'); }
@@ -536,7 +718,7 @@ function editable() { return S.d && S.d.readonly ? 'false' : 'true'; }
 
 // 10/14 for this year, 2025/10/14 for another
 function shortDay(d) {
-  if (!d.date) return d.day.split('（')[0];
+  if (!d.date) return String(d.day || '').split('（')[0];   // an English day ("Wed, Oct 15") has no （ and stays whole
   const [y, m, day] = d.date.split('-');
   const md = `${m}/${day}`;
   return y === String(new Date().getFullYear()) ? md : `${y}/${md}`;
@@ -560,7 +742,7 @@ function wireDoc() {
     el.querySelectorAll('font').forEach((f) => f.replaceWith(...f.childNodes));
     el.querySelectorAll('[style]').forEach((x) => x.removeAttribute('style'));
     S.dirty = true;
-    setSave('未儲存');
+    setSave(['unsaved']);
     clearTimeout(S.saveTimer);
     S.saveTimer = setTimeout(save, 2500);
   });
@@ -587,14 +769,14 @@ function save() {
   const id = S.sel;
   const html = docEl().innerHTML;
   S.dirty = false;
-  setSave('儲存中⋯');
+  setSave(['saving']);
   S.saving = call('save', { id, html, shown: S.shown }).then((r) => {
     if (S.sel !== id || !S.d) return;
     afterEdit(r);
   }).catch((e) => {
     if (S.sel !== id) return;
     S.dirty = true;
-    setSave(e.message || '沒有存到 Google 文件', true);
+    setSave(e.message || ['save_failed'], true);
   }).finally(() => { S.saving = null; });
   return S.saving;
 }
@@ -607,8 +789,8 @@ async function flush() {
 // every edit answers the same way: saved where, what a colleague changed meanwhile, what did not fit
 function afterEdit(r) {
   if (!S.d) return;                                 // the meeting is loading again: what it loads already has this
-  if (r.unsaved) setSave('這次的修改沒有存', true);
-  else setSave(r.held ? `先存在這台電腦 ${r.saved_at || hhmm()}` : `已存回 Google 文件 ${r.saved_at || hhmm()}`);
+  if (r.unsaved) setSave(['not_saved_edit'], true);
+  else setSave([r.held ? 'held' : 'saved', r.saved_at || hhmm()]);
   if (r.todo) { S.d.todo = r.todo; renderFoot(); renderRail(); }
   if ('can_undo' in r) S.canUndo = !!r.can_undo;
   if (r.reload_doc) placeDoc(true);                 // the whole Doc was uploaded again: the one shown loads again
@@ -616,13 +798,13 @@ function afterEdit(r) {
   const notes = [];
   if (r.held) notes.push(r.held);
   if (r.conflicts && r.conflicts.length) {
-    notes.push(`有人同時在 Google 文件改了同一段，這幾段保留對方的版本：${r.conflicts.map((c) => '「' + c.slice(0, 20) + '」').join('、')}`);
+    notes.push(t('conflicts', quoteList(r.conflicts)));
   }
   if (r.skipped && r.skipped.length) {
-    notes.push(`有幾段改過的內容對不到原本的段落，沒有存：${r.skipped.map((c) => '「' + c.slice(0, 20) + '」').join('、')}`);
+    notes.push(t('skipped', quoteList(r.skipped)));
   }
   if (r.kept && r.kept.length) {
-    notes.push(`有幾段在 ${aiName()} 改完之後又被改過，這幾段沒有復原：${r.kept.map((c) => '「' + c.slice(0, 20) + '」').join('、')}`);
+    notes.push(t('kept', aiName(), quoteList(r.kept)));
   }
   if (r.warning) notes.push(r.warning);
   if (notes.length) showAlert(notes.join(' '));
@@ -630,10 +812,13 @@ function afterEdit(r) {
   else if (r.typed) S.shown = r.typed;              // the page as it was saved: later typing is compared with it
 }
 
+// the first 20 characters of each paragraph, quoted, in one line
+const quoteList = (list) => list.map((c) => t('quote', c.slice(0, 20))).join(t('list_sep'));
+
 // a change that needs the latest text (Claude, undo, a mail) waits for typing to be saved first
 async function savedFirst() {
   await flush();
-  if (S.dirty) { showAlert('改過的內容還沒存好，存好之後再試一次。'); return false; }
+  if (S.dirty) { showAlert(t('save_first')); return false; }
   return true;
 }
 
@@ -644,7 +829,7 @@ function jumpTo(item) {
            || blocks.find((b) => b.textContent.includes(item.anchor));
   const target = hit ? (hit.querySelector('.blank') || hit) : el.querySelector('.blank');
   const prompt = $('#promptInput');
-  if (prompt) prompt.value = `${item.label}是`;
+  if (prompt) prompt.value = t('fill_prefix', item.label);
   if (!target) return;
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   el.focus({ preventScroll: true });
@@ -679,9 +864,9 @@ function renderRail() {
   if (!S.railOpen) {
     el.className = 'rail closed';
     el.innerHTML = `
-      <button class="iconbtn" id="expand" title="展開" aria-label="展開">${ICON.expand}</button>
-      <button class="iconbtn" id="railC" title="留言" aria-label="留言">${ICON.bubble}${open ? `<span class="badge">${open}</span>` : ''}</button>
-      <button class="iconbtn" id="railL" title="操作紀錄" aria-label="操作紀錄">${ICON.clock}</button>`;
+      <button class="iconbtn" id="expand" title="${esc(t('expand'))}" aria-label="${esc(t('expand'))}">${ICON.expand}</button>
+      <button class="iconbtn" id="railC" title="${esc(t('comments'))}" aria-label="${esc(t('comments'))}">${ICON.bubble}${open ? `<span class="badge">${open}</span>` : ''}</button>
+      <button class="iconbtn" id="railL" title="${esc(t('activity'))}" aria-label="${esc(t('activity'))}">${ICON.clock}</button>`;
     $('#expand').addEventListener('click', () => { S.railOpen = true; renderRail(); });
     $('#railC').addEventListener('click', () => { S.railOpen = true; S.tab = 'comments'; renderRail(); });
     $('#railL').addEventListener('click', () => { S.railOpen = true; S.tab = 'log'; renderRail(); });
@@ -692,11 +877,11 @@ function renderRail() {
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
-        <button class="tab${tab === 'comments' ? ' on' : ''}" role="tab" id="tabC">留言${open ? ' ' + open : ''}</button>
-        <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">操作紀錄</button>
+        <button class="tab${tab === 'comments' ? ' on' : ''}" role="tab" id="tabC">${esc(t('comments'))}${open ? ' ' + open : ''}</button>
+        <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>
-      <button class="iconbtn" id="collapse" title="收合" aria-label="收合">${ICON.collapse}</button>
+      <button class="iconbtn" id="collapse" title="${esc(t('collapse'))}" aria-label="${esc(t('collapse'))}">${ICON.collapse}</button>
     </div>
     <div class="railbody" id="railbody">${tab === 'comments' ? commentsHTML(comments) : logHTML(d.log || [])}</div>`;
   $('#tabC').addEventListener('click', () => { S.tab = 'comments'; renderRail(); });
@@ -716,10 +901,10 @@ function renderDocsRail(el) {
   if (!S.railOpen) {
     el.className = 'rail closed';
     el.innerHTML = `
-      <button class="iconbtn" id="expand" title="展開" aria-label="展開">${ICON.expand}</button>
-      <button class="iconbtn" id="railF" title="待補充" aria-label="待補充">${ICON.lines}${todo.length ? `<span class="badge red">${todo.length}</span>` : ''}</button>
-      <button class="iconbtn" id="railK" title="待確認" aria-label="待確認">${ICON.check}${check.length ? `<span class="badge">${check.length}</span>` : ''}</button>
-      <button class="iconbtn" id="railL" title="操作紀錄" aria-label="操作紀錄">${ICON.clock}</button>`;
+      <button class="iconbtn" id="expand" title="${esc(t('expand'))}" aria-label="${esc(t('expand'))}">${ICON.expand}</button>
+      <button class="iconbtn" id="railF" title="${esc(t('to_fill'))}" aria-label="${esc(t('to_fill'))}">${ICON.lines}${todo.length ? `<span class="badge red">${todo.length}</span>` : ''}</button>
+      <button class="iconbtn" id="railK" title="${esc(t('to_confirm'))}" aria-label="${esc(t('to_confirm'))}">${ICON.check}${check.length ? `<span class="badge">${check.length}</span>` : ''}</button>
+      <button class="iconbtn" id="railL" title="${esc(t('activity'))}" aria-label="${esc(t('activity'))}">${ICON.clock}</button>`;
     $('#expand').addEventListener('click', () => { S.railOpen = true; renderRail(); });
     $('#railF').addEventListener('click', pick('fill'));
     $('#railK').addEventListener('click', pick('check'));
@@ -729,21 +914,21 @@ function renderDocsRail(el) {
   el.className = 'rail';
   const body = tab === 'fill'
     ? (todo.length ? todo.map((t, i) => `<button class="todo" data-t="${i}"><b>${esc(t.label)}</b>${t.anchor && t.anchor !== t.label ? `<span>${esc(t.anchor)}</span>` : ''}</button>`).join('')
-                   : '<div class="empty">都補完了</div>')
+                   : `<div class="empty">${esc(t('all_filled'))}</div>`)
     : tab === 'check'
       ? (check.length ? check.map((c, i) => `<div class="card guess"><div class="text">${esc(c.label)}</div>
-          <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>確認無誤</span></button></div>`).join('')
-                      : '<div class="empty">都確認了</div>')
+          <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`).join('')
+                      : `<div class="empty">${esc(t('all_confirmed'))}</div>`)
       : logHTML(d.log || []);
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
-        <button class="tab${tab === 'fill' ? ' on' : ''}" role="tab" id="tabF">待補充${todo.length ? ` <b class="n red">${todo.length}</b>` : ''}</button>
-        <button class="tab${tab === 'check' ? ' on' : ''}" role="tab" id="tabK">待確認${check.length ? ` <b class="n yellow">${check.length}</b>` : ''}</button>
-        <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">操作紀錄</button>
+        <button class="tab${tab === 'fill' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_fill'))}${todo.length ? ` <b class="n red">${todo.length}</b>` : ''}</button>
+        <button class="tab${tab === 'check' ? ' on' : ''}" role="tab" id="tabK">${esc(t('to_confirm'))}${check.length ? ` <b class="n yellow">${check.length}</b>` : ''}</button>
+        <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>
-      <button class="iconbtn" id="collapse" title="收合" aria-label="收合">${ICON.collapse}</button>
+      <button class="iconbtn" id="collapse" title="${esc(t('collapse'))}" aria-label="${esc(t('collapse'))}">${ICON.collapse}</button>
     </div>
     <div class="railbody" id="railbody">${body}</div>`;
   $('#tabF').addEventListener('click', pick('fill'));
@@ -763,24 +948,24 @@ function renderDocsRail(el) {
 function askAbout(item) {
   const input = $('#promptInput');
   if (!input || S.busy) return;
-  input.value = `${item.label}是`;
+  input.value = t('fill_prefix', item.label);
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
 }
 
 function commentsHTML(list) {
-  if (!list.length) return '<div class="empty">沒有留言</div>';
+  if (!list.length) return `<div class="empty">${esc(t('no_comments'))}</div>`;
   return list.map((c) => {
     const done = S.resolved.has(c.n);
     return `<div class="card${S.cfocus === c.n ? ' focus' : ''}${done ? ' done' : ''}" data-n="${c.n}" data-id="${esc(c.id)}">
       <div class="top"><span class="num">${c.n}</span><span class="who">${esc(c.who)}</span><span class="at">${esc(c.at)}</span>
         <span style="flex:1"></span>
-        ${done ? '<span style="font-size:11px;color:var(--green)">已解決</span>'
-               : `<button class="okc" title="標記為已解決" aria-label="標記為已解決">${ICON.check}</button>`}</div>
+        ${done ? `<span style="font-size:11px;color:var(--green)">${esc(t('resolved'))}</span>`
+               : `<button class="okc" title="${esc(t('mark_resolved'))}" aria-label="${esc(t('mark_resolved'))}">${ICON.check}</button>`}</div>
       ${c.quote ? `<div class="quote">${esc(c.quote)}</div>` : ''}
       <div class="text">${esc(c.text)}</div>
       ${(c.replies || []).map((r) => `<div class="rep"><b>${esc(r.who)}</b>　${esc(r.text)}</div>`).join('')}
-      ${done ? '' : '<input aria-label="回覆這則留言" placeholder="回覆">'}
+      ${done ? '' : `<input aria-label="${esc(t('reply_aria'))}" placeholder="${esc(t('reply'))}">`}
     </div>`;
   }).join('');
 }
@@ -832,7 +1017,7 @@ function focusComment(n) {
 }
 
 function logHTML(list) {
-  if (!list.length) return '<div class="empty">還沒有紀錄</div>';
+  if (!list.length) return `<div class="empty">${esc(t('no_log'))}</div>`;
   return list.map((g) => `<div class="logrow ${esc(g.kind || '')}"><span class="when">${esc(clock(g.at))}</span>
     <span class="what"><b>${esc(g.who)}</b>　${esc(g.text)}</span></div>`).join('');
 }
@@ -858,18 +1043,18 @@ function renderAsk() {
     // files, links and pictures need the Google Doc: they go to Drive and into its 「八、補充資訊」
     const canAttach = !!(S.d && S.d.doc_url && !S.d.readonly);
     el.innerHTML = `<div id="askTop"></div>
-      <div class="quick">${QUICK.map(([k, hint]) => `<button class="qk" title="${esc(hint)}" data-k="${esc(k)}">${esc(k)}</button>`).join('')}</div>
+      <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>
       <div id="attachBox"></div>
       <div class="prompt with-tools">
-        <div class="mwrap"><button class="model" id="aiPick" title="換一個 AI 整理會議記錄" aria-label="換一個 AI 整理會議記錄"
+        <div class="mwrap"><button class="model" id="aiPick" title="${esc(t('ai_pick'))}" aria-label="${esc(t('ai_pick'))}"
             aria-haspopup="menu"></button><div class="mmenu" id="aiMenu" role="menu" hidden></div></div><span class="sep"></span>${canAttach ? `
-        <div class="awrap"><button class="ib" id="attachPlus" title="加上附件或超連結" aria-label="加上附件或超連結" aria-haspopup="menu">${ICON.plus}</button>
+        <div class="awrap"><button class="ib" id="attachPlus" title="${esc(t('attach_plus'))}" aria-label="${esc(t('attach_plus'))}" aria-haspopup="menu">${ICON.plus}</button>
           <div class="amenu" id="attachMenu" role="menu" hidden>
-            <button role="menuitem" data-a="file">${ICON.clip}<span>上傳檔案</span></button>
-            <button role="menuitem" data-a="link">${ICON.link}<span>貼上超連結</span></button></div></div>
-        <button class="ib" id="attachImage" title="插入圖片" aria-label="插入圖片">${ICON.image}</button>` : ''}
-        <input id="promptInput" aria-label="跟 ${aiName()} 說要改什麼" placeholder="跟 ${aiName()} 說要改什麼，例如：主持人是王小明">
-        <button class="send" id="askGo" aria-label="送出">${ICON.up}</button></div>`;
+            <button role="menuitem" data-a="file">${ICON.clip}<span>${esc(t('upload_file'))}</span></button>
+            <button role="menuitem" data-a="link">${ICON.link}<span>${esc(t('paste_link'))}</span></button></div></div>
+        <button class="ib" id="attachImage" title="${esc(t('insert_image'))}" aria-label="${esc(t('insert_image'))}">${ICON.image}</button>` : ''}
+        <input id="promptInput" aria-label="${esc(t('ask_aria', aiName()))}" placeholder="${esc(t('ask_ph', aiName()))}">
+        <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>`;
     const input = $('#promptInput');
     const go = () => (S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
@@ -922,17 +1107,17 @@ function renderAiMenu() {
   btn.classList.toggle('on', !!S.aiOpen);
   menu.hidden = !S.aiOpen;
   placeDoc();
-  menu.innerHTML = '<div class="mhead">AI模型</div>' + AIS.map(([k]) => {
+  menu.innerHTML = `<div class="mhead">${esc(t('ai_menu_head'))}</div>` + AIS.map(([k]) => {
     const why = !have.includes(k) || states[k] === 'install' ? 'install' : states[k] === 'login' ? 'login' : '';
     const off = why && k !== key;
     return `<button class="mi${off ? ' off' : ''}" role="menuitemradio" aria-checked="${k === key}" data-ai="${k}"${off ? ' disabled' : ''}>
       <i class="dot ${k}"></i><span class="mn">${AI_SHORT[k]}</span>${k === key ? `<span class="ck">${ICON.check}</span>` : ''}
-      ${why ? `<span class="ms">${why === 'install' ? '這台電腦還沒安裝' : '還沒登入'}</span>` : ''}</button>`;
+      ${why ? `<span class="ms">${esc(t(why === 'install' ? 'not_installed' : 'not_signed_in'))}</span>` : ''}</button>`;
   }).join('');
   const input = $('#promptInput');
   if (input && !S.attach.length) {
-    input.placeholder = `跟 ${aiName()} 說要改什麼，例如：主持人是王小明`;
-    input.setAttribute('aria-label', `跟 ${aiName()} 說要改什麼`);
+    input.placeholder = t('ask_ph', aiName());
+    input.setAttribute('aria-label', t('ask_aria', aiName()));
   }
 }
 
@@ -963,7 +1148,7 @@ async function switchAi(key) {
     if (r.ai && r.ai.state === 'login') {
       await call('setupAI', { ai: was }).catch(() => {});
       showAi(was);
-      showAlert(`${AI_SHORT[key]} 在這台電腦還沒登入，所以會議記錄還是用 ${AI_SHORT[was]} 修改。到「環境設定自檢」第 5 項登入 ${AI_SHORT[key]} 以後，就能換成它。`);
+      showAlert(t('ai_not_signed', AI_SHORT[key], AI_SHORT[was]));
     } else if (S.setup) S.setup.ai = r.ai;
   } catch (e) {
     showAi(was);
@@ -995,9 +1180,9 @@ function renderAttach() {
   const icon = { image: ICON.image, link: ICON.link, file: ICON.clip };
   box.innerHTML = `${items.length ? `<div class="achips">${items.map((it, i) => `<span class="achip" title="${esc(it.name)}">
       ${icon[it.kind]}<span class="an">${esc(it.name)}</span>
-      ${S.busy ? '' : `<button class="ax" data-i="${i}" aria-label="移除">✕</button>`}</span>`).join('')}</div>` : ''}
-    ${S.urlOpen ? `<div class="aurl"><input id="attachUrl" aria-label="網址" placeholder="貼上網址">
-      <button class="btn" id="attachUrlAdd">加入</button></div>` : ''}`.trim();
+      ${S.busy ? '' : `<button class="ax" data-i="${i}" aria-label="${esc(t('remove'))}">✕</button>`}</span>`).join('')}</div>` : ''}
+    ${S.urlOpen ? `<div class="aurl"><input id="attachUrl" aria-label="${esc(t('url_aria'))}" placeholder="${esc(t('url_ph'))}">
+      <button class="btn" id="attachUrlAdd">${esc(t('add'))}</button></div>` : ''}`.trim();
   box.querySelectorAll('.ax').forEach((b) => b.addEventListener('click', () => {
     S.attach.splice(Number(b.dataset.i), 1);
     renderAttach();
@@ -1006,7 +1191,7 @@ function renderAttach() {
   if (url) {
     const add = () => {
       const u = url.value.trim();
-      if (!/^https?:\/\/\S+$/.test(u)) { showAlert('網址要用 http:// 或 https:// 開頭。'); return; }
+      if (!/^https?:\/\/\S+$/.test(u)) { showAlert(t('url_bad')); return; }
       S.attach.push({ kind: 'link', url: u, name: u });
       S.urlOpen = false;
       renderAttach();
@@ -1021,8 +1206,7 @@ function renderAttach() {
   }
   const input = $('#promptInput');
   if (input) {
-    input.placeholder = items.length ? '寫一句這是什麼、誰提供的，例如：Amy 提供的 9 月流量報表'
-                                     : `跟 ${aiName()} 說要改什麼，例如：主持人是王小明`;
+    input.placeholder = items.length ? t('attach_ph') : t('ask_ph', aiName());
   }
 }
 
@@ -1046,8 +1230,8 @@ async function sendAttach(text) {
   const id = S.sel;
   if (!(await savedFirst())) return;
   const items = S.attach.map(({ kind, path, url }) => ({ kind, path, url }));
-  S.busy = true; S.busyText = '正在把檔案存進雲端硬碟，再寫進第八章⋯';
-  S.asked = text || S.attach.map((a) => a.name).join('、'); S.said = ''; S.saidErr = false; S.editSeq++;
+  S.busy = true; S.busyText = 'attaching';
+  S.asked = text || S.attach.map((a) => a.name).join(t('list_sep')); S.askedQuick = ''; S.said = ''; S.saidErr = false; S.editSeq++;
   const box = $('#promptInput');
   if (box) box.value = '';
   renderAsk(); renderAttach();
@@ -1074,17 +1258,17 @@ function renderLearned() {
   if (!top) return;
   const learned = S.learned;
   top.innerHTML = `
-    ${S.busy ? `<div class="busy">${ICON.spin}<span>${esc(S.busyText || `${aiName()} 正在修改⋯`)}</span></div>` : ''}
+    ${S.busy ? `<div class="busy">${ICON.spin}<span>${esc(S.busyText ? t(S.busyText) : t('ai_working', aiName()))}</span></div>` : ''}
     ${!S.busy && S.said ? `<div class="replyline${S.saidErr ? ' err' : ''}">${S.saidErr ? '' : ICON.done}
-        <span class="asked">「${esc(S.asked)}」</span><span class="said">${esc(S.said)}</span>
-        ${S.canUndo && !S.saidErr ? '<button class="btn ghost" id="undo" style="height:24px;padding:0 10px;font-size:12px">復原</button>' : ''}</div>` : ''}
-    ${learned.length ? `<div class="learn"><div class="lh">${ICON.book}<span>${aiName()} 看過你的修改</span></div>
+        <span class="asked">${esc(t('quote', S.askedQuick ? t(`quick_${S.askedQuick}`) : S.asked))}</span><span class="said">${esc(S.said)}</span>
+        ${S.canUndo && !S.saidErr ? `<button class="btn ghost" id="undo" style="height:24px;padding:0 10px;font-size:12px">${esc(t('undo'))}</button>` : ''}</div>` : ''}
+    ${learned.length ? `<div class="learn"><div class="lh">${ICON.book}<span>${esc(t('learned_head', aiName()))}</span></div>
         ${learned.map((l, i) => {
           const keep = l.kind !== 'once';
-          const where = keep && l.off ? '不記' : { term: '寫進詞彙表', pref: '寫進個人偏好', style: '寫進個人偏好', once: '只改這份' }[l.kind];
+          const where = t(keep && l.off ? 'learn_off' : { term: 'learn_term', pref: 'learn_pref', style: 'learn_pref', once: 'learn_once' }[l.kind]);
           return `<div class="lr${keep && l.off ? ' off' : ''}"><span class="lt">${esc(l.text)}</span>
             <span class="tag${keep && !l.off ? '' : ' gray'}">${where}</span><span style="flex:1"></span>
-            ${keep ? `<button class="btn ghost" data-i="${i}" style="height:22px;padding:0 8px;font-size:11px">${l.off ? '要記' : '不要記'}</button>` : ''}</div>`;
+            ${keep ? `<button class="btn ghost" data-i="${i}" style="height:22px;padding:0 8px;font-size:11px">${esc(t(l.off ? 'learn_on_btn' : 'learn_off_btn'))}</button>` : ''}</div>`;
         }).join('')}</div>` : ''}`.trim();
   const undo = $('#undo');
   if (undo) undo.addEventListener('click', undoLast);
@@ -1095,7 +1279,7 @@ async function ask(text, quick) {
   if (S.busy || (!text && !quick)) return;
   const id = S.sel;
   if (!(await savedFirst())) return;
-  S.busy = true; S.asked = quick || text; S.said = ''; S.saidErr = false; S.editSeq++;
+  S.busy = true; S.asked = text; S.askedQuick = quick || ''; S.said = ''; S.saidErr = false; S.editSeq++;
   if (docEl()) docEl().contentEditable = 'false';
   const box = $('#promptInput');
   if (box) box.value = '';
@@ -1153,23 +1337,23 @@ function renderFoot() {
   const p = S.player;
   const docs = docsMode();
   el.innerHTML = `
-    ${todo.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--red)">待補充 ${todo.length}</span>
+    ${todo.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--red)">${esc(t('to_fill'))} ${todo.length}</span>
       <div class="chips">${todo.map((t, i) => `<button class="chip red" data-t="${i}">${esc(t.label)}</button>`).join('')}</div></div>` : ''}
-    ${check.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--yellow-label)">待確認 ${check.length}</span>
+    ${check.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--yellow-label)">${esc(t('to_confirm'))} ${check.length}</span>
       <div class="chips">${check.map((c, i) => `<span class="chip yellow"><span>${esc(c.label)}</span>
-        <button class="okbtn" data-c="${i}" title="確認無誤" aria-label="確認無誤">${ICON.checkSmall}</button></span>`).join('')}</div></div>` : ''}
+        <button class="okbtn" data-c="${i}" title="${esc(t('looks_right'))}" aria-label="${esc(t('looks_right'))}">${ICON.checkSmall}</button></span>`).join('')}</div></div>` : ''}
     ${p.open ? `<div class="player">
-        <button class="play" id="pp" aria-label="${p.playing ? '暫停' : '播放'}">${p.playing ? ICON.pause : ICON.play}</button>
+        <button class="play" id="pp" aria-label="${esc(t(p.playing ? 'pause' : 'play'))}">${p.playing ? ICON.pause : ICON.play}</button>
         <span class="tm" id="ptime">${mmss(p.pos)}</span>
         <div class="bar" id="pbar"><i id="pfill" style="width:${p.dur ? (p.pos / p.dur * 100).toFixed(2) : 0}%"></i></div>
         <span class="dur">${mmss(p.dur)}</span>
-        <button class="speed" id="pspeed" aria-label="播放速度">${p.speed}x</button>
-        <button class="iconbtn" id="pclose" aria-label="關閉錄音">${ICON.x}</button></div>` : ''}
+        <button class="speed" id="pspeed" aria-label="${esc(t('speed_aria'))}">${p.speed}x</button>
+        <button class="iconbtn" id="pclose" aria-label="${esc(t('close_rec'))}">${ICON.x}</button></div>` : ''}
     <div class="buttons">
-      ${d.sent ? `<div class="sentline">${ICON.done}<span>已寄出　${esc(d.sent.at)}　${d.sent.count} 人　${esc(d.sent.format)}</span></div>` : ''}
+      ${d.sent ? `<div class="sentline">${ICON.done}<span>${t('sent_line', esc(d.sent.at), d.sent.count, esc(d.sent.format))}</span></div>` : ''}
       <span style="flex:1"></span>
-      ${d.doc_url && !docs ? `<button class="btn ghost" id="openGdoc">${ICON.open}<span>在 Google 文件打開</span></button>` : ''}
-      ${d.mail && !d.sent ? `<button class="btn primary" id="mailBtn">${ICON.mail}<span>發送信件</span></button>` : ''}
+      ${d.doc_url && !docs ? `<button class="btn ghost" id="openGdoc">${ICON.open}<span>${esc(t('open_in_docs'))}</span></button>` : ''}
+      ${d.mail && !d.sent ? `<button class="btn primary" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}
     </div>`;
   el.querySelectorAll('.chip.red').forEach((b) => b.addEventListener('click', () => jumpTo(todo[Number(b.dataset.t)])));
   el.querySelectorAll('.okbtn').forEach((b) => b.addEventListener('click', () => confirmCheck(check[Number(b.dataset.c)])));
@@ -1216,6 +1400,7 @@ window.onEvent = (name, data) => {
   if (name === 'select' && (data.id !== S.sel || !S.d)) select(data.id);
   if (name === 'docfail' && docsMode()) { S.docFailed = true; renderMain(); }
   if (name === 'setup') openSetup();
+  if (name === 'language' && data) setLang(data.lang);
   if (name === 'player') {
     const p = S.player;
     const wasPlaying = p.playing;
@@ -1225,6 +1410,49 @@ window.onEvent = (name, data) => {
     else { renderFoot(); markPlaying(); }
   }
 };
+
+// --- switching language ----------------------------------------------------------------------
+
+// the words outside what app.js draws: the page's language and the list's name for screen readers
+function applyLang() {
+  document.documentElement.lang = LANG === 'zh-TW' ? 'zh-Hant' : 'en';
+  $('#side').setAttribute('aria-label', t('side_aria'));
+}
+
+// everything on screen is drawn again in the new language; what is being typed (the minutes in the preview, the
+// box under them, a name in the transcript) stays as it is
+function setLang(lang) {
+  lang = lang === 'zh-TW' ? 'zh-TW' : 'en';
+  if (lang === LANG) return;
+  LANG = lang;
+  applyLang();
+  renderSide();
+  if (S.sel) {
+    const input = $('#promptInput');
+    const typed = input ? { value: input.value, focus: document.activeElement === input,
+                            start: input.selectionStart, end: input.selectionEnd } : null;
+    const doc = docEl();
+    const docHtml = doc && S.d && !docsMode() ? doc.innerHTML : null;
+    const paper = $('#main .paper');
+    const scrolled = paper ? paper.scrollTop : 0;
+    renderMain();
+    if (docHtml !== null && docEl()) docEl().innerHTML = docHtml;
+    const paperNow = $('#main .paper');
+    if (paperNow) paperNow.scrollTop = scrolled;
+    const inputNow = $('#promptInput');
+    if (typed && inputNow) {
+      inputNow.value = typed.value;
+      if (typed.focus) { inputNow.focus(); inputNow.setSelectionRange(typed.start, typed.end); }
+    }
+  } else renderMain();
+  if (S.sheet === 'setup') renderSetup();
+  else if (S.sheet === 'mail') renderMail();
+  else if (S.sheet === 'delete') renderDelete();
+  else if (S.sheet === 'transcript') {
+    const v = $('#vinput');
+    openTranscript({ ask: S.tAsk, typed: v ? v.value : '' });
+  }
+}
 
 // --- sheets ----------------------------------------------------------------------------------
 
@@ -1240,28 +1468,32 @@ function voiceStyle(group, named) {
   return named ? `background:${bg};color:${fg}` : `background:transparent;color:${fg};border:1px dashed ${fg}`;
 }
 
+// a voice nobody has named yet comes from the transcript as 講者 A (Chinese minutes) or Speaker A (English ones)
+const UNNAMED = /^(講者|Speaker) /;
+
 function openTranscript(keep = {}) {
   const d = S.d;
   const voices = d.voices || [];
   const before = $('#sheet .lines');
   const scrolled = before ? before.scrollTop : 0;
   S.sheet = 'transcript';
+  S.tAsk = keep.ask || null;                     // a language switch draws the sheet again with the same question
   placeDoc();
   const ask = keep.ask;
   const askVoice = ask ? voices.find((v) => v.group === ask.group) : null;
   const askLabel = ask && ask.line != null ? (d.transcript[ask.line].who || (askVoice && askVoice.label)) : askVoice && askVoice.label;
   const names = [...new Set([...(d.voice_names || []), ...voices.filter((v) => v.name).map((v) => v.name)])];
-  $('#sheet').innerHTML = `<div class="veil"><div class="sheet" role="dialog" aria-label="逐字稿">
-    <div style="display:flex;align-items:baseline;gap:10px"><h3>逐字稿</h3><span style="font-size:12px;color:var(--muted)">${esc(d.title)}　${esc(shortDay(d))}</span></div>
-    ${voices.length ? `<div class="vchips">${voices.map((v) => `<button class="vchip" data-g="${esc(v.group)}" style="${voiceStyle(v.group, v.name)}">${esc(v.label)}<span>${v.minutes} 分鐘</span></button>`).join('')}</div>` : ''}
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet" role="dialog" aria-label="${esc(t('transcript'))}">
+    <div style="display:flex;align-items:baseline;gap:10px"><h3>${esc(t('transcript'))}</h3><span style="font-size:12px;color:var(--muted)">${esc(d.title)}　${esc(shortDay(d))}</span></div>
+    ${voices.length ? `<div class="vchips">${voices.map((v) => `<button class="vchip" data-g="${esc(v.group)}" style="${voiceStyle(v.group, v.name)}">${esc(v.label)}<span>${esc(t('minutes', v.minutes))}</span></button>`).join('')}</div>` : ''}
     ${ask ? `<div class="vname">
-      <div class="vrow"><b>${esc(askLabel)} 是誰？</b><span style="flex:1"></span><button class="btn ghost" id="vplay">${S.player.playing ? '■ 停止播放' : '▶ 聽一段聲音'}</button></div>
-      <div class="vrow">${names.map((n) => `<button class="vsug" data-n="${esc(n)}">${esc(n)}</button>`).join('')}<input id="vinput" maxlength="30" placeholder="輸入名字" aria-label="輸入名字"></div>
-      <div class="vrow"><button class="btn primary" id="vall">套用到這位的每一句</button>${ask.line != null ? '<button class="btn ghost" id="vone">只改這一句</button>' : ''}<button class="btn ghost" id="vcancel">取消</button></div>
+      <div class="vrow"><b>${t('who_is', esc(askLabel))}</b><span style="flex:1"></span><button class="btn ghost" id="vplay">${esc(t(S.player.playing ? 'stop_play' : 'hear'))}</button></div>
+      <div class="vrow">${names.map((n) => `<button class="vsug" data-n="${esc(n)}">${esc(n)}</button>`).join('')}<input id="vinput" maxlength="30" placeholder="${esc(t('name_ph'))}" aria-label="${esc(t('name_ph'))}" value="${esc(keep.typed || '')}"></div>
+      <div class="vrow"><button class="btn primary" id="vall">${esc(t('apply_all'))}</button>${ask.line != null ? `<button class="btn ghost" id="vone">${esc(t('only_line'))}</button>` : ''}<button class="btn ghost" id="vcancel">${esc(t('cancel'))}</button></div>
     </div>` : ''}
     ${keep.toast ? `<div class="vtoast">${esc(keep.toast)}</div>` : ''}
-    <div class="lines">${(d.transcript || []).map((t, i) => `<div><button class="tm" data-i="${i}" title="從這裡開始聽">${esc(t.at)}</button>${t.who ? `<button class="who" data-g="${esc(t.group || '')}" data-line="${i}" style="${voiceStyle(t.group, !t.who.startsWith('講者 '))}">${esc(t.who)}</button>` : ''}<span>${esc(t.text)}</span></div>`).join('')}</div>
-    <div style="display:flex;justify-content:flex-end"><button class="btn ghost" id="closeT">關閉</button></div></div></div>`;
+    <div class="lines">${(d.transcript || []).map((line, i) => `<div><button class="tm" data-i="${i}" title="${esc(t('listen_here'))}">${esc(line.at)}</button>${line.who ? `<button class="who" data-g="${esc(line.group || '')}" data-line="${i}" style="${voiceStyle(line.group, !UNNAMED.test(line.who))}">${esc(line.who)}</button>` : ''}<span>${esc(line.text)}</span></div>`).join('')}</div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn ghost" id="closeT">${esc(t('close'))}</button></div></div></div>`;
   $('#sheet .lines').scrollTop = scrolled;
   $('#closeT').addEventListener('click', closeSheet);
   $('#sheet').querySelectorAll('.lines .tm').forEach((b) => b.addEventListener('click', () => {
@@ -1282,7 +1514,7 @@ function openTranscript(keep = {}) {
   $('#vplay').addEventListener('click', () => {
     if (S.player.playing) audio('pause', { at: S.player.pos });
     else if (askVoice) audio('play', { at: ask.line != null ? d.transcript[ask.line].sec : askVoice.sample[0] });
-    setTimeout(() => { const b = $('#vplay'); if (b) b.textContent = S.player.playing ? '■ 停止播放' : '▶ 聽一段聲音'; }, 600);
+    setTimeout(() => { const b = $('#vplay'); if (b) b.textContent = t(S.player.playing ? 'stop_play' : 'hear'); }, 600);
   });
   const apply = async (oneLine) => {
     const name = (picked || input.value).trim();
@@ -1292,7 +1524,7 @@ function openTranscript(keep = {}) {
       d.transcript = r.transcript || d.transcript;
       d.voices = r.voices || d.voices;
       d.voice_names = r.voice_names || d.voice_names;
-      openTranscript({ toast: oneLine ? '' : `已記住 ${name} 的聲音，下次開會會自動標上名字` });
+      openTranscript({ toast: oneLine ? '' : t('voice_saved', name) });
       refreshLog();
     } catch (e) { showAlert(e.message); }
   };
@@ -1302,15 +1534,19 @@ function openTranscript(keep = {}) {
 }
 
 // a Word or PDF attachment: the mail says 詳細如附件 where the Doc's address was (Vin 2026-10-15), and the
-// address comes back when the Google 文件連結 is picked again
+// address comes back when the Google 文件連結 is picked again. These words go into the mail, so they follow the
+// minutes' language (d.minutes_lang), not the window's: English minutes get "; please see the attached file."
 const DOC_URL = /[:：]?[ \t]*\n?[ \t]*https:\/\/docs\.google\.com\/document\/[^\s]+/;
-const ATTACHED = '，詳細如附件。';
+const mailWords = () => STRINGS[S.d && S.d.minutes_lang === 'en' ? 'en' : 'zh-TW'];
 function withAttachment(body) {
-  return DOC_URL.test(body) ? body.replace(DOC_URL, ATTACHED).replace(/。，詳細如附件。/, ATTACHED) : body;
+  const w = mailWords();
+  const attached = w.mail_attached;
+  return DOC_URL.test(body) ? body.replace(DOC_URL, attached).replace(w.mail_period + attached, attached) : body;
 }
 function withLink(body, url) {
   if (DOC_URL.test(body)) return body;
-  return body.includes(ATTACHED) ? body.replace(ATTACHED, `：\n${url}`) : `${body.trimEnd()}\n\n${url}`;
+  const w = mailWords();
+  return body.includes(w.mail_attached) ? body.replace(w.mail_attached, `${w.mail_link_colon}\n${url}`) : `${body.trimEnd()}\n\n${url}`;
 }
 
 function openMail() {
@@ -1325,26 +1561,26 @@ function openMail() {
 function renderMail() {
   const m = S.mail;
   const d = S.d;
-  $('#sheet').innerHTML = `<div class="veil"><div class="sheet" role="dialog" aria-label="發送信件">
-    <h3>發送信件</h3>
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet" role="dialog" aria-label="${esc(t('send_mail'))}">
+    <h3>${esc(t('send_mail'))}</h3>
     <div class="grid">
-      <span class="k">寄件人</span><span>${esc(d.mail.from)}</span>
-      <span class="k" style="align-self:start;padding-top:6px">收件人</span>
+      <span class="k">${esc(t('mail_from'))}</span><span>${esc(d.mail.from)}</span>
+      <span class="k" style="align-self:start;padding-top:6px">${esc(t('mail_to'))}</span>
       <div class="field tokens" id="tokens">${m.to.map((a, i) => `<span class="token"><span>${esc(a)}</span>
-        <button data-i="${i}" aria-label="移除這位收件人">${ICON.xs}</button></span>`).join('')}
-        <input id="addTo" aria-label="加收件人" placeholder="加收件人"></div>
-      <label class="k" for="subj">主旨</label><input class="field" id="subj" value="${esc(m.subject)}">
-      <span class="k">附件</span>
-      <div style="display:flex;align-items:center;gap:10px"><div class="seg" role="radiogroup" aria-label="附件">
-        ${FORMATS.map(([k, l]) => `<button role="radio" aria-checked="${m.fmt === k}" class="${m.fmt === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}</div>
-        <span style="font-size:12px;color:var(--muted)">${esc(m.info)}</span></div>
+        <button data-i="${i}" aria-label="${esc(t('remove_rcpt'))}">${ICON.xs}</button></span>`).join('')}
+        <input id="addTo" aria-label="${esc(t('add_rcpt'))}" placeholder="${esc(t('add_rcpt'))}"></div>
+      <label class="k" for="subj">${esc(t('mail_subject'))}</label><input class="field" id="subj" value="${esc(m.subject)}">
+      <span class="k">${esc(t('mail_attachment'))}</span>
+      <div style="display:flex;align-items:center;gap:10px"><div class="seg" role="radiogroup" aria-label="${esc(t('mail_attachment'))}">
+        ${FORMATS.map((k) => `<button role="radio" aria-checked="${m.fmt === k}" class="${m.fmt === k ? 'on' : ''}" data-f="${k}">${esc(t(`fmt_${k}`))}</button>`).join('')}</div>
+        <span style="font-size:12px;color:var(--muted)">${esc(say(m.info))}</span></div>
     </div>
-    <textarea id="body" aria-label="信件內容">${esc(m.body)}</textarea>
+    <textarea id="body" aria-label="${esc(t('mail_body'))}">${esc(m.body)}</textarea>
     <div style="display:flex;align-items:center;gap:10px">
-      <span class="note${m.err ? ' err' : ''}">${esc(m.err || ((m.fmt === 'gdoc' ? '收件人可以在 Google 文件上加註' : '收件人會收到附件，不會拿到 Google 文件的連結')
-        + (m.files ? `，也可以打開第八章的 ${m.files} 個檔案` : '')))}</span>
-      <button class="btn ghost" id="mailCancel"${m.sending ? ' disabled' : ''}>取消</button>
-      <button class="btn primary" id="mailSend"${m.sending ? ' disabled' : ''}>${m.sending ? '寄出中⋯' : '寄出'}</button></div>
+      <span class="note${m.err ? ' err' : ''}">${esc(say(m.err) || (t(m.fmt === 'gdoc' ? 'note_gdoc' : 'note_file')
+        + (m.files ? t('note_files', m.files) : '')))}</span>
+      <button class="btn ghost" id="mailCancel"${m.sending ? ' disabled' : ''}>${esc(t('cancel'))}</button>
+      <button class="btn primary" id="mailSend"${m.sending ? ' disabled' : ''}>${esc(t(m.sending ? 'sending' : 'send_mail_btn'))}</button></div>
   </div></div>`;
   const keep = () => { m.subject = $('#subj').value; m.body = $('#body').value; };
   $('#tokens').querySelectorAll('.token button').forEach((b) => b.addEventListener('click', () => { keep(); m.to.splice(Number(b.dataset.i), 1); renderMail(); }));
@@ -1365,7 +1601,7 @@ function renderMail() {
   $('#sheet').querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', async () => {
     keep();
     const before = m.fmt;
-    m.fmt = b.dataset.f; m.info = m.fmt === 'gdoc' ? '' : '準備附件中⋯'; m.err = '';
+    m.fmt = b.dataset.f; m.info = m.fmt === 'gdoc' ? '' : ['preparing']; m.err = '';
     if (before === 'gdoc' && m.fmt !== 'gdoc') { m.linkBody = m.body; m.body = withAttachment(m.body); }
     if (before !== 'gdoc' && m.fmt === 'gdoc') {
       m.body = m.body === withAttachment(m.linkBody) ? m.linkBody : withLink(m.body, S.d.doc_url || '');
@@ -1386,9 +1622,9 @@ async function sendMail() {
   const m = S.mail;
   if (m.sending) return;
   m.subject = $('#subj').value; m.body = $('#body').value;
-  if (!m.to.length) { m.err = '至少要有一位收件人。'; renderMail(); return; }
+  if (!m.to.length) { m.err = ['need_rcpt']; renderMail(); return; }
   await flush();
-  if (S.dirty) { m.err = '紀錄改過的內容還沒存好，存好之後再寄出。'; renderMail(); return; }
+  if (S.dirty) { m.err = ['mail_unsaved']; renderMail(); return; }
   m.sending = true; m.err = '';
   renderMail();
   const id = S.sel;
@@ -1407,36 +1643,37 @@ async function sendMail() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.ctx) { closeCtx(); return; }
   if (e.key === 'Escape' && S.aiOpen) { S.aiOpen = false; renderAiMenu(); return; }
-  if (e.key === 'Escape' && S.sheet && !(S.mail && S.mail.sending)) closeSheet();
+  if (e.key === 'Escape' && S.sheet === 'delete' && S.del && S.del.busy) return;
+  if (e.key === 'Escape' && S.sheet && !(S.mail && S.mail.sending)) { closeSheet(); return; }
+  if (e.key === 'Escape' && S.picking) { endPicking(); renderSide(); }
 });
 
 // --- 環境設定自檢 ------------------------------------------------------------------------------------
 // what this computer still needs: two items macOS answers (microphone, notifications), eight setup_check.py does
 
-// [key, icon, icon colour, name, needed, the one line shown while it is not done yet, button]
+// [key, icon, icon colour, needed]; the name, the one line shown while it is not done yet and the button are
+// t('setup_<key>'), t('setup_<key>_desc') and t('setup_<key>_btn')
 const SETUP = [
-  ['mic', '🎙', '#fde8e7', '麥克風', true, '錄音時要用', '允許'],
-  ['notify', '🔔', '#fdf3d7', '通知', false, '會議記錄整理好時通知你', '允許'],
-  ['speech', '📝', '#e3ecfd', '語音轉文字模型', true, '約 1.6 GB', '下載'],
-  ['voice', '👥', '#ece3fb', '聲紋識別模型', false, '約 28 MB', '下載'],
-  ['ai', '🤖', '#fde8d7', '內容生成模型', true, '選一個 AI，在這台電腦安裝並登入', ''],
-  ['client', '🔑', '#eef0f2', 'Google 連線設定', false, '約 15 分鐘，有步驟帶著做', '開始設定'],
-  ['login', '👤', '#eef0f2', 'Google 帳號登入', false, '用公司的 Google 帳號', '登入'],
-  ['docs', '📄', '#e3ecfd', 'Google 文件與雲端硬碟', false, '', '開啟'],
-  ['gmail', '✉', '#fde8e7', 'Gmail', false, '', '開啟'],
-  ['calendar', '📅', '#dff3e3', 'Google 行事曆', false, '', '開啟'],
+  ['mic', '🎙', '#fde8e7', true],
+  ['notify', '🔔', '#fdf3d7', false],
+  ['speech', '📝', '#e3ecfd', true],
+  ['voice', '👥', '#ece3fb', false],
+  ['ai', '🤖', '#fde8d7', true],
+  ['client', '🔑', '#eef0f2', false],
+  ['login', '👤', '#eef0f2', false],
+  ['docs', '📄', '#e3ecfd', false],
+  ['gmail', '✉', '#fde8e7', false],
+  ['calendar', '📅', '#dff3e3', false],
 ];
 const AIS = [['claude', 'Claude Code'], ['codex', 'Codex'], ['antigravity', 'Antigravity']];
+// the page each step opens; step i's title and description are t('g<i+1>') and t('g<i+1>_desc')
 const GOOGLE_STEPS = [
-  ['建立 Google Cloud 專案', '用公司的 Google 帳號登入，專案名稱可以自己取，例如 meeting-minutes。',
-   'https://console.cloud.google.com/projectcreate'],
-  ['開啟會用到的五個 API', '打開之後確認上方選的是第 1 步的專案，再按「啟用」。',
-   'https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com,docs.googleapis.com,gmail.googleapis.com,calendar-json.googleapis.com,people.googleapis.com'],
-  ['設定 OAuth 同意畫面', '按「開始」，應用程式名稱可以自己取。用公司帳號的話，目標對象選「內部」；用個人 Gmail 的話選「外部」，再把自己的信箱加進測試使用者。',
-   'https://console.cloud.google.com/auth/overview'],
-  ['建立用戶端，下載 JSON 檔', '應用程式類型選「電腦版應用程式」，建立之後按「下載 JSON」。',
-   'https://console.cloud.google.com/auth/clients/create'],
+  'https://console.cloud.google.com/projectcreate',
+  'https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com,docs.googleapis.com,gmail.googleapis.com,calendar-json.googleapis.com,people.googleapis.com',
+  'https://console.cloud.google.com/auth/overview',
+  'https://console.cloud.google.com/auth/clients/create',
 ];
 
 function openSetup() {
@@ -1475,25 +1712,25 @@ async function refreshSetup(progress = false) {
 }
 window.addEventListener('focus', () => { if (S.sheet === 'setup') refreshSetup(); });   // back from the browser
 
-function setupSide(key, it, label) {
+function setupSide(key, label) {
   const st = (S.setup || {})[key] || {};
   const btn = (text, act, extra = '') => `<button class="btn primary sbtn" data-k="${key}" data-act="${act}"${extra}>${esc(text)}</button>`;
   switch (st.state) {
-    case 'done': return '<span class="sok">✓ 已完成</span>';
-    case 'denied': return '<span class="sbad">✕ 未開啟</span><button class="slink" data-k="' + key + '" data-act="settings">打開系統設定</button>';
-    case 'locked': return `<span class="slock">${key === 'login' ? '先完成 Google 連線設定' : '先完成 Google 帳號登入'}</span>`;
+    case 'done': return `<span class="sok">${esc(t('s_done'))}</span>`;
+    case 'denied': return `<span class="sbad">${esc(t('s_denied'))}</span><button class="slink" data-k="${key}" data-act="settings">${esc(t('open_settings'))}</button>`;
+    case 'locked': return `<span class="slock">${esc(t(key === 'login' ? 'lock_client' : 'lock_login'))}</span>`;
     case 'loading':
-      if (key === 'login') return '<span class="swait">請在瀏覽器完成登入⋯</span>';
-      return `<span class="swait">下載中 ${st.pct || 0}%</span><div class="sbar"><i style="width:${st.pct || 0}%"></i></div>`;
-    case 'install': return btn('安裝說明', 'install');
-    case 'login': return btn('登入', 'ailogin');
-    case 'unknown': return btn('重新檢查', 'recheck');
-    case 'off': return btn('開啟', 'open');
-    case 'scope': return btn('重新登入', 'glogin');
-    case 'offline': return '<span class="slock">沒有連上網路</span>';
-    case 'error': return btn('重新檢查', 'recheck');
-    case 'todo': return btn(label, 'do') + (st.failed ? '<span class="slock">上次下載沒有完成</span>' : '');
-    default: return '<span class="slock">檢查中⋯</span>';
+      if (key === 'login') return `<span class="swait">${esc(t('browser_login'))}</span>`;
+      return `<span class="swait">${esc(t('downloading', st.pct || 0))}</span><div class="sbar"><i style="width:${st.pct || 0}%"></i></div>`;
+    case 'install': return btn(t('install_guide'), 'install');
+    case 'login': return btn(t('sign_in'), 'ailogin');
+    case 'unknown': return btn(t('recheck'), 'recheck');
+    case 'off': return btn(t('turn_on'), 'open');
+    case 'scope': return btn(t('sign_in_again'), 'glogin');
+    case 'offline': return `<span class="slock">${esc(t('offline'))}</span>`;
+    case 'error': return btn(t('recheck'), 'recheck');
+    case 'todo': return btn(label, 'do') + (st.failed ? `<span class="slock">${esc(t('dl_failed'))}</span>` : '');
+    default: return `<span class="slock">${esc(t('checking'))}</span>`;
   }
 }
 
@@ -1504,21 +1741,34 @@ function renderSetup() {
   if (S.setupGuide) return renderGoogleGuide(el);
   const done = st ? SETUP.filter(([k]) => (st[k] || {}).state === 'done').length : 0;
   const chosen = st && st.ai ? st.ai.ai : 'claude';
-  el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="環境設定自檢">
-    <div class="shead"><h3>Vinutes 需要的設定</h3></div>
+  const desc = (k) => t(`setup_${k}_desc`);
+  el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="${esc(t('setup_aria'))}">
+    <div class="shead lang"><h3>${esc(t('setup_title'))}</h3>
+      <div class="langseg" role="radiogroup" aria-label="${esc(t('language'))}">${[['en', 'lang_en'], ['zh-TW', 'lang_zh']].map(([l, key]) =>
+        `<button role="radio" aria-checked="${LANG === l}" class="${LANG === l ? 'on' : ''}" data-lang="${l}">${esc(t(key))}</button>`).join('')}</div></div>
     ${S.setupErr ? `<div class="sinfo err">${esc(S.setupErr)}</div>` : ''}
-    <div class="slist">${SETUP.map(([k, icon, bg, title, req, desc, label], i) => `<div class="srow">
+    <div class="slist">${SETUP.map(([k, icon, bg, req], i) => `<div class="srow">
       <div class="sico" style="background:${bg}">${icon}</div>
-      <div class="stxt"><div class="stt">${i + 1}. ${esc(title)}${req ? '<span class="sreq">必要</span>' : ''}</div>
-        ${desc && st && st[k] && st[k].state !== 'done' ? `<div class="sds">${esc(desc)}</div>` : ''}
+      <div class="stxt"><div class="stt">${i + 1}. ${esc(t(`setup_${k}`))}${req ? `<span class="sreq">${esc(t('required'))}</span>` : ''}</div>
+        ${desc(k) && st && st[k] && st[k].state !== 'done' ? `<div class="sds">${esc(desc(k))}</div>` : ''}
         ${k === 'ai' ? `<div class="spills">${AIS.map(([a, n]) => `<button class="spill${a === chosen ? ' on' : ''}" data-ai="${a}">${n}</button>`).join('')}</div>` : ''}
         ${k === 'login' && st && st.login && st.login.email ? `<div class="sds">${esc(st.login.email)}</div>` : ''}</div>
-      <div class="sside">${st ? setupSide(k, null, label) : '<span class="slock">檢查中⋯</span>'}</div></div>`).join('')}</div>
-    <div class="sfoot"><span class="scount">已完成 ${done} / ${SETUP.length}</span><button class="btn ghost" id="closeS">關閉</button></div>
+      <div class="sside">${st ? setupSide(k, t(`setup_${k}_btn`)) : `<span class="slock">${esc(t('checking'))}</span>`}</div></div>`).join('')}</div>
+    <div class="sfoot"><span class="scount">${esc(t('done_count', done, SETUP.length))}</span><button class="btn ghost" id="closeS">${esc(t('close'))}</button></div>
   </div></div>`;
   $('#closeS').addEventListener('click', () => { clearTimeout(S.setupTimer); closeSheet(); });
   el.querySelectorAll('.sbtn, .slink').forEach((b) => b.addEventListener('click', () => setupAct(b.dataset.k, b.dataset.act)));
   el.querySelectorAll('.spill').forEach((b) => b.addEventListener('click', () => chooseAi(b.dataset.ai)));
+  el.querySelectorAll('.langseg button').forEach((b) => b.addEventListener('click', () => pickLang(b.dataset.lang)));
+}
+
+// English or 中文, at the top of the list: the app keeps the choice and then sends 'language' as well
+async function pickLang(lang) {
+  if (lang === LANG) return;
+  try {
+    await call('setLanguage', { lang });
+    setLang(lang);
+  } catch (e) { showAlert(e.message); }
 }
 
 async function setupAct(key, act) {
@@ -1552,19 +1802,19 @@ async function chooseAi(key) {
 
 // item 6, step by step: each step opens its Google Cloud page; the last one takes the downloaded file
 function renderGoogleGuide(el) {
-  el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="Google 連線設定">
-    <div class="shead"><h3>Google 連線設定</h3><div class="ssub">照順序做完四個步驟，最後選擇下載的 JSON 檔。</div></div>
-    <div class="slist">${GOOGLE_STEPS.map(([title, desc], i) => `<div class="srow">
+  el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="${esc(t('setup_client'))}">
+    <div class="shead"><h3>${esc(t('setup_client'))}</h3><div class="ssub">${esc(t('g_sub'))}</div></div>
+    <div class="slist">${GOOGLE_STEPS.map((url, i) => `<div class="srow">
       <div class="sico snum">${i + 1}</div>
-      <div class="stxt"><div class="stt">${esc(title)}</div><div class="sds">${esc(desc)}</div></div>
-      <div class="sside"><button class="btn ghost sopen" data-i="${i}">打開這一頁</button></div></div>`).join('')}
+      <div class="stxt"><div class="stt">${esc(t(`g${i + 1}`))}</div><div class="sds">${esc(t(`g${i + 1}_desc`))}</div></div>
+      <div class="sside"><button class="btn ghost sopen" data-i="${i}">${esc(t('open_page'))}</button></div></div>`).join('')}
       <div class="srow"><div class="sico snum">5</div>
-        <div class="stxt"><div class="stt">選擇下載的檔案</div><div class="sds">這個檔案的檔名通常是 client_secret 開頭，會在「下載項目」資料夾裡。</div></div>
-        <div class="sside"><button class="btn primary" id="pickClient">選擇檔案</button></div></div></div>
-    <div class="sfoot"><span></span><button class="btn ghost" id="backS">回到清單</button></div>
+        <div class="stxt"><div class="stt">${esc(t('g5'))}</div><div class="sds">${esc(t('g5_desc'))}</div></div>
+        <div class="sside"><button class="btn primary" id="pickClient">${esc(t('pick_file'))}</button></div></div></div>
+    <div class="sfoot"><span></span><button class="btn ghost" id="backS">${esc(t('back_list'))}</button></div>
   </div></div>`;
   el.querySelectorAll('.sopen').forEach((b) => b.addEventListener('click', () => {
-    call('setupOpen', { url: GOOGLE_STEPS[Number(b.dataset.i)][2] }).catch((e) => showAlert(e.message));
+    call('setupOpen', { url: GOOGLE_STEPS[Number(b.dataset.i)] }).catch((e) => showAlert(e.message));
   }));
   $('#backS').addEventListener('click', () => { S.setupGuide = false; renderSetup(); });
   $('#pickClient').addEventListener('click', async () => {
@@ -1579,6 +1829,7 @@ function renderGoogleGuide(el) {
 
 // --- start -----------------------------------------------------------------------------------
 
+applyLang();
 (async () => {
   await loadList();
   renderMain();

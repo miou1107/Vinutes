@@ -13,8 +13,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
+# The assertions below check the Chinese wording, which must not change; the English tests at the end set 'en'
+# for themselves. Set before the scripts are imported: their messages are read in the app's language then.
+os.environ['VINUTES_LANG'] = 'zh-TW'
 HOME = tempfile.mkdtemp(prefix='minutes-test-')
 os.environ['MINUTES_HOME'] = HOME                  # nothing here touches the real settings, glossary or notes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
@@ -950,6 +954,32 @@ class DocInWindow(Flows):
         self.assertEqual(self.outs[-1], {'busy': True})
 
 
+
+class TimeZone(unittest.TestCase):
+    """The calendar is read and invitations are made in the Mac's own time zone, not Taiwan's."""
+
+    def setUp(self):
+        import time
+        self.saved = os.environ.get('TZ')
+        os.environ['TZ'] = 'America/New_York'
+        time.tzset()
+
+    def tearDown(self):
+        import time
+        if self.saved is None:
+            os.environ.pop('TZ', None)
+        else:
+            os.environ['TZ'] = self.saved
+        time.tzset()
+
+    def test_a_day_in_new_york_is_asked_for_in_new_york_time_summer_and_winter(self):
+        import workspace
+        from datetime import date
+        self.assertEqual(workspace.zone_name(), 'America/New_York')
+        self.assertIn('timeMin=2026-07-01T00%3A00%3A00-04%3A00', workspace.day_query(date(2026, 7, 1)))
+        self.assertIn('timeMin=2026-12-01T00%3A00%3A00-05%3A00', workspace.day_query(date(2026, 12, 1)))
+
+
 if __name__ == '__main__':
     unittest.main()
 
@@ -1147,7 +1177,7 @@ class Attach(Flows):
         ds.get_doc = ds.get_doc_inline = lambda doc_id: self.google.doc()
         (self.job_dir / '同步.json').write_text(json.dumps({'revision': 'r1'}), encoding='utf-8')
         self.uploaded, self.shown = [], []
-        attachments.folder_for = lambda state, doc_id: state.setdefault('attach_folder', 'F')
+        attachments.folder_for = lambda state, doc_id, lang="zh-TW": state.setdefault('attach_folder', 'F')
         attachments.upload = lambda path, folder, name, mime='': (
             self.uploaded.append((name, folder, mime))
             or {'id': f'id{len(self.uploaded)}', 'link': f'https://drive.google.com/file/d/id{len(self.uploaded)}/view'})
@@ -1613,6 +1643,132 @@ class ListCorner(Flows):
         self.assertEqual(self.outs[-1], {'version': '1.0.0', 'newest': '', 'update': False})
 
 
+class ArchiveDelete(Flows):
+    """封存 hides a meeting from the list and brings it back; 刪除 sends its Doc and Drive folder to Google's trash
+    and names the files beside the minutes for the app to move to the Mac's Trash."""
+
+    def setUp(self):
+        super().setUp()
+        self.saved_call = ds.call
+        self.calls = []
+        ds.call = lambda url, body=None, method=None: self.calls.append((url, body, method)) or {}
+
+    def tearDown(self):
+        ds.call = self.saved_call
+        super().tearDown()
+
+    def test_an_archived_meeting_is_marked_in_the_list_until_it_is_unarchived(self):
+        self.assertFalse(minutes_app.summary(self.job())['archived'])
+        minutes_app.cmd_archive(self.job(), True)
+        self.assertTrue(minutes_app.summary(self.job())['archived'])
+        minutes_app.cmd_archive(self.job(), False)
+        self.assertFalse(minutes_app.summary(self.job())['archived'])
+
+    def test_delete_trashes_the_doc_and_its_drive_folder_and_names_the_files_beside_the_minutes(self):
+        job = self.job()
+        job.state['attach_folder'] = 'F' * 20
+        job.save_state()
+        beside = [self.root / 'minutes.md.gdoc.json', self.root / 'minutes_逐字稿.txt',
+                  self.root / 'minutes_沒存回的修改.md']
+        for path in beside:
+            path.write_text('x', encoding='utf-8')
+        (self.root / 'minutes_附件').mkdir()                 # picture copies for the Word file
+        (self.root / 'other.md').write_text('another meeting', encoding='utf-8')
+        minutes_app.cmd_delete(self.job())
+        trashed = [(url.split('?')[0], body, method) for url, body, method in self.calls]
+        self.assertEqual(trashed, [(ds.DRIVE + 'F' * 20, {'trashed': True}, 'PATCH'),     # the Doc goes last
+                                   (ds.DRIVE + 'D' * 30, {'trashed': True}, 'PATCH')])
+        self.assertEqual(sorted(self.outs[-1]['trash']),
+                         sorted(str(p) for p in [self.md_path, *beside, self.root / 'minutes_附件']))
+        self.assertTrue(self.md_path.exists())           # the app moves them to the Trash, not this script
+
+    def test_a_drive_folder_shared_by_a_series_stays_and_only_this_meetings_uploads_go(self):
+        job = self.job()
+        job.state.update(attach_folder='F' * 20, pictures=[{'id': 'P' * 20, 'name': 'a.png', 'width': 100}])
+        job.save_state()
+        (self.root / 'minutes.md.gdoc.json').write_text(json.dumps({'attach_files': ['A' * 20, 'P' * 20]}))
+        other_dir = self.root / '20261007-103000'
+        other_dir.mkdir()
+        (other_dir / 'job.json').write_text('{}')
+        (other_dir / '同步.json').write_text(json.dumps({'attach_folder': 'F' * 20}))
+        saved = minutes_app.all_jobs
+        minutes_app.all_jobs = lambda: [self.job(), minutes_app.Job(other_dir)]
+        try:
+            minutes_app.cmd_delete(self.job())
+        finally:
+            minutes_app.all_jobs = saved
+        trashed = [url.split('?')[0].removeprefix(ds.DRIVE) for url, body, method in self.calls]
+        self.assertEqual(trashed, ['A' * 20, 'P' * 20, 'D' * 30])
+
+    def test_the_transcript_copy_is_found_beside_minutes_named_as_the_app_names_them(self):
+        md = self.root / '20261014_1030_週會_會議紀錄.md'
+        self.md_path.rename(md)
+        result = json.loads((self.job_dir / 'result.json').read_text())
+        result['minutes_md'] = str(md)
+        (self.job_dir / 'result.json').write_text(json.dumps(result))
+        (self.root / '20261014_1030_週會_逐字稿.txt').write_text('x', encoding='utf-8')
+        (self.root / '20261014_1030_週會_會議紀錄_附件').mkdir()
+        (self.root / '20261021_1030_週會_逐字稿.txt').write_text('next week', encoding='utf-8')
+        minutes_app.cmd_delete(self.job())
+        self.assertEqual(sorted(Path(p).name for p in self.outs[-1]['trash']),
+                         ['20261014_1030_週會_會議紀錄.md', '20261014_1030_週會_會議紀錄_附件', '20261014_1030_週會_逐字稿.txt'])
+
+    def test_a_meeting_still_being_written_up_is_not_archived(self):
+        (self.job_dir / 'status.json').write_text(json.dumps({'step': 'transcribing'}))
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_archive(self.job(), True)
+        self.assertFalse(self.job().archived)
+
+    def test_previous_and_next_skip_archived_meetings(self):
+        def meeting(stamp, archived=False):
+            folder = self.root / stamp
+            folder.mkdir()
+            (folder / 'job.json').write_text(json.dumps({'started': f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T10:30:00+08:00'}))
+            (folder / 'status.json').write_text(json.dumps({'step': 'done'}))
+            (folder / 'result.json').write_text(json.dumps({'title': '週會', 'minutes_md': str(self.md_path)}))
+            if archived:
+                (folder / '封存.json').write_text('{}')
+            return minutes_app.Job(folder)
+        newer, older = meeting('20261021-103000', archived=True), meeting('20261007-103000')
+        saved = minutes_app.all_jobs
+        minutes_app.all_jobs = lambda: [newer, self.job(), older]
+        try:
+            around = minutes_app.neighbours(self.job())
+        finally:
+            minutes_app.all_jobs = saved
+        self.assertEqual((around['prev'], around['next']), ('20261007-103000', ''))
+
+    def test_a_doc_already_gone_from_drive_does_not_stop_the_delete(self):
+        def gone(url, body=None, method=None):
+            raise SystemExit('HTTP 404 from Google: File not found')
+        ds.call = gone
+        minutes_app.cmd_delete(self.job())
+        self.assertIn(str(self.md_path), self.outs[-1]['trash'])
+
+    def test_offline_nothing_is_deleted_and_the_window_says_so(self):
+        def offline(url, body=None, method=None):
+            raise SystemExit('OFFLINE: Google did not answer')
+        ds.call = offline
+        with self.assertRaises(SystemExit) as stop:
+            minutes_app.cmd_delete(self.job())
+        self.assertEqual(str(stop.exception), '沒有連上 Google，這場會議沒有刪除，請再試一次。')
+        self.assertEqual(self.outs, [])
+
+    def test_a_meeting_without_a_doc_asks_nothing_of_google(self):
+        result = json.loads((self.job_dir / 'result.json').read_text())
+        del result['doc_url']
+        (self.job_dir / 'result.json').write_text(json.dumps(result))
+        minutes_app.cmd_delete(self.job())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.outs[-1]['trash'], [str(self.md_path)])
+
+    def test_a_meeting_still_being_written_up_is_not_deleted(self):
+        (self.job_dir / 'status.json').write_text(json.dumps({'step': 'writing'}))
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_delete(self.job())
+        self.assertEqual(self.calls, [])
+
+
 class Voices(unittest.TestCase):
     """Who said each line: grouping alike voices, knowing named people, and naming a voice."""
 
@@ -1749,3 +1905,105 @@ class FinishedMail(unittest.TestCase):
     def test_a_body_without_blanks_stays_as_it_is(self):
         body = '各位好，\n\n紀錄整理好了。\n\nVin'
         self.assertEqual(minutes_app.finished_body(body), body)
+
+
+class Languages(unittest.TestCase):
+    """Vinutes speaks English or Traditional Chinese (i18n.py, strings.py); the minutes follow the meeting."""
+
+    def setUp(self):
+        os.environ['VINUTES_LANG'] = 'en'
+
+    def tearDown(self):
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+
+    def test_both_tables_have_the_same_keys_and_blanks(self):
+        import string
+        import strings
+        self.assertEqual(set(strings.EN), set(strings.ZH))
+        blanks = lambda text: {f for _, f, _, _ in string.Formatter().parse(text) if f is not None}   # noqa: E731
+        for key in strings.EN:
+            self.assertEqual(blanks(strings.EN[key]), blanks(strings.ZH[key]), key)
+
+    def test_dates_lengths_and_formats_in_english(self):
+        when = datetime(2025, 10, 15, 14, 52)
+        self.assertEqual(minutes_app.day_words(when), 'Wed, Oct 15, 2025')
+        this_year = datetime(minutes_app.now().year, 3, 2)
+        day = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')[this_year.weekday()]
+        self.assertEqual(minutes_app.day_words(this_year), f'{day}, Mar 2')
+        self.assertEqual(minutes_app.short_time('2026-10-15T14:52:00+08:00')[:6], 'Oct 15')
+        self.assertEqual(minutes_app.length_words(70), '1 h 10 min')
+        self.assertEqual(minutes_app.length_words(120), '2 h')
+        self.assertEqual(minutes_app.length_words(0), '1 min')
+        self.assertEqual(minutes_app.format_words('word'), 'Word file')
+        self.assertEqual(minutes_app.format_words('pdf'), 'PDF file')
+        self.assertEqual(minutes_app.format_words(None), 'Google Docs link')
+
+    def test_the_same_words_stay_chinese_in_chinese(self):
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+        self.assertEqual(minutes_app.day_words(datetime(2025, 10, 15)), '2025/10/15（三）')
+        self.assertEqual(minutes_app.length_words(70), '1 小時 10 分鐘')
+        self.assertEqual(minutes_app.format_words(None), 'Google 文件連結')
+
+    def test_a_message_the_window_shows_is_in_english(self):
+        with self.assertRaises(SystemExit) as stop:
+            minutes_app.Job(Path(HOME) / 'no-such-recording')
+        self.assertEqual(str(stop.exception), "Can't find this recording.")
+
+    def test_an_unnamed_voice_is_speaker_a(self):
+        job_dir = Path(tempfile.mkdtemp(prefix='voices-'))
+        try:
+            (job_dir / 'job.json').write_text('{}')
+            (job_dir / '講者.json').write_text(json.dumps({
+                'groups': {'A': {'name': '', 'seconds': 120, 'sample': [1, 4]},
+                           'B': {'name': 'Amy', 'seconds': 60, 'sample': [9, 12]}},
+                'lines': ['A', 'B'], 'fixed': {}}), encoding='utf-8')
+            job = minutes_app.Job(job_dir)
+            self.assertEqual([v['label'] for v in minutes_app.voices_view(job)], ['Speaker A', 'Amy'])
+            os.environ['VINUTES_LANG'] = 'zh-TW'
+            self.assertEqual([v['label'] for v in minutes_app.voices_view(job)], ['講者 A', 'Amy'])
+        finally:
+            shutil.rmtree(job_dir, ignore_errors=True)
+
+    def test_minutes_follow_the_meeting_and_other_languages_the_app(self):
+        import i18n
+        self.assertEqual(i18n.norm('zh_Hant_TW'), 'zh-TW')
+        self.assertEqual(i18n.norm('en-US'), 'en')
+        self.assertEqual(i18n.norm('ja'), '')
+        self.assertEqual(i18n.minutes_lang('zh'), 'zh-TW')
+        self.assertEqual(i18n.minutes_lang('yue'), 'zh-TW')
+        self.assertEqual(i18n.minutes_lang('en'), 'en')
+        self.assertEqual(i18n.minutes_lang('ja'), 'en')
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+        self.assertEqual(i18n.minutes_lang('ja'), 'zh-TW')
+        self.assertEqual(i18n.minutes_lang('en'), 'en')
+
+    def test_english_minutes_get_section_8_supporting_materials(self):
+        import attachments as at
+        md = '# Weekly\n\n## 1. Basic Information\n\n- Date: Oct 14\n\n## 2. Discussion Summary\n\nBudget set.\n'
+        lines = at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://example.com/slides'}],
+                             'Deck from Amy', 'en')
+        self.assertEqual(lines, ['- Deck from Amy: [Slides](https://example.com/slides)'])
+        out = at.add_lines(md, lines)
+        self.assertIn('## 8. Supporting Materials\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
+        self.assertNotIn('補充資訊', out)
+        self.assertIn('：[Slides]', at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://e.com'}],
+                                                'Amy 的簡報', 'zh-TW')[0])
+
+
+class MeetingLanguage(unittest.TestCase):
+    """transcribe.detect: which language the meeting was held in, by majority of three stretches."""
+
+    def detect(self, *heard):
+        import transcribe
+        said = iter(heard)
+        fake = lambda audio, **kw: {'text': 'words', 'language': next(said)}   # noqa: E731
+        return transcribe.detect(range(10 * 60 * 16000), fake)
+
+    def test_the_majority_wins(self):
+        self.assertEqual(self.detect('en', 'zh', 'en'), 'en')
+
+    def test_a_tie_goes_to_the_earliest(self):
+        self.assertEqual(self.detect('zh', 'ja', 'ko'), 'zh')
+
+    def test_cantonese_counts_as_chinese(self):
+        self.assertEqual(self.detect('yue', 'en', 'zh'), 'zh')

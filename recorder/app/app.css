@@ -33,6 +33,35 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 #side { width: 270px; flex: none; display: flex; flex-direction: column; padding: 14px 10px 10px; overflow: hidden; background: var(--side); border-right: 1px solid var(--line2); }
 .sidelist { flex: 1; min-height: 0; overflow: auto; }
 #side h1 { margin: 0; padding: 2px 8px 10px; font-size: 15px; font-weight: 700; }
+/* 選取: the button beside the title, the 全選 line, a checkbox on each meeting, 封存 and 刪除 at the bottom */
+.sidehead { display: flex; align-items: flex-start; justify-content: space-between; }
+.pickbtn { all: unset; box-sizing: border-box; height: 22px; padding: 0 10px; margin: 0 4px 0 0; border-radius: 11px; font-size: 12px;
+           border: 1px solid var(--field-line); background: var(--field); color: var(--text2); cursor: pointer; }
+.pickbtn:hover { filter: brightness(0.96); }
+.pickbtn[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+.pickbtn:focus-visible, .pickall:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.pickall { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: calc(100% - 8px); margin: 0 4px;
+           padding: 4px 6px; border-radius: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.pickall:hover { background: var(--hover); }
+.cbox { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 4px;
+        border: 1.5px solid var(--faint); background: var(--field); color: transparent; }
+.cbox.on { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+.item.picking .tools { display: none; }
+.item.picked { background: var(--pick); }
+.pickbar { flex: none; display: flex; align-items: center; gap: 6px; margin-top: 6px; padding: 8px 2px 0 10px; border-top: 1px solid var(--line2);
+           font-size: 12px; color: var(--muted); }
+.pickbar span { flex: 1; }
+.pickbar .btn { height: 26px; padding: 0 12px; font-size: 12px; }
+.btn.ghost.danger { color: var(--red); }
+.btn.danger-fill { background: #c4291f; color: #ffffff; }
+.btn.danger-fill:hover { filter: brightness(0.93); }
+/* the right-click menu on a meeting */
+.ctxmenu { position: fixed; z-index: 20; display: flex; flex-direction: column; min-width: 130px; padding: 4px; border-radius: 8px;
+           background: var(--panel); border: 1px solid var(--field-line); box-shadow: var(--sheet-shadow); }
+.ctxmenu button { all: unset; padding: 5px 10px; border-radius: 5px; font-size: 13px; color: var(--text); cursor: pointer; }
+.ctxmenu button:hover, .ctxmenu button:focus-visible { background: var(--blue); color: #ffffff; }
+.ctxmenu button.danger { color: var(--red); }
+.ctxmenu button.danger:hover, .ctxmenu button.danger:focus-visible { background: #c4291f; color: #ffffff; }
 .search { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; margin: 0 4px 8px; background: var(--field);
           border: 1px solid var(--field-line); border-radius: 7px; }
 .search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 13px; }
@@ -198,7 +227,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .ib[disabled] { opacity: 0.4; cursor: default; background: none; }
 .awrap { position: relative; flex: none; display: flex; }
 /* opens downward: above the box the Google Doc lies over the page, and nothing of the page shows through it */
-.amenu { position: absolute; left: 0; top: 36px; z-index: 20; width: 160px; box-sizing: border-box; padding: 6px; border-radius: 10px;
+.amenu { position: absolute; left: 0; top: 36px; z-index: 20; width: max-content; min-width: 160px; box-sizing: border-box; padding: 6px; border-radius: 10px;
          background: var(--field); border: 1px solid var(--field-line); box-shadow: 0 8px 24px rgba(0,0,0,0.16); }
 .amenu[hidden] { display: none; }
 .amenu button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 10px;
@@ -216,7 +245,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .dot.claude { background: #d97757; }
 .dot.codex { background: var(--text); }
 .dot.antigravity { background: #4285f4; }
-.mmenu { position: absolute; left: 0; bottom: 36px; z-index: 20; width: 230px; box-sizing: border-box; padding: 6px; border-radius: 10px;
+.mmenu { position: absolute; left: 0; bottom: 36px; z-index: 20; width: max-content; min-width: 230px; box-sizing: border-box; padding: 6px; border-radius: 10px;
          background: var(--field); border: 1px solid var(--field-line); box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
 .mmenu[hidden] { display: none; }
 .mi { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 10px;
@@ -245,7 +274,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 /* bottom: open items, the player, the buttons */
 .foot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 14px 24px 16px; background: var(--panel); border-top: 1px solid var(--line2); }
 .row { display: flex; align-items: center; gap: 10px; }
-.lbl { width: 60px; flex: none; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.lbl { width: auto; min-width: 60px; flex: none; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .chips { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { all: unset; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; font-size: 12px; cursor: pointer; }
 .chip.red { background: var(--red-bg); color: var(--red-ink); }
@@ -280,12 +309,12 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .spin { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* sheets: send mail, transcript */
+/* sheets: send mail, transcript, 刪除 */
 .veil { position: fixed; inset: 0; background: rgba(0,0,0,0.22); display: flex; justify-content: center; align-items: flex-start; z-index: 10; }
 .sheet { width: 640px; max-height: calc(100vh - 20px); overflow: auto; padding: 20px 22px 18px; background: var(--panel); border: 1px solid var(--field-line);
          border-top: none; border-radius: 0 0 12px 12px; box-shadow: var(--sheet-shadow); display: flex; flex-direction: column; gap: 14px; }
 .sheet h3 { margin: 0; font-size: 15px; }
-.grid { display: grid; grid-template-columns: 56px minmax(0, 1fr); column-gap: 10px; row-gap: 10px; align-items: center; font-size: 13px; }
+.grid { display: grid; grid-template-columns: minmax(56px, max-content) minmax(0, 1fr); column-gap: 10px; row-gap: 10px; align-items: center; font-size: 13px; }
 .grid .k { color: var(--muted); text-align: right; }
 .field { width: 100%; min-height: 28px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); padding: 0 8px;
          display: flex; align-items: center; font-size: 13px; }
@@ -323,6 +352,13 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .sheet.setup { width: 680px; padding: 18px 0 14px; }
 .setup .shead { padding: 0 22px 12px; text-align: center; }
 .setup .shead h3 { font-size: 17px; }
+/* the checklist's header: the title stays in the middle, English／中文 sits at the right */
+.setup .shead.lang { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
+.setup .shead.lang h3 { grid-column: 2; }
+.setup .shead.lang .langseg { grid-column: 3; justify-self: end; margin-left: auto; }
+.langseg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--line); }
+.langseg button { all: unset; cursor: pointer; padding: 3px 12px; border-radius: 6px; font-size: 12px; color: var(--text2); }
+.langseg button.on { background: var(--field); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 .setup .ssub { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .setup .sinfo { margin: 0 22px 10px; font-size: 12px; }
 .setup .slist { margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -335,7 +371,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .setup .stt { font-size: 13px; font-weight: 700; }
 .setup .sreq { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
 .setup .sds { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
-.setup .sside { flex: none; width: 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.setup .sside { flex: none; width: auto; min-width: 170px; max-width: 230px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .setup .sside .btn { height: 28px; min-width: 84px; padding: 0 14px; font-size: 12px; }
 .setup .sok { font-size: 12px; font-weight: 600; color: var(--green); }
 .setup .sbad { font-size: 12px; font-weight: 600; color: var(--red); }
@@ -352,3 +388,14 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .setup .spill.on { background: var(--blue); border-color: var(--blue); color: #ffffff; }
 .setup .sfoot { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px 0; }
 .setup .scount { font-size: 13px; font-weight: 600; }
+
+/* 刪除: the meetings about to go, one line on where their files go, the warning when one was sent to others */
+.sheet.confirm { width: 420px; gap: 10px; }
+.dlist { max-height: 200px; overflow: auto; padding: 6px 10px; border-radius: 6px; background: var(--field); border: 1px solid var(--line); font-size: 12px; }
+.drow { display: flex; justify-content: space-between; gap: 12px; line-height: 1.9; }
+.dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dst { flex: none; color: var(--muted); }
+.dsent { flex: none; color: var(--red); }
+.dnote { margin: 0; font-size: 13px; color: var(--text2); }
+.dnote.err, .dwarn { margin: 0; font-size: 13px; color: var(--red); }
+.dfoot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }

@@ -42,6 +42,247 @@ func writeJSON(_ obj: [String: Any], _ url: URL) {
     }
 }
 
+// MARK: language
+
+/// settings.json, shared with the scripts and the meeting window: "language" ("auto" | "en" | "zh-TW") is the app's own
+/// language, "meeting_language" ("auto" | "en" | "zh") the language the next recording is transcribed in.
+let settingsFile = configDir.appendingPathComponent("settings.json")
+
+/// Writes one key of settings.json, keeping every other key and the file's permissions.
+func saveSetting(_ key: String, _ value: String) {
+    var obj = readJSON(settingsFile)
+    obj[key] = value
+    let mode = (try? FileManager.default.attributesOfItem(atPath: settingsFile.path))?[.posixPermissions]
+    try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+    if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .withoutEscapingSlashes]) {
+        try? data.write(to: settingsFile, options: .atomic)
+    }
+    if let mode { try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: settingsFile.path) }
+}
+
+/// The language the user picked, or nil while they have not picked one.
+func pickedLanguage() -> String? {
+    let v = (readJSON(settingsFile)["language"] as? String ?? "").lowercased()
+    if v.hasPrefix("zh") { return "zh-TW" }
+    if v.hasPrefix("en") { return "en" }
+    return nil
+}
+
+/// The app's language: the one picked, else the Mac's (Chinese of any kind -> zh-TW, anything else -> en).
+func uiLanguage() -> String {
+    pickedLanguage() ?? ((Locale.preferredLanguages.first ?? "").lowercased().hasPrefix("zh") ? "zh-TW" : "en")
+}
+
+func meetingLanguage() -> String {
+    let v = readJSON(settingsFile)["meeting_language"] as? String ?? "auto"
+    return ["auto", "en", "zh"].contains(v) ? v : "auto"
+}
+
+/// Every word the app shows, in both languages, with the same keys and the same %@ / %d blanks.
+let STRINGS: [String: [String: String]] = [
+    "en": [
+        "menu.start": "Start Recording",
+        "menu.pause": "Pause Recording",
+        "menu.resume": "Resume Recording",
+        "menu.stop": "Stop Recording",
+        "menu.discard": "Discard This Recording",
+        "menu.recent": "Recent Meetings",
+        "menu.none": "No recordings yet",
+        "menu.more": "More…",
+        "menu.folder": "Open Recordings Folder",
+        "menu.settings": "Settings",
+        "menu.setup": "Setup Checklist",
+        "menu.login": "Open at Login",
+        "menu.language": "App Language",
+        "menu.languageAuto": "Same as Mac",
+        "menu.meetingLanguage": "Meeting Language",
+        "menu.meetingAuto": "Detect Automatically",
+        "menu.quit": "Quit Vinutes",
+        "app.hide": "Hide %@",
+        "app.quit": "Quit %@",
+        "edit": "Edit",
+        "edit.undo": "Undo",
+        "edit.redo": "Redo",
+        "edit.cut": "Cut",
+        "edit.copy": "Copy",
+        "edit.paste": "Paste",
+        "edit.selectAll": "Select All",
+        "window": "Window",
+        "window.minimize": "Minimize",
+        "window.close": "Close Window",
+        "state.transcribing": "Transcribing",
+        "state.writing": "Writing up",
+        "state.failed": "Not finished",
+        "state.waiting": "Waiting",
+        "job.title": "Meeting minutes",
+        "tip.recording": "Recording",
+        "tip.paused": "Paused",
+        "bar.pause": "Pause (⌃⌥P)",
+        "bar.resume": "Resume (⌃⌥P)",
+        "bar.stop": "Stop recording (⌃⌥R)",
+        "quit.title": "You're still recording",
+        "btn.keepRecording": "Keep Recording",
+        "btn.stopAndWrite": "Stop and Write Up",
+        "mic.title": "No microphone access",
+        "mic.text": "Open System Settings > Privacy & Security > Microphone and turn on Vinutes.",
+        "btn.openSettings": "Open System Settings",
+        "btn.close": "Close",
+        "btn.ok": "OK",
+        "btn.cancel": "Cancel",
+        "btn.delete": "Delete Recording",
+        "start.failTitle": "Can't start recording",
+        "start.failText": "Another app may be using the microphone. (%@)",
+        "discard.title": "Discard this recording?",
+        "discard.text": "The recording will be deleted.",
+        "status.preparing": "Getting ready to transcribe",
+        "status.stopped": "Writing up stopped before it finished.",
+        "noApp.title": "Can't find Vinutes' files",
+        "noApp.text": "Run recorder/install.sh again.",
+        "run.failTitle": "Can't start writing up",
+        "notify.done": "Minutes ready",
+        "notify.failed": "Not finished",
+        "login.failTitle": "Can't change Open at Login",
+        "login.failText": "Add Vinutes yourself in System Settings > General > Login Items. (%@)",
+        "window.missing": "Can't find the window's files. Run recorder/install.sh again.",
+        "err.quitting": "Vinutes is quitting.",
+        "err.tryAgain": "That didn't finish. Please try again.",
+        "err.noJob": "Can't find this recording.",
+        "err.saveEdits": "Couldn't save your changes.",
+        "err.noSetupItem": "There's no such setup item.",
+        "err.noAI": "Vinutes doesn't work with that AI.",
+        "err.badURL": "This link can't be opened from here.",
+        "err.nothingToAttach": "There's no file, link or picture to add.",
+        "err.speakerName": "Enter a name, up to 30 characters.",
+        "err.alreadyDone": "This meeting has already been written up.",
+        "err.updateWhileRecording": "You're recording. You can update when the recording ends.",
+        "err.unknownCommand": "Vinutes doesn't recognize that action.",
+        "err.badFormat": "Vinutes doesn't recognize that attachment format.",
+        "err.noRecipient": "Add at least one recipient.",
+        "err.emptyMail": "The subject and the message both need text.",
+        "err.saveMail": "Couldn't save the message.",
+        "err.previewFailed": "The email preview failed. Nothing was sent.",
+        "err.mailChanged": "The email about to go out doesn't match what's on screen. Nothing was sent. Press Send again.",
+        "err.notSent": "The email wasn't sent.",
+        "err.noAudio": "Can't find the recording for this meeting.",
+        "format.gdoc": "Google Doc link",
+        "format.word": "Word file",
+        "format.pdf": "PDF file",
+        "signin.title": "Sign in to %@",
+        "signin.done": "When you're signed in, close this window and go back to Vinutes.",
+        "panel.client": "Choose the client file you downloaded from Google Cloud (a JSON file whose name starts with client_secret)",
+        "panel.useFile": "Use This File",
+        "panel.images": "Choose pictures to insert into the minutes",
+        "panel.files": "Choose files to add to the minutes",
+        "panel.add": "Add",
+    ],
+    "zh-TW": [
+        "menu.start": "開始錄音",
+        "menu.pause": "暫停",
+        "menu.resume": "繼續錄音",
+        "menu.stop": "結束錄音",
+        "menu.discard": "放棄這段錄音",
+        "menu.recent": "最近會議",
+        "menu.none": "還沒有錄音",
+        "menu.more": "更多…",
+        "menu.folder": "打開錄音資料夾",
+        "menu.settings": "設定",
+        "menu.setup": "環境設定自檢",
+        "menu.login": "開機時自動開啟",
+        "menu.language": "介面語言",
+        "menu.languageAuto": "自動判斷",
+        "menu.meetingLanguage": "會議語言",
+        "menu.meetingAuto": "自動判斷",
+        "menu.quit": "退出本程式",
+        "app.hide": "隱藏 %@",
+        "app.quit": "結束 %@",
+        "edit": "編輯",
+        "edit.undo": "還原",
+        "edit.redo": "重做",
+        "edit.cut": "剪下",
+        "edit.copy": "拷貝",
+        "edit.paste": "貼上",
+        "edit.selectAll": "全選",
+        "window": "視窗",
+        "window.minimize": "縮到最小",
+        "window.close": "關閉視窗",
+        "state.transcribing": "轉逐字稿中",
+        "state.writing": "整理中",
+        "state.failed": "沒有整理完成",
+        "state.waiting": "等待整理",
+        "job.title": "會議紀錄",
+        "tip.recording": "錄音中",
+        "tip.paused": "已暫停",
+        "bar.pause": "暫停（⌃⌥P）",
+        "bar.resume": "繼續（⌃⌥P）",
+        "bar.stop": "結束錄音（⌃⌥R）",
+        "quit.title": "還在錄音",
+        "btn.keepRecording": "繼續錄音",
+        "btn.stopAndWrite": "結束錄音並整理",
+        "mic.title": "沒有麥克風權限",
+        "mic.text": "到「系統設定 > 隱私權與安全性 > 麥克風」，打開「Vinutes」。",
+        "btn.openSettings": "打開系統設定",
+        "btn.close": "關閉",
+        "btn.ok": "好",
+        "btn.cancel": "取消",
+        "btn.delete": "刪除錄音",
+        "start.failTitle": "沒辦法開始錄音",
+        "start.failText": "麥克風可能被其他程式占用。（%@）",
+        "discard.title": "放棄這段錄音？",
+        "discard.text": "錄音檔會刪除。",
+        "status.preparing": "準備轉逐字稿",
+        "status.stopped": "整理中斷了。",
+        "noApp.title": "找不到 Vinutes 的程式",
+        "noApp.text": "請重新執行 recorder/install.sh。",
+        "run.failTitle": "沒辦法開始整理",
+        "notify.done": "整理好了",
+        "notify.failed": "沒有整理完成",
+        "login.failTitle": "沒辦法設定開機時自動開啟",
+        "login.failText": "到「系統設定 > 一般 > 登入項目」手動加入「Vinutes」。（%@）",
+        "window.missing": "找不到視窗的檔案，請重新執行 recorder/install.sh。",
+        "err.quitting": "程式正在結束。",
+        "err.tryAgain": "沒有完成，請再試一次。",
+        "err.noJob": "找不到這場錄音。",
+        "err.saveEdits": "沒辦法存下改過的內容。",
+        "err.noSetupItem": "沒有這個設定項目。",
+        "err.noAI": "沒有這個 AI。",
+        "err.badURL": "這個網址不能從這裡打開。",
+        "err.nothingToAttach": "沒有要加進去的檔案、連結或圖片。",
+        "err.speakerName": "請輸入名字，最多 30 個字。",
+        "err.alreadyDone": "這場會議已經整理好了。",
+        "err.updateWhileRecording": "正在錄音，錄音結束後才能更新。",
+        "err.unknownCommand": "不認得的動作。",
+        "err.badFormat": "不認得的附件格式。",
+        "err.noRecipient": "至少要有一位收件人。",
+        "err.emptyMail": "主旨和信件內容都要有字。",
+        "err.saveMail": "沒辦法存下信件內容。",
+        "err.previewFailed": "信件預覽失敗，信沒有寄出。",
+        "err.mailChanged": "準備寄出的信跟畫面上的不一樣，信沒有寄出，請再按一次寄出。",
+        "err.notSent": "信沒有寄出。",
+        "err.noAudio": "找不到這場會議的錄音檔。",
+        "format.gdoc": "Google 文件連結",
+        "format.word": "Word 檔",
+        "format.pdf": "PDF 檔",
+        "signin.title": "登入 %@",
+        "signin.done": "登入好了就可以關掉這個視窗，回到 Vinutes。",
+        "panel.client": "選擇從 Google Cloud 下載的用戶端檔案（client_secret 開頭的 JSON 檔）",
+        "panel.useFile": "使用這個檔案",
+        "panel.images": "選擇要插入會議記錄的圖片",
+        "panel.files": "選擇要加進會議記錄的檔案",
+        "panel.add": "加入",
+    ],
+]
+
+/// The words for `key` in the app's language right now (a language switch applies at once), blanks filled in.
+func tr(_ key: String, _ args: CVarArg...) -> String {
+    let text = STRINGS[uiLanguage()]?[key] ?? STRINGS["en"]?[key] ?? key
+    return args.isEmpty ? text : String(format: text, arguments: args)
+}
+
+/// A word for a shell script inside single quotes.
+func shellQuoted(_ text: String) -> String {
+    "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
 func isoString(_ date: Date) -> String {
     let f = ISO8601DateFormatter()
     f.timeZone = .current
@@ -85,10 +326,11 @@ struct Job {
     var result: [String: Any] { json("result.json") }
     var title: String {
         let t = result["title"] as? String ?? ""
-        return t.isEmpty ? "會議紀錄" : t
+        return t.isEmpty ? tr("job.title") : t
     }
     var mail: [String: Any]? { result["mail"] as? [String: Any] }
     var sent: Bool { result["sent_at"] != nil }
+    var archived: Bool { FileManager.default.fileExists(atPath: dir.appendingPathComponent("封存.json").path) }
     var notifiedMarker: URL { dir.appendingPathComponent(".notified") }
     var finished: Bool { step == "done" || step == "failed" }
     // "20261014-145212" -> "10/14 14:52"
@@ -157,9 +399,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if recording {
             let alert = NSAlert()
-            alert.messageText = "還在錄音"
-            alert.addButton(withTitle: "繼續錄音")
-            alert.addButton(withTitle: "結束錄音並整理")
+            alert.messageText = tr("quit.title")
+            alert.addButton(withTitle: tr("btn.keepRecording"))
+            alert.addButton(withTitle: tr("btn.stopAndWrite"))
             NSApp.activate(ignoringOtherApps: true)
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
             stopRecording()
@@ -205,25 +447,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(titleItem())
         menu.addItem(.separator())
         if recording {
-            menu.addItem(item(paused ? "繼續錄音" : "暫停", #selector(togglePause), key: "p",
+            menu.addItem(item(paused ? tr("menu.resume") : tr("menu.pause"), #selector(togglePause), key: "p",
                               image: paused ? "play.fill" : "pause.fill"))
-            menu.addItem(item("結束錄音", #selector(stopRecording), key: "r", image: "stop.fill"))
-            menu.addItem(item("放棄這段錄音", #selector(cancelRecording), image: "trash"))
+            menu.addItem(item(tr("menu.stop"), #selector(stopRecording), key: "r", image: "stop.fill"))
+            menu.addItem(item(tr("menu.discard"), #selector(cancelRecording), image: "trash"))
         } else {
-            let start = item("開始錄音", #selector(startRecording), key: "r", image: "record.circle")
+            let start = item(tr("menu.start"), #selector(startRecording), key: "r", image: "record.circle")
             start.image = symbol("record.circle", 13, .regular, tint: .systemRed)
             menu.addItem(start)
         }
         menu.addItem(.separator())
 
         let header = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        header.attributedTitle = NSAttributedString(string: "最近會議", attributes: [
+        header.attributedTitle = NSAttributedString(string: tr("menu.recent"), attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
         header.isEnabled = false
         menu.addItem(header)
-        let jobs = recentJobs(limit: 5).filter { $0.dir != currentJob }.prefix(4)
+        let jobs = recentJobs(limit: 200).filter { $0.dir != currentJob && !$0.archived }.prefix(4)
         if jobs.isEmpty {
-            let none = NSMenuItem(title: "還沒有錄音", action: nil, keyEquivalent: "")
+            let none = NSMenuItem(title: tr("menu.none"), action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
         }
@@ -237,21 +479,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             entry.isEnabled = true                  // a meeting still being written opens on its progress
             menu.addItem(entry)
         }
-        menu.addItem(item("更多…", #selector(showAll), image: "ellipsis"))
+        menu.addItem(item(tr("menu.more"), #selector(showAll), image: "ellipsis"))
         menu.addItem(.separator())
-        menu.addItem(item("打開錄音資料夾", #selector(openFolder), image: "folder"))
-        let settings = item("設定", #selector(noop), image: "gearshape")
+        menu.addItem(item(tr("menu.folder"), #selector(openFolder), image: "folder"))
+        let settings = item(tr("menu.settings"), #selector(noop), image: "gearshape")
         let sub = NSMenu()
         sub.autoenablesItems = false
-        sub.addItem(item("環境設定自檢", #selector(openSetup), image: "checklist"))
-        let login = item("開機時自動開啟", #selector(toggleLogin))
+        sub.addItem(item(tr("menu.setup"), #selector(openSetup), image: "checklist"))
+        let login = item(tr("menu.login"), #selector(toggleLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         sub.addItem(login)
+        sub.addItem(.separator())
+        sub.addItem(languageItem())
+        sub.addItem(meetingLanguageItem())
         settings.submenu = sub
         settings.action = nil
         menu.addItem(settings)
         menu.addItem(.separator())
-        let quit = item("退出本程式", #selector(quit), image: "power")
+        let quit = item(tr("menu.quit"), #selector(quit), image: "power")
         quit.keyEquivalent = "q"
         quit.keyEquivalentModifierMask = [.command]
         menu.addItem(quit)
@@ -275,27 +520,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     @objc func noop() {}
 
+    /// Settings > App Language: Same as Mac (the default) / English / 繁體中文, the one picked checked.
+    func languageItem() -> NSMenuItem {
+        let it = item(tr("menu.language"), #selector(noop), image: "globe")
+        it.action = nil
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let current = pickedLanguage() ?? "auto"
+        for (lang, label) in [("auto", tr("menu.languageAuto")), ("", ""), ("en", "English"), ("zh-TW", "繁體中文")] {
+            if lang.isEmpty { sub.addItem(.separator()); continue }
+            let choice = item(label, #selector(pickLanguage(_:)))
+            choice.representedObject = lang
+            choice.state = lang == current ? .on : .off
+            sub.addItem(choice)
+        }
+        it.submenu = sub
+        return it
+    }
+
+    /// Settings > Meeting Language: what the next recording is transcribed in.
+    func meetingLanguageItem() -> NSMenuItem {
+        let it = item(tr("menu.meetingLanguage"), #selector(noop), image: "waveform")
+        it.action = nil
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let current = meetingLanguage()
+        for (value, label) in [("auto", tr("menu.meetingAuto")), ("", ""), ("en", "English"), ("zh", "中文")] {
+            if value.isEmpty { sub.addItem(.separator()); continue }
+            let choice = item(label, #selector(pickMeetingLanguage(_:)))
+            choice.representedObject = value
+            choice.state = value == current ? .on : .off
+            sub.addItem(choice)
+        }
+        it.submenu = sub
+        return it
+    }
+
+    @objc func pickLanguage(_ sender: NSMenuItem) {
+        guard let lang = sender.representedObject as? String else { return }
+        setLanguage(lang)
+        manager?.languageChanged()
+    }
+
+    @objc func pickMeetingLanguage(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String, ["auto", "en", "zh"].contains(value) else { return }
+        saveSetting("meeting_language", value)
+    }
+
+    /// Keeps the language the user picked and redraws the menu bar in it (the status menu is drawn each time it opens).
+    func setLanguage(_ lang: String) {
+        guard ["auto", "en", "zh-TW"].contains(lang) else { return }
+        saveSetting("language", lang)                 // "auto": follow the Mac again
+        NSApp.mainMenu = mainMenu()
+    }
+
     /// The menu bar while the meeting window is open (the app is in the Dock then); the shortcuts work in the window.
     func mainMenu() -> NSMenu {
         let main = NSMenu()
         let name = "Vinutes"
         let appMenu = NSMenu(title: name)
-        appMenu.addItem(withTitle: "隱藏 \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: tr("app.hide", name), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "結束 \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: tr("app.quit", name), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         main.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = appMenu
-        let edit = NSMenu(title: "編輯")
-        edit.addItem(withTitle: "還原", action: Selector(("undo:")), keyEquivalent: "z")
-        edit.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "Z")
+        let edit = NSMenu(title: tr("edit"))
+        edit.addItem(withTitle: tr("edit.undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: tr("edit.redo"), action: Selector(("redo:")), keyEquivalent: "Z")
         edit.addItem(.separator())
-        edit.addItem(withTitle: "剪下", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "拷貝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "貼上", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "全選", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(withTitle: tr("edit.cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: tr("edit.copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: tr("edit.paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: tr("edit.selectAll"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         main.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = edit
-        let windows = NSMenu(title: "視窗")
-        windows.addItem(withTitle: "縮到最小", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windows.addItem(withTitle: "關閉視窗", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let windows = NSMenu(title: tr("window"))
+        windows.addItem(withTitle: tr("window.minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windows.addItem(withTitle: tr("window.close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         main.addItem(withTitle: "", action: nil, keyEquivalent: "").submenu = windows
         NSApp.windowsMenu = windows
         return main
@@ -311,11 +610,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     func stateText(_ job: Job) -> String {
         switch job.step {
-        case "transcribing": return "轉逐字稿中"
-        case "writing": return "整理中"
-        case "failed": return "沒有整理完成"
+        case "transcribing": return tr("state.transcribing")
+        case "writing": return tr("state.writing")
+        case "failed": return tr("state.failed")
         case "done": return job.title
-        default: return "等待整理"
+        default: return tr("state.waiting")
         }
     }
 
@@ -340,7 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             button.contentTintColor = nil
             button.title = ""
         }
-        button.toolTip = recording ? (paused ? "已暫停" : "錄音中") : "Vinutes"
+        button.toolTip = recording ? (paused ? tr("tip.paused") : tr("tip.recording")) : "Vinutes"
         bar.update()
     }
 
@@ -362,10 +661,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     func micDenied() {
         let alert = NSAlert()
-        alert.messageText = "沒有麥克風權限"
-        alert.informativeText = "到「系統設定 > 隱私權與安全性 > 麥克風」，打開「Vinutes」。"
-        alert.addButton(withTitle: "打開系統設定")
-        alert.addButton(withTitle: "關閉")
+        alert.messageText = tr("mic.title")
+        alert.informativeText = tr("mic.text")
+        alert.addButton(withTitle: tr("btn.openSettings"))
+        alert.addButton(withTitle: tr("btn.close"))
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn,
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
@@ -392,13 +691,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             startedAt = now
             pausedAt = nil
             pausedTotal = 0
-            awake = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "錄音中")
+            awake = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: tr("tip.recording"))
             tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refreshIcon() }
             bar.show()
             refreshIcon()
         } catch {
             try? FileManager.default.removeItem(at: dir)
-            showError("沒辦法開始錄音", "麥克風可能被其他程式占用。（\(error.localizedDescription)）")
+            showError(tr("start.failTitle"), tr("start.failText", error.localizedDescription))
         }
     }
 
@@ -439,10 +738,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     @objc func cancelRecording() {
         let alert = NSAlert()
-        alert.messageText = "放棄這段錄音？"
-        alert.informativeText = "錄音檔會刪除。"
-        alert.addButton(withTitle: "繼續錄音")
-        alert.addButton(withTitle: "刪除錄音")
+        alert.messageText = tr("discard.title")
+        alert.informativeText = tr("discard.text")
+        alert.addButton(withTitle: tr("btn.keepRecording"))
+        alert.addButton(withTitle: tr("btn.delete"))
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertSecondButtonReturn, let dir = endRecording() else { return }
         try? FileManager.default.removeItem(at: dir)
@@ -457,13 +756,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// Start (or restart) the whole job for a finished recording.
     func process(_ dir: URL) {
         try? FileManager.default.removeItem(at: Job(dir: dir).notifiedMarker)
-        writeStatus(dir, "transcribing", "準備轉逐字稿")
+        writeStatus(dir, "transcribing", tr("status.preparing"))
         refreshIcon()
         runPipeline([dir.path]) { [weak self] code, out in
             // the script records its own failures; this covers a crash before it could
             let job = Job(dir: dir)
             if code != 0 && !job.finished {
-                self?.writeStatus(dir, "failed", lastLine(out).isEmpty ? "整理中斷了。" : lastLine(out))
+                self?.writeStatus(dir, "failed", lastLine(out).isEmpty ? tr("status.stopped") : lastLine(out))
             }
             self?.checkJobs()
         }
@@ -497,13 +796,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// Runs one of the Python scripts through a login shell, so the claude command is found on the user's PATH.
     func runScript(_ name: String, _ args: [String], done: @escaping (Int32, String) -> Void) {
         guard let cfg = recorderConfig() else {
-            showError("找不到 Vinutes 的程式", "請重新執行 recorder/install.sh。")
+            showError(tr("noApp.title"), tr("noApp.text"))
             done(1, "")
             return
         }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
         proc.arguments = ["-lc", "exec \"$0\" \"$@\"", cfg.python, (cfg.skill as NSString).appendingPathComponent("scripts/" + name)] + args
+        // the scripts speak the app's language, so the window, the menu and their messages never disagree
+        var env = ProcessInfo.processInfo.environment
+        env["VINUTES_LANG"] = uiLanguage()
+        proc.environment = env
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
@@ -522,7 +825,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             DispatchQueue.main.async { done(p.terminationStatus, text) }
         }
         do { try proc.run() } catch {
-            showError("沒辦法開始整理", error.localizedDescription)
+            showError(tr("run.failTitle"), error.localizedDescription)
             done(1, "")
         }
     }
@@ -540,10 +843,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         if !recording { refreshIcon() }
         for job in recentJobs(limit: 10) where !job.finished && !job.step.isEmpty && job.dir != currentJob {
             if let pid = job.status["pid"] as? Int {
-                if kill(pid_t(pid), 0) != 0 && errno == ESRCH { writeStatus(job.dir, "failed", "整理中斷了。") }
+                if kill(pid_t(pid), 0) != 0 && errno == ESRCH { writeStatus(job.dir, "failed", tr("status.stopped")) }
             } else if let attrs = try? FileManager.default.attributesOfItem(atPath: job.dir.appendingPathComponent("status.json").path),
                       let at = attrs[.modificationDate] as? Date, Date().timeIntervalSince(at) > 180 {
-                writeStatus(job.dir, "failed", "整理中斷了。")
+                writeStatus(job.dir, "failed", tr("status.stopped"))
             }
         }
         for job in recentJobs(limit: 10) where job.finished && !FileManager.default.fileExists(atPath: job.notifiedMarker.path) {
@@ -560,7 +863,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     func announce(_ job: Job) {
         let content = UNMutableNotificationContent()
-        content.title = job.step == "done" ? "整理好了" : "沒有整理完成"
+        content.title = job.step == "done" ? tr("notify.done") : tr("notify.failed")
         content.body = job.step == "done" ? job.title : job.message
         content.sound = .default
         content.userInfo = ["job": job.dir.path]
@@ -629,6 +932,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
+        alert.addButton(withTitle: tr("btn.ok"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
@@ -640,7 +944,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
             else { try SMAppService.mainApp.register() }
         } catch {
-            showError("沒辦法設定開機時自動開啟", "到「系統設定 > 一般 > 登入項目」手動加入「Vinutes」。（\(error.localizedDescription)）")
+            showError(tr("login.failTitle"), tr("login.failText", error.localizedDescription))
         }
     }
 
@@ -656,6 +960,7 @@ final class RecordingBar: NSObject {
     let dot = NSImageView()
     let time = NSTextField(labelWithString: "00:00")
     var pauseButton: NSButton!
+    var stopButton: NSButton!
 
     init(owner: AppDelegate) {
         self.owner = owner
@@ -682,9 +987,9 @@ final class RecordingBar: NSObject {
         panel.contentView = fx
 
         time.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
-        pauseButton = button("pause.fill", #selector(AppDelegate.togglePause), "暫停（⌃⌥P）")
-        let stop = button("stop.fill", #selector(AppDelegate.stopRecording), "結束錄音（⌃⌥R）")
-        let row = NSStackView(views: [dot, time, pauseButton, stop])
+        pauseButton = button("pause.fill", #selector(AppDelegate.togglePause), tr("bar.pause"))
+        stopButton = button("stop.fill", #selector(AppDelegate.stopRecording), tr("bar.stop"))
+        let row = NSStackView(views: [dot, time, pauseButton, stopButton])
         row.orientation = .horizontal
         row.spacing = 10
         row.setCustomSpacing(6, after: dot)
@@ -722,7 +1027,8 @@ final class RecordingBar: NSObject {
         time.stringValue = clock(owner.elapsed)
         time.textColor = owner.paused ? .secondaryLabelColor : .labelColor
         pauseButton.image = symbol(owner.paused ? "play.fill" : "pause.fill", 14, .semibold)
-        pauseButton.toolTip = owner.paused ? "繼續（⌃⌥P）" : "暫停（⌃⌥P）"
+        pauseButton.toolTip = owner.paused ? tr("bar.resume") : tr("bar.pause")
+        stopButton.toolTip = tr("bar.stop")
     }
 }
 
@@ -777,6 +1083,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         window.delegate = self
         let config = WKWebViewConfiguration()
         config.userContentController.add(WeakHandler(self), name: "app")
+        config.userContentController.addUserScript(ManagerWindow.languageScript())
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
         let content = FlippedView()
@@ -790,7 +1097,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             appDir = page.deletingLastPathComponent()
             web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
         } else {
-            web.loadHTMLString("<p style='font:14px -apple-system;padding:24px'>找不到視窗的檔案，請重新執行 recorder/install.sh。</p>", baseURL: nil)
+            web.loadHTMLString("<p style='font:14px -apple-system;padding:24px'>\(tr("window.missing"))</p>", baseURL: nil)
         }
     }
 
@@ -805,6 +1112,22 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         NSApp.activate(ignoringOtherApps: true)
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: language
+
+    /// window.VINUTES_LANG before the page's own scripts run, so the page draws itself in the app's language.
+    static func languageScript() -> WKUserScript {
+        WKUserScript(source: "window.VINUTES_LANG = \"\(uiLanguage())\";", injectionTime: .atDocumentStart,
+                     forMainFrameOnly: true)
+    }
+
+    /// The language changed (here or in the menu): a reload starts in the new one, the open page switches now.
+    func languageChanged() {
+        let scripts = web.configuration.userContentController
+        scripts.removeAllUserScripts()
+        scripts.addUserScript(ManagerWindow.languageScript())
+        event("language", ["lang": uiLanguage()])
     }
 
     // MARK: talking to the page
@@ -832,11 +1155,11 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
 
     /// minutes_app.py: the last line `JSON {...}` is the answer; anything else, its last line is the message.
     func app(_ args: [String], _ done: @escaping (Bool, Any) -> Void) {
-        guard let owner else { return done(false, ["message": "程式正在結束。"]) }
+        guard let owner else { return done(false, ["message": tr("err.quitting")]) }
         owner.runScript("minutes_app.py", args) { code, out in
             if code == 0, let obj = lastObject(out, prefix: "JSON ") { return done(true, obj) }
             let why = lastLine(out)
-            done(false, ["message": why.isEmpty || why.hasPrefix("JSON ") ? "沒有完成，請再試一次。" : why])
+            done(false, ["message": why.isEmpty || why.hasPrefix("JSON ") ? tr("err.tryAgain") : why])
         }
     }
 
@@ -851,7 +1174,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
                                      "speaker", "attach"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
-            return done(false, ["message": "找不到這場錄音。"])
+            return done(false, ["message": tr("err.noJob")])
         }
         switch cmd {
         case "ready":
@@ -861,6 +1184,12 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             pendingSetup = false
         case "list":
             app(["list"], done)
+        case "setLanguage":
+            let lang = args["lang"] as? String ?? ""
+            guard lang == "en" || lang == "zh-TW", let owner else { return done(false, ["message": tr("err.unknownCommand")]) }
+            owner.setLanguage(lang)
+            done(true, ["lang": lang])
+            languageChanged()
         case "open", "learn", "log", "undo", "refresh":
             app([cmd, dir.path], done)
         case "gdoc":
@@ -877,7 +1206,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         case "save":
             let file = dir.appendingPathComponent("編輯中.html")
             do { try (args["html"] as? String ?? "").write(to: file, atomically: true, encoding: .utf8) } catch {
-                return done(false, ["message": "沒辦法存下改過的內容。"])
+                return done(false, ["message": tr("err.saveEdits")])
             }
             // the token of the preview the user was editing: 16 hex characters, or nothing
             let shown = args["shown"] as? String ?? ""
@@ -925,14 +1254,14 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             let what = args["what"] as? String ?? ""
             let known: [String: [String]] = ["speech": ["download", "speech"], "voice": ["download", "voice"],
                                             "login": ["login"]]
-            guard let run = known[what] else { return done(false, ["message": "沒有這個設定項目。"]) }
+            guard let run = known[what] else { return done(false, ["message": tr("err.noSetupItem")]) }
             owner?.runScript("setup_check.py", run) { code, out in
                 if code == 0 { return done(true, [:]) }
-                done(false, ["message": lastLine(out).isEmpty ? "沒有完成，請再試一次。" : lastLine(out)])
+                done(false, ["message": lastLine(out).isEmpty ? tr("err.tryAgain") : lastLine(out)])
             }
         case "setupAI":
             let key = args["ai"] as? String ?? ""
-            guard ["claude", "codex", "antigravity"].contains(key) else { return done(false, ["message": "沒有這個 AI。"]) }
+            guard ["claude", "codex", "antigravity"].contains(key) else { return done(false, ["message": tr("err.noAI")]) }
             setupScript(["ai", key], done)
         case "aiStates":
             setupScript(["ais"], done)
@@ -946,7 +1275,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             let text = args["url"] as? String ?? ""
             let hosts = ["console.cloud.google.com", "docs.claude.com", "github.com", "antigravity.google"]
             guard let url = URL(string: text), url.scheme == "https", hosts.contains(url.host ?? "") else {
-                return done(false, ["message": "這個網址不能從這裡打開。"])
+                return done(false, ["message": tr("err.badURL")])
             }
             NSWorkspace.shared.open(url)
             done(true, [:])
@@ -963,7 +1292,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             }
             guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: items),
                   let json = String(data: data, encoding: .utf8) else {
-                return done(false, ["message": "沒有要加進去的檔案、連結或圖片。"])
+                return done(false, ["message": tr("err.nothingToAttach")])
             }
             app(["attach", dir.path, text, json], done)
         case "speaker":
@@ -971,13 +1300,13 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             let group = args["group"] as? String ?? ""
             let name = (args["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard group.range(of: #"^[A-Z]$"#, options: .regularExpression) != nil, !name.isEmpty, name.count <= 30 else {
-                return done(false, ["message": "請輸入名字，最多 30 個字。"])
+                return done(false, ["message": tr("err.speakerName")])
             }
             let line = (args["line"] as? NSNumber).map { [String($0.intValue)] } ?? []
             app(["speaker", dir.path, group, name] + line, done)
         case "retry":
             // only a recording that failed starts over; a finished one keeps its Doc and its sent mail
-            guard Job(dir: dir).step == "failed" else { return done(false, ["message": "這場會議已經整理好了。"]) }
+            guard Job(dir: dir).step == "failed" else { return done(false, ["message": tr("err.alreadyDone")]) }
             owner?.process(dir)
             done(true, [:])
         case "folder":
@@ -1001,12 +1330,19 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                 done(ok, info)
             }
         case "update":
-            guard owner?.recording != true else { return done(false, ["message": "正在錄音，錄音結束後才能更新。"]) }
+            guard owner?.recording != true else { return done(false, ["message": tr("err.updateWhileRecording")]) }
             app(["update"], done)
         case "mailPrepare", "send":
             mail(dir, args, send: cmd == "send", done)
+        case "archive", "unarchive", "delete":
+            let ids = (args["ids"] as? [String] ?? []).filter {
+                $0.range(of: #"^\d{8}-\d{6}$"#, options: .regularExpression) != nil
+                    && FileManager.default.fileExists(atPath: recordingsDir.appendingPathComponent($0)
+                        .appendingPathComponent("job.json").path)
+            }
+            eachMeeting(cmd, ids, done)
         default:
-            done(false, ["message": "不認得的動作。"])
+            done(false, ["message": tr("err.unknownCommand")])
         }
     }
 
@@ -1015,36 +1351,36 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     /// The sheet's recipients, subject, text and attachment become the preview (--dry); the mail is sent only if
     /// the preview is exactly what the sheet showed when the user pressed 寄出.
     func mail(_ dir: URL, _ args: [String: Any], send: Bool, _ done: @escaping (Bool, Any) -> Void) {
-        guard let owner else { return done(false, ["message": "程式正在結束。"]) }
+        guard let owner else { return done(false, ["message": tr("err.quitting")]) }
         let to = (args["to"] as? [String] ?? []).map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
         let subject = (args["subject"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let body = (args["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let format = args["format"] as? String ?? "gdoc"
-        guard ["gdoc", "word", "pdf"].contains(format) else { return done(false, ["message": "不認得的附件格式。"]) }
-        guard !to.isEmpty else { return done(false, ["message": "至少要有一位收件人。"]) }
-        guard !subject.isEmpty, !body.isEmpty else { return done(false, ["message": "主旨和信件內容都要有字。"]) }
+        guard ["gdoc", "word", "pdf"].contains(format) else { return done(false, ["message": tr("err.badFormat")]) }
+        guard !to.isEmpty else { return done(false, ["message": tr("err.noRecipient")]) }
+        guard !subject.isEmpty, !body.isEmpty else { return done(false, ["message": tr("err.emptyMail")]) }
         do { try body.write(to: dir.appendingPathComponent("信件內文.txt"), atomically: true, encoding: .utf8) } catch {
-            return done(false, ["message": "沒辦法存下信件內容。"])
+            return done(false, ["message": tr("err.saveMail")])
         }
         let base = ["--send", dir.path, "--to", to.joined(separator: ","), "--subject", subject, "--format", format]
         owner.runPipeline(base + ["--dry"]) { code, out in
             guard code == 0, let preview = lastObject(out, prefix: "MAIL "), let confirm = preview["code"] as? String else {
                 let why = lastLine(out)
-                return done(false, ["message": why.isEmpty ? "信件預覽失敗，信沒有寄出。" : why])
+                return done(false, ["message": why.isEmpty ? tr("err.previewFailed") : why])
             }
             guard send else { return done(true, preview) }
             let same = Set(preview["to"] as? [String] ?? []) == Set(to)
                 && (preview["subject"] as? String ?? "") == subject
                 && (preview["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == body
-            guard same else { return done(false, ["message": "準備寄出的信跟畫面上的不一樣，信沒有寄出，請再按一次寄出。"]) }
+            guard same else { return done(false, ["message": tr("err.mailChanged")]) }
             owner.runPipeline(base + ["--confirm", confirm]) { code, out in
                 guard code == 0 else {
                     let why = lastLine(out)
-                    return done(false, ["message": why.isEmpty ? "信沒有寄出。" : why])
+                    return done(false, ["message": why.isEmpty ? tr("err.notSent") : why])
                 }
                 let f = DateFormatter()
                 f.dateFormat = "MM/dd HH:mm"
-                let words = ["gdoc": "Google 文件連結", "word": "Word 檔", "pdf": "PDF 檔"][format] ?? ""
+                let words = ["gdoc": tr("format.gdoc"), "word": tr("format.word"), "pdf": tr("format.pdf")][format] ?? ""
                 done(true, ["sent": ["at": f.string(from: Date()), "count": to.count, "format": words]])
                 owner.checkJobs()
             }
@@ -1059,7 +1395,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             if player == nil || playerJob != dir.lastPathComponent {
                 let name = Job(dir: dir).meta["audio"] as? String ?? "錄音.m4a"
                 guard let p = try? AVAudioPlayer(contentsOf: dir.appendingPathComponent(name)) else {
-                    return done(false, ["message": "找不到這場會議的錄音檔。"])
+                    return done(false, ["message": tr("err.noAudio")])
                 }
                 p.enableRate = true
                 p.delegate = self
@@ -1084,6 +1420,45 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         }
         tellPlayer()
         done(true, [:])
+    }
+
+    /// 封存, 取消封存 or 刪除 for the meetings picked in the list, one after the other (main thread: runScript
+    /// answers there). Answers the ones that went through and a message. The first one that fails stops the rest:
+    /// offline, each of them would wait for Google too. A deleted meeting's folder goes to the Mac's Trash first,
+    /// once minutes_app.py has sent its Doc to Google's trash; if the folder can't go, the meeting stays listed.
+    /// The files beside its minutes follow; one that can't go is only mentioned.
+    func eachMeeting(_ cmd: String, _ ids: [String], _ done: @escaping (Bool, Any) -> Void) {
+        var through: [String] = []
+        func next(_ rest: ArraySlice<String>, _ note: String) {
+            guard let id = rest.first else { return done(true, ["done": through, "message": note]) }
+            let dir = recordingsDir.appendingPathComponent(id)
+            app([cmd, dir.path]) { [weak self] ok, data in
+                let answer = data as? [String: Any] ?? [:]
+                guard ok else {
+                    return done(true, ["done": through, "message": answer["message"] as? String ?? tr("err.tryAgain")])
+                }
+                guard cmd == "delete" else {
+                    through.append(id)
+                    return next(rest.dropFirst(), note)
+                }
+                if let self, self.playerJob == id {
+                    self.player?.stop()
+                    self.player = nil
+                    self.playerTick?.invalidate()
+                    self.tellPlayer()
+                }
+                do { try FileManager.default.trashItem(at: dir, resultingItemURL: nil) }
+                catch { return done(true, ["done": through, "message": error.localizedDescription]) }
+                through.append(id)
+                var why = note
+                for url in (answer["trash"] as? [String] ?? []).map({ URL(fileURLWithPath: $0) }) {
+                    do { try FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+                    catch { if why.isEmpty { why = error.localizedDescription } }
+                }
+                next(rest.dropFirst(), why)
+            }
+        }
+        next(ids[...], "")
     }
 
     func tellPlayer() {
@@ -1163,11 +1538,11 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     }
 
     func setupScript(_ args: [String], _ done: @escaping (Bool, Any) -> Void) {
-        guard let owner else { return done(false, ["message": "程式正在結束。"]) }
+        guard let owner else { return done(false, ["message": tr("err.quitting")]) }
         owner.runScript("setup_check.py", args) { code, out in
             if code == 0, let obj = lastObject(out, prefix: "JSON ") { return done(true, obj) }
             let why = lastLine(out)
-            done(false, ["message": why.isEmpty || why.hasPrefix("JSON ") ? "沒有完成，請再試一次。" : why])
+            done(false, ["message": why.isEmpty || why.hasPrefix("JSON ") ? tr("err.tryAgain") : why])
         }
     }
 
@@ -1180,8 +1555,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let commands = ["claude": ("Claude Code", "claude auth login"), "codex": ("Codex", "codex login"),
                         "antigravity": ("Antigravity", "agy")]
         guard let (name, command) = commands[key] else { return }
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("登入 \(name).command")
-        let script = "#!/bin/zsh -l\necho '登入 \(name)'\n\(command)\necho\necho '登入好了就可以關掉這個視窗，回到 Vinutes。'\n"
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(tr("signin.title", name) + ".command")
+        let script = "#!/bin/zsh -l\necho \(shellQuoted(tr("signin.title", name)))\n\(command)\necho\necho \(shellQuoted(tr("signin.done")))\n"
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
@@ -1198,8 +1573,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.json]
         panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        panel.message = "選擇從 Google Cloud 下載的用戶端檔案（client_secret 開頭的 JSON 檔）"
-        panel.prompt = "使用這個檔案"
+        panel.message = tr("panel.client")
+        panel.prompt = tr("panel.useFile")
         panel.beginSheetModal(for: window) { [weak self] answer in
             guard answer == .OK, let url = panel.url else { return done(true, ["cancelled": true]) }
             self?.setupScript(["client", url.path], done)
@@ -1213,8 +1588,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         if images { panel.allowedContentTypes = [.png, .jpeg, .gif, .heic, .webP, .tiff, .bmp] }
-        panel.message = images ? "選擇要插入會議記錄的圖片" : "選擇要加進會議記錄的檔案"
-        panel.prompt = "加入"
+        panel.message = images ? tr("panel.images") : tr("panel.files")
+        panel.prompt = tr("panel.add")
         panel.beginSheetModal(for: window) { [weak self] answer in
             guard answer == .OK else { return done(true, ["files": []]) }
             let files = panel.urls.map { url -> [String: String] in
@@ -1339,7 +1714,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let alert = NSAlert()
         alert.messageText = message
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: tr("btn.ok"))
         alert.beginSheetModal(for: window) { _ in completionHandler() }
     }
 
@@ -1347,8 +1722,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         let alert = NSAlert()
         alert.messageText = message
-        alert.addButton(withTitle: "好")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: tr("btn.ok"))
+        alert.addButton(withTitle: tr("btn.cancel"))
         alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn) }
     }
 

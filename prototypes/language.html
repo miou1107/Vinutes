@@ -1,0 +1,659 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vinutes 英文版原型</title><style>/* The meeting window of Vinutes. Layout and colours follow the approved prototype (2026-10-15). */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --side: #ebebef; --panel: #f6f6f8; --rail: #fbfbfc; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field: #ffffff; --field-line: #cfcfd6;
+  --pick: #d6e4fb; --hover: #e0e0e6; --link: #2a6dd6; --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff;
+  --blue-line: #c9d6ee; --green: #1e7b34; --green-bg: #dff3e3; --green-ink: #14532d; --news-bg: #ecf7ee;
+  --red-bg: #fde2e1; --red-ink: #9b1c1c; --red: #b42318; --red-hover: #fbcfcd;
+  --yellow-bg: #fbefc6; --yellow-ink: #6b4d00; --yellow-label: #8a6100; --amber: #f0b400; --anchor-bg: #fff3cd;
+  --warn-bg: #fff6dd; --h1: #1f3a68; --h2: #2e5e3a; --sheet-shadow: 0 16px 40px rgba(0,0,0,0.3);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e20; --side: #252528; --panel: #232326; --rail: #222225; --line: #333338; --line2: #3a3a40;
+    --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field: #2c2c30; --field-line: #46464c;
+    --pick: #2d3f5e; --hover: #303036; --link: #7fb0ff; --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a;
+    --blue-line: #36507a; --green: #5cc27a; --green-bg: #1f3a28; --green-ink: #b6e8c4; --news-bg: #1f3326;
+    --red-bg: #4a2020; --red-ink: #ffb4ad; --red: #ff8a80; --red-hover: #5a2828;
+    --yellow-bg: #4a3c10; --yellow-ink: #ffe08a; --yellow-label: #e9c46a; --anchor-bg: #4a3c10;
+    --warn-bg: #3d3214; --h1: #9db8e8; --h2: #9ccfa8; --sheet-shadow: 0 16px 40px rgba(0,0,0,0.6);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif;
+       overflow: hidden; -webkit-user-select: none; user-select: none; }
+button { font: inherit; color: inherit; }
+input, textarea, select { font: inherit; color: var(--text); -webkit-user-select: text; user-select: text; }
+.hidden { display: none !important; }
+#app { display: flex; height: 100vh; }
+
+/* sidebar */
+#side { width: 270px; flex: none; display: flex; flex-direction: column; padding: 14px 10px 10px; overflow: hidden; background: var(--side); border-right: 1px solid var(--line2); }
+.sidelist { flex: 1; min-height: 0; overflow: auto; }
+#side h1 { margin: 0; padding: 2px 8px 10px; font-size: 15px; font-weight: 700; }
+.search { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; margin: 0 4px 8px; background: var(--field);
+          border: 1px solid var(--field-line); border-radius: 7px; }
+.search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 13px; }
+.proj { display: flex; align-items: center; gap: 8px; margin: 0 4px 6px; }
+.proj label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.proj select { flex: 1; min-width: 0; height: 28px; border: 1px solid var(--field-line); border-radius: 7px; background: var(--field); padding: 0 6px; }
+.count { padding: 2px 10px 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+.day { display: flex; align-items: center; gap: 8px; padding: 14px 10px 5px; }
+.day span { font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.day i { flex: 1; height: 1px; background: var(--field-line); }
+.item { all: unset; box-sizing: border-box; display: flex; gap: 9px; align-items: flex-start; width: 100%; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+.item:hover { background: var(--hover); }
+.item.on { background: var(--pick); }
+.item:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+/* 看逐字稿 and 聽錄音檔 only on the meeting that is open (Vin 2026-10-15: not on hover) */
+.item .tools { display: none; flex: none; gap: 4px; align-self: center; }
+.item.on .tools, .item.playing .tools { display: flex; }
+.tb { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+      border-radius: 6px; background: var(--field); border: 1px solid var(--field-line); color: var(--text2); cursor: pointer; }
+.tb:hover { filter: brightness(0.95); }
+.tb:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.tb.on { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+/* the list's corner: the version, and 版本更新 when there is a newer one */
+.ver { flex: none; display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px 0; border-top: 1px solid var(--line2);
+       font-size: 11px; color: var(--faint); }
+.ver:empty { display: none; }
+.upd { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border-radius: 11px;
+       background: var(--blue); color: #ffffff; font-size: 11px; font-weight: 600; cursor: pointer; }
+.upd:hover { filter: brightness(0.92); }
+.upd.off { opacity: 0.5; cursor: default; filter: none; }
+.item .ico { flex: none; padding-top: 2px; }
+.item .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.item .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .s { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.empty { padding: 24px 10px; font-size: 13px; color: var(--faint); text-align: center; }
+
+/* main column */
+#main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.head { flex: none; display: flex; align-items: center; gap: 14px; padding: 12px 24px; border-bottom: 1px solid var(--line); }
+.crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.crumb { all: unset; cursor: pointer; color: var(--link); padding: 2px 4px; border-radius: 4px; }
+.crumb:hover { background: var(--blue-bg); }
+.crumbs b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.sib { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px;
+       border-radius: 13px; border: 1px solid var(--field-line); font-size: 12px; color: var(--blue-ink); background: var(--blue-bg); cursor: pointer; }
+.sib.off { color: var(--faint); background: var(--panel); border-color: var(--line); cursor: default; }
+.savetext { font-size: 11px; color: var(--faint); white-space: nowrap; }
+.savetext.err { color: var(--red); }
+.iconlink { display: flex; cursor: pointer; }
+.body { flex: 1; min-height: 0; display: flex; }
+.paper { flex: 1; min-width: 0; overflow: auto; padding: 24px 56px 40px; }
+.banner { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+.banner.news { background: var(--news-bg); color: var(--green-ink); }
+.banner.warn { background: var(--warn-bg); color: var(--yellow-ink); }
+.banner.err { background: var(--red-bg); color: var(--red-ink); }
+.banner span { flex: 1; }
+.banner button { all: unset; cursor: pointer; font-size: 12px; }
+
+/* the minutes */
+#doc { font-size: 15px; line-height: 1.75; outline: none; -webkit-user-select: text; user-select: text; max-width: 820px; margin: 0 auto; }
+#doc h1 { font-size: 22px; text-align: center; margin: 0; color: var(--h1); }
+#doc h1 + h1 { font-size: 17px; margin-bottom: 12px; }
+#doc h2 { font-size: 16px; color: var(--h2); margin: 22px 0 8px; }
+#doc h3 { font-size: 15px; margin: 12px 0 4px; }
+#doc p { margin: 4px 0; }
+#doc ul, #doc ol { margin: 0; padding-left: 22px; }
+#doc li { margin: 3px 0; }
+#doc table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 14px; }
+#doc th, #doc td { border: 1px solid var(--field-line); padding: 4px 8px; vertical-align: top; text-align: left; }
+#doc th { background: var(--h1); color: #fff; }
+#doc a { color: var(--link); }
+#doc img { max-width: 100%; }
+#doc .blank { background: var(--red-bg); color: var(--red-ink); border-radius: 3px; padding: 0 2px; }
+#doc.blinking .blank { animation: blank-blink .65s steps(1) 3; }
+@keyframes blank-blink { 0% { background: #ff2d20; color: #ffffff; } 55% { background: var(--red-bg); color: var(--red-ink); } }
+#doc .flash { outline: 2px solid #d1242f; outline-offset: 2px; border-radius: 3px; }
+#doc .edited { background: var(--green-bg); border-bottom: 2px solid #34a853; padding: 0 2px; }
+#doc .anchor { background: var(--anchor-bg); border-bottom: 2px solid var(--amber); cursor: pointer; }
+#doc .anchor.focus { outline: 2px solid var(--amber); outline-offset: 2px; }
+#doc .cnum { color: #b07d00; font-size: 10px; font-weight: 700; margin-left: 1px; -webkit-user-select: none; user-select: none; }
+#doc[contenteditable="false"] { opacity: 0.6; }
+
+/* right column: comments and the activity log */
+.rail { width: 290px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--rail); }
+.rail.closed { width: 44px; align-items: center; gap: 8px; padding-top: 10px; }
+.railhead { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 8px 9px 14px; border-bottom: 1px solid var(--line); }
+.tabs { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--line); }
+.tab { all: unset; cursor: pointer; padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--text2); }
+.tab.on { background: var(--field); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+.iconbtn { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; position: relative; }
+.iconbtn:hover { background: var(--line); }
+.badge { position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; border-radius: 8px; background: var(--amber); color: #fff;
+         font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.railbody { flex: 1; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.card { padding: 10px 12px; border-radius: 8px; background: var(--field); border: 1px solid var(--line); }
+.card.focus { border-color: var(--amber); }
+.card.done { opacity: 0.55; }
+.card .top { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.num { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 8px; background: var(--amber); color: #fff; font-size: 10px; font-weight: 700; }
+.card .who { font-weight: 600; }
+.card .at { color: var(--faint); }
+.card .quote { margin-top: 6px; padding-left: 8px; border-left: 2px solid #f0d27a; font-size: 12px; color: var(--muted); }
+.card .text { margin-top: 6px; font-size: 13px; line-height: 1.55; -webkit-user-select: text; user-select: text; }
+.card .rep { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; }
+.card input { margin-top: 8px; width: 100%; height: 28px; border: 1px solid var(--field-line); border-radius: 6px; padding: 0 8px; font-size: 12px; background: var(--field); }
+.okc { all: unset; cursor: pointer; display: flex; padding: 2px; }
+.logrow { display: flex; gap: 10px; font-size: 12px; line-height: 1.55; }
+.logrow .when { flex: none; width: 72px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.logrow .what { flex: 1; min-width: 0; -webkit-user-select: text; user-select: text; }
+.logrow .what b { font-weight: 600; }
+.logrow.sent .what { color: var(--green); }
+.logrow.warn .what { color: var(--red); }
+
+/* beside the Google Doc: the Doc itself is laid over #gdoc by the app */
+.paper.docs { overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+.paper.docs #banners:not(:empty) { padding: 10px 14px 0; }
+.paper.docs .banner { margin-bottom: 10px; }
+.gdoc { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--panel); }
+.tab .n { font-weight: 700; }
+.tab .n.red { color: var(--red); }
+.tab .n.yellow { color: var(--yellow-label); }
+.badge.red { background: var(--red); }
+.todo { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 3px; padding: 10px 12px;
+        border-radius: 8px; background: var(--field); border: 1px solid var(--red-hover); }
+.todo:hover { background: var(--red-bg); }
+.todo b { font-size: 13px; color: var(--red-ink); }
+.todo span { font-size: 12px; color: var(--muted); -webkit-user-select: text; user-select: text; }
+.card.guess { border-color: var(--yellow-bg); display: flex; flex-direction: column; gap: 8px; }
+.card.guess .text { margin-top: 0; cursor: pointer; }
+.okc2 { all: unset; cursor: pointer; align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px;
+        border-radius: 12px; border: 1px solid var(--green-bg); background: var(--field); font-size: 12px; color: var(--green); }
+.okc2:hover { background: var(--green-bg); }
+.okc2:disabled { opacity: 0.5; cursor: default; }
+
+/* talking to Claude */
+.ask { flex: none; padding: 10px 24px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.busy, .replyline { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+#askTop { display: flex; flex-direction: column; gap: 8px; }
+#askTop:empty { display: none; }
+.busy { color: var(--muted); }
+.replyline .asked { color: var(--muted); }
+.replyline .said { flex: 1; }
+.replyline.err .said { color: var(--red); }
+.learn { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 8px; background: var(--blue-bg); border: 1px solid var(--blue-line); font-size: 12px; }
+.learn .lh { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--blue-ink); }
+.learn .lr { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.learn .lr.off .lt { text-decoration: line-through; color: var(--faint); }
+.tag { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--blue-bg); color: var(--blue-ink); border: 1px solid var(--blue-line); }
+.tag.gray { background: var(--line); color: var(--muted); border-color: transparent; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.qk { all: unset; display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 13px; border: 1px solid var(--blue-line);
+      background: var(--blue-bg); font-size: 12px; color: var(--blue-ink); cursor: pointer; }
+.qk:hover { filter: brightness(0.96); }
+.qk[disabled] { opacity: 0.5; cursor: default; }
+.prompt { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 12px; border: 1px solid var(--field-line); border-radius: 10px;
+          background: var(--field); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.prompt input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: 14px; }
+.prompt.with-tools { padding-left: 6px; gap: 4px; }
+.prompt.with-tools input { margin-left: 4px; }
+.ib { all: unset; flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px;
+      color: var(--muted); cursor: pointer; }
+.ib:hover, .ib.on { background: var(--blue-bg); color: var(--blue); }
+.ib[disabled] { opacity: 0.4; cursor: default; background: none; }
+.awrap { position: relative; flex: none; display: flex; }
+/* opens downward: above the box the Google Doc lies over the page, and nothing of the page shows through it */
+.amenu { position: absolute; left: 0; top: 36px; z-index: 20; width: 160px; box-sizing: border-box; padding: 6px; border-radius: 10px;
+         background: var(--field); border: 1px solid var(--field-line); box-shadow: 0 8px 24px rgba(0,0,0,0.16); }
+.amenu[hidden] { display: none; }
+.amenu button { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 10px;
+                border-radius: 7px; font-size: 13px; cursor: pointer; }
+.amenu button:hover { background: var(--blue-bg); }
+/* the AI in use, left of the prompt box; its menu is too tall to open downward, so it opens upward and the
+   Google Doc's view ends above it while it is open (placeDoc) */
+.mwrap { position: relative; flex: none; display: flex; }
+.model { all: unset; flex: none; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px;
+         font-size: 12.5px; font-weight: 600; color: var(--text); cursor: pointer; background: var(--panel); }
+.model:hover, .model.on { background: var(--blue-bg); color: var(--blue-ink); }
+.model[disabled] { opacity: 0.5; cursor: default; background: var(--panel); color: var(--text); }
+.sep { flex: none; width: 1px; height: 20px; background: var(--line2); margin: 0 2px; }
+.dot { flex: none; width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.claude { background: #d97757; }
+.dot.codex { background: var(--text); }
+.dot.antigravity { background: #4285f4; }
+.mmenu { position: absolute; left: 0; bottom: 36px; z-index: 20; width: 230px; box-sizing: border-box; padding: 6px; border-radius: 10px;
+         background: var(--field); border: 1px solid var(--field-line); box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
+.mmenu[hidden] { display: none; }
+.mi { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 10px;
+      border-radius: 7px; font-size: 13px; cursor: pointer; }
+.mi:hover { background: var(--blue-bg); }
+.mi .mn { flex: 1; }
+.mi .ck { color: var(--blue); display: flex; }
+.mi .ms { font-size: 11px; color: var(--muted); }
+.mi.off { opacity: 0.45; cursor: default; }
+.mi.off:hover { background: none; }
+.mhead { padding: 4px 10px 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+#attachBox { display: flex; flex-direction: column; gap: 6px; }
+#attachBox:empty { display: none; }
+.achips { display: flex; flex-wrap: wrap; gap: 6px; }
+.achip { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 320px; box-sizing: border-box; padding: 0 6px 0 9px;
+         border-radius: 14px; background: var(--blue-bg); border: 1px solid var(--blue-line); font-size: 12px; color: var(--blue-ink); }
+.achip .an { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax { all: unset; flex: none; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+      border-radius: 9px; font-size: 11px; }
+.ax:hover { background: var(--blue-line); }
+.aurl { display: flex; gap: 8px; }
+.aurl input { flex: 1; min-width: 0; height: 30px; box-sizing: border-box; border: 1px solid var(--field-line); border-radius: 7px; padding: 0 9px;
+              font-size: 12px; background: var(--field); color: inherit; outline: none; }
+.send { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 15px; background: var(--blue); }
+
+/* bottom: open items, the player, the buttons */
+.foot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 14px 24px 16px; background: var(--panel); border-top: 1px solid var(--line2); }
+.row { display: flex; align-items: center; gap: 10px; }
+.lbl { width: 60px; flex: none; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.chips { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { all: unset; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; font-size: 12px; cursor: pointer; }
+.chip.red { background: var(--red-bg); color: var(--red-ink); }
+.chip.red:hover { background: var(--red-hover); }
+.chip.yellow { background: var(--yellow-bg); color: var(--yellow-ink); cursor: default; padding-right: 4px; }
+.okbtn { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9px; background: var(--field); }
+.okbtn:hover { background: var(--green-bg); }
+.player { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 8px 0 6px; border-radius: 10px; background: var(--field); border: 1px solid var(--line2); }
+.play { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 15px; background: var(--blue); }
+.player .tm { font-size: 12px; color: var(--text2); font-variant-numeric: tabular-nums; min-width: 40px; }
+.player .dur { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.bar { flex: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; cursor: pointer; }
+.bar i { display: block; height: 100%; background: var(--blue); width: 0; }
+.speed { all: unset; cursor: pointer; min-width: 34px; text-align: center; font-size: 12px; font-weight: 600; color: var(--blue-ink); padding: 3px 6px; border-radius: 5px; background: var(--blue-bg); }
+.buttons { display: flex; align-items: center; gap: 10px; }
+.btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 16px;
+       border-radius: 6px; font-size: 13px; cursor: pointer; }
+.btn.ghost { background: var(--field); border: 1px solid var(--field-line); color: var(--text); }
+.btn.ghost:hover { filter: brightness(0.97); }
+.btn.primary { background: var(--blue); color: #fff; }
+.btn[disabled] { opacity: 0.55; cursor: default; }
+.sentline { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--green); }
+
+/* the meeting that is still being written, or failed */
+.state { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 32px 40px; }
+.state h2 { margin: 0; font-size: 20px; }
+.state .sub { font-size: 13px; color: var(--muted); }
+.steps { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; font-size: 14px; }
+.steps div { display: flex; align-items: center; gap: 10px; }
+.steps .now { font-weight: 600; }
+.steps .later { color: var(--faint); }
+.spin { animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* sheets: send mail, transcript */
+.veil { position: fixed; inset: 0; background: rgba(0,0,0,0.22); display: flex; justify-content: center; align-items: flex-start; z-index: 10; }
+.sheet { width: 640px; max-height: calc(100vh - 20px); overflow: auto; padding: 20px 22px 18px; background: var(--panel); border: 1px solid var(--field-line);
+         border-top: none; border-radius: 0 0 12px 12px; box-shadow: var(--sheet-shadow); display: flex; flex-direction: column; gap: 14px; }
+.sheet h3 { margin: 0; font-size: 15px; }
+.grid { display: grid; grid-template-columns: 56px minmax(0, 1fr); column-gap: 10px; row-gap: 10px; align-items: center; font-size: 13px; }
+.grid .k { color: var(--muted); text-align: right; }
+.field { width: 100%; min-height: 28px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); padding: 0 8px;
+         display: flex; align-items: center; font-size: 13px; }
+.tokens { flex-wrap: wrap; gap: 6px; padding: 4px 6px; min-height: 34px; }
+.token { display: inline-flex; align-items: center; gap: 4px; background: var(--blue-bg); color: var(--blue-ink); border-radius: 4px; padding: 2px 4px 2px 8px; }
+.token button { all: unset; cursor: pointer; display: flex; padding: 2px; }
+.tokens input { flex: 1; min-width: 120px; border: none; outline: none; background: transparent; font-size: 13px; }
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--line); }
+.seg button { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 6px; font-size: 12px; color: var(--text2); }
+.seg button.on { background: var(--field); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+.sheet textarea { height: 230px; padding: 10px 12px; background: var(--field); border: 1px solid var(--field-line); border-radius: 6px; font-size: 13px; line-height: 1.6; resize: none; }
+.sheet .note { flex: 1; font-size: 12px; color: var(--muted); }
+.sheet .err { color: var(--red); }
+.lines { height: 340px; overflow: auto; padding: 10px 12px; background: var(--field); border: 1px solid var(--field-line); border-radius: 6px; font-size: 13px; line-height: 1.8; }
+.lines div { display: flex; align-items: flex-start; gap: 12px; }
+.lines button { all: unset; cursor: pointer; flex: none; color: var(--link); font-variant-numeric: tabular-nums; }
+.lines span { -webkit-user-select: text; user-select: text; }
+/* who said each line: a chip per voice above the lines, a name before each line, and the question 「講者 A 是誰？」 */
+.vchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 8px; }
+.vchip { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 13px;
+         font-size: 12px; font-weight: 600; cursor: pointer; }
+.vchip span { font-weight: 400; opacity: 0.8; }
+.vchip:hover, .lines .who:hover { filter: brightness(0.95); }
+.lines .who { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; height: 20px; margin-top: 2px; padding: 0 8px;
+              border-radius: 10px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.vname { display: flex; flex-direction: column; gap: 9px; margin-bottom: 10px; padding: 12px 14px; border-radius: 8px; background: var(--field); border: 1px solid var(--field-line); }
+.vrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.vsug { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 13px; cursor: pointer;
+        border: 1px solid var(--blue-line); background: var(--blue-bg); color: var(--blue-ink); font-size: 12px; }
+.vsug.on { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+#vinput { width: 130px; height: 26px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); font-size: 12px; }
+.vtoast { margin-bottom: 10px; padding: 7px 12px; border-radius: 7px; background: var(--green-bg); color: var(--green-ink); font-size: 12px; }
+
+/* 環境設定自檢 */
+.sheet.setup { width: 680px; padding: 18px 0 14px; }
+.setup .shead { padding: 0 22px 12px; text-align: center; }
+.setup .shead h3 { font-size: 17px; }
+.setup .ssub { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.setup .sinfo { margin: 0 22px 10px; font-size: 12px; }
+.setup .slist { margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.setup .srow { display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+.setup .srow:last-child { border-bottom: none; }
+.setup .srow:nth-child(even) { background: var(--panel2, transparent); }
+.setup .sico { flex: none; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+.setup .snum { background: var(--blue-bg); color: var(--blue-ink); font-weight: 700; font-size: 14px; }
+.setup .stxt { flex: 1; min-width: 0; }
+.setup .stt { font-size: 13px; font-weight: 700; }
+.setup .sreq { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
+.setup .sds { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.setup .sside { flex: none; width: 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.setup .sside .btn { height: 28px; min-width: 84px; padding: 0 14px; font-size: 12px; }
+.setup .sok { font-size: 12px; font-weight: 600; color: var(--green); }
+.setup .sbad { font-size: 12px; font-weight: 600; color: var(--red); }
+.setup .slink { all: unset; cursor: pointer; font-size: 12px; color: var(--link); }
+.setup .slink:hover { text-decoration: underline; }
+.setup .slock { font-size: 12px; color: var(--faint, var(--muted)); text-align: right; }
+.setup .swait { font-size: 12px; color: var(--blue-ink); }
+.setup .sbar { width: 120px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.setup .sbar i { display: block; height: 100%; background: var(--blue); }
+.setup .spills { display: flex; gap: 4px; margin-top: 6px; }
+.setup .spill { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border-radius: 11px;
+                border: 1px solid var(--blue-line); background: var(--field); color: var(--blue-ink); font-size: 11px; cursor: pointer; }
+.setup .spill:hover { background: var(--blue-bg); }
+.setup .spill.on { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+.setup .sfoot { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px 0; }
+.setup .scount { font-size: 13px; font-weight: 600; }
+
+body{background:#f2f2f5;padding:24px 16px;height:auto;overflow:auto;-webkit-user-select:auto;user-select:auto}
+html,body{height:auto}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:26px}
+.intro h1{font-size:20px;margin:0 0 6px}
+.intro p{margin:0;font-size:14px;color:var(--text2)}
+.frame{background:var(--bg);border-radius:12px;position:relative;padding-top:30px;overflow:hidden}
+.frame.asis{border:2px solid #c9c9cf;background:#fafafa}
+.frame.tobe{border:2px solid #2f7ef0}
+.ftag{position:absolute;top:0;left:0;padding:4px 12px;border-radius:10px 0 10px 0;font-size:12px;font-weight:700;color:#fff;z-index:5}
+.asis .ftag{background:#8a8a90}.tobe .ftag{background:#2f7ef0}
+.cap{margin:0;padding:10px 16px 12px;font-size:13px;color:var(--text2);border-top:1px dashed var(--line2);background:var(--bg)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.row2.menus{grid-template-columns:1fr}
+@media (max-width:900px){.row2{grid-template-columns:1fr}}
+
+/* the macOS menu bar menu */
+.desk{height:330px;background:linear-gradient(160deg,#6f8fb8,#9db3cf);position:relative;overflow:hidden}
+.mbar{height:26px;background:rgba(240,240,244,.82);display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:0 14px;font-size:13px;color:#1d1d1f}
+.mbar .vi{display:flex;align-items:center;justify-content:center;width:26px;height:20px;border-radius:5px;background:rgba(0,0,0,.14)}
+.nsmenu{position:absolute;top:30px;width:250px;padding:5px;border-radius:9px;background:rgba(246,246,248,.97);box-shadow:0 10px 30px rgba(0,0,0,.28);border:1px solid rgba(0,0,0,.12);font-size:13px;color:#1d1d1f}
+.nsmenu .mi2{display:flex;align-items:center;gap:8px;height:24px;padding:0 9px;border-radius:5px;white-space:nowrap}
+.nsmenu .mi2 .k{margin-left:auto;color:#8a8a90;font-size:12px}
+.nsmenu .mi2 .ar{margin-left:auto;color:#6e6e73}
+.nsmenu .mi2 .ck{width:12px;flex:none;color:#1d1d1f}
+.nsmenu .mi2.hl{background:#0a64d8;color:#fff}
+.nsmenu .mi2.hl .k,.nsmenu .mi2.hl .ar,.nsmenu .mi2.hl .ck{color:#fff}
+.nsmenu .mi2.pick{cursor:pointer}
+.nsmenu .mi2.pick:hover{background:#0a64d8;color:#fff}
+.nsmenu .mi2.pick:hover .ck{color:#fff}
+.nsmenu .hd{padding:4px 9px 2px;font-size:11px;font-weight:600;color:#8a8a90}
+.nsmenu .sp{height:1px;background:rgba(0,0,0,.1);margin:4px 8px}
+.nsmenu .ic{width:16px;text-align:center;color:#6e6e73;flex:none}
+.nsmenu .mi2.hl .ic{color:#fff}
+.nsmenu .dim{color:#8a8a90;font-size:12px}
+.nsmenu .note{padding:3px 9px 4px 29px;font-size:11px;color:#8a8a90;white-space:normal;line-height:1.4}
+
+/* the meeting window inside a frame */
+.win{height:700px;display:flex;overflow:hidden}
+.win #side,.win #main{height:100%}
+.win .paper{padding:24px 40px 40px}
+.lbl{width:auto;min-width:60px}
+.langseg{display:inline-flex;padding:2px;border-radius:8px;background:var(--line);margin-left:auto}
+.langseg button{all:unset;cursor:pointer;padding:3px 12px;border-radius:6px;font-size:12px;color:var(--text2)}
+.langseg button.on{background:var(--field);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.setup .shead{display:flex;align-items:center;gap:12px}
+.setupbox{display:flex;justify-content:center;padding:24px 16px 28px;background:rgba(0,0,0,.28)}
+.setupbox .sheet{position:static;margin:0;max-height:none;width:560px;max-width:100%}
+.mdl{padding:16px 20px;font-size:14px;line-height:1.7;background:var(--bg)}
+.mdl h3{margin:0 0 6px;font-size:15px}
+.mdl table{border-collapse:collapse;width:100%;font-size:13px}
+.mdl th,.mdl td{border:1px solid var(--line2);padding:5px 9px;text-align:left;vertical-align:top}
+.mdl th{background:var(--panel);font-weight:600}
+.model{all:unset;flex:none;display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--text);background:var(--panel)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}.dot.claude{background:#d97757}
+.sep{width:1px;height:20px;background:var(--line2);margin:0 2px}
+</style></head><body><div class="wrap">
+
+<header class="intro">
+  <h1>Vinutes 英文版原型</h1>
+  <p>Mac 設定成英文的人，打開 Vinutes 會看到英文畫面；Mac 設定成中文的人，打開 Vinutes 跟現在一樣是中文畫面。不管 Mac 是什麼語言，都可以在選單列或設定清單裡自己換。</p>
+</header>
+
+<div class="row2 menus">
+  <section class="frame tobe">
+    <div class="ftag">調整後的畫面：換介面語言</div>
+    <div class="desk">
+      <div class="mbar"><span>Wed Oct 15 14:52</span><span class="vi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span></div>
+      <div class="nsmenu" style="left:16px;width:250px">
+        <div class="mi2"><span class="ic">⏺</span>Start Recording<span class="k">⌃⌥R</span></div>
+        <div class="sp"></div>
+        <div class="hd">Recent Meetings</div>
+        <div class="mi2"><span class="ic">✉</span>Website redesign kickoff<span class="k">14:00</span></div>
+        <div class="mi2"><span class="ic">✓</span>Weekly sales sync<span class="k">10:30</span></div>
+        <div class="mi2"><span class="ic">…</span>More…</div>
+        <div class="sp"></div>
+        <div class="mi2"><span class="ic">📁</span>Open Recordings Folder</div>
+        <div class="mi2 hl"><span class="ic">⚙</span>Settings<span class="ar">›</span></div>
+        <div class="sp"></div>
+        <div class="mi2"><span class="ic">⏻</span>Quit Vinutes<span class="k">⌘Q</span></div>
+      </div>
+      <div class="nsmenu" style="left:262px;top:196px;width:190px">
+        <div class="mi2"><span class="ic">☑</span>Setup Checklist</div>
+        <div class="mi2"><span class="ic"></span>Open at Login</div>
+        <div class="sp"></div>
+        <div class="mi2 hl"><span class="ic">🌐</span>Language<span class="ar">›</span></div>
+        <div class="mi2"><span class="ic">🎙</span>Meeting Language<span class="ar">›</span></div>
+      </div>
+      <div class="nsmenu" id="langMenu" style="left:448px;top:253px;width:220px"></div>
+    </div>
+    <p class="cap">換語言的選項放在選單列的 Settings 裡。點「繁體中文」，下方的會議視窗會換成中文；點「English」會換成英文。</p>
+  </section>
+
+  <section class="frame tobe">
+    <div class="ftag">調整後的畫面：會議用什麼語言</div>
+    <div class="desk">
+      <div class="mbar"><span>Wed Oct 15 14:52</span><span class="vi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d1d1f" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span></div>
+      <div class="nsmenu" style="left:16px;width:250px">
+        <div class="mi2"><span class="ic">⏺</span>Start Recording<span class="k">⌃⌥R</span></div>
+        <div class="sp"></div>
+        <div class="hd">Recent Meetings</div>
+        <div class="mi2"><span class="ic">✉</span>Website redesign kickoff<span class="k">14:00</span></div>
+        <div class="mi2"><span class="ic">✓</span>Weekly sales sync<span class="k">10:30</span></div>
+        <div class="mi2"><span class="ic">…</span>More…</div>
+        <div class="sp"></div>
+        <div class="mi2"><span class="ic">📁</span>Open Recordings Folder</div>
+        <div class="mi2 hl"><span class="ic">⚙</span>Settings<span class="ar">›</span></div>
+        <div class="sp"></div>
+        <div class="mi2"><span class="ic">⏻</span>Quit Vinutes<span class="k">⌘Q</span></div>
+      </div>
+      <div class="nsmenu" style="left:262px;top:196px;width:190px">
+        <div class="mi2"><span class="ic">☑</span>Setup Checklist</div>
+        <div class="mi2"><span class="ic"></span>Open at Login</div>
+        <div class="sp"></div>
+        <div class="mi2"><span class="ic">🌐</span>Language<span class="ar">›</span></div>
+        <div class="mi2 hl"><span class="ic">🎙</span>Meeting Language<span class="ar">›</span></div>
+      </div>
+      <div class="nsmenu" style="left:448px;top:277px;width:230px">
+        <div class="mi2"><span class="ck">✓</span>Detect Automatically</div>
+        <div class="sp"></div>
+        <div class="mi2"><span class="ck"></span>English</div>
+        <div class="mi2"><span class="ck"></span>中文</div>
+      </div>
+    </div>
+    <p class="cap">Meeting Language 選單決定逐字稿和會議紀錄用哪個語言寫，預設是自動判斷。錄音結束後，Vinutes 會取錄音開頭、中段、後段各 30 秒，判斷這場會議講中文還是英文。如果之後的會議固定講同一種語言，也可以直接選 English 或中文，Vinutes 就不再判斷。</p>
+  </section>
+</div>
+
+<section class="frame tobe" id="winFrame">
+  <div class="ftag" id="winTag">調整後的畫面：英文</div>
+  <div class="win" id="win"><nav id="side"></nav><main id="main"></main></div>
+  <p class="cap" id="winCap"></p>
+</section>
+
+<div class="row2">
+  <section class="frame tobe">
+    <div class="ftag">調整後的畫面：第一次打開</div>
+    <div class="setupbox"><div class="sheet setup">
+      <div class="shead"><h3>What Vinutes needs</h3><div class="langseg"><button class="on">English</button><button>中文</button></div></div>
+      <div class="slist">
+        <div class="srow"><div class="sico" style="background:#fde8e7">🎙</div><div class="stxt"><div class="stt">1. Microphone<span class="sreq">Required</span></div></div><div class="sside"><span class="sok">✓ Done</span></div></div>
+        <div class="srow"><div class="sico" style="background:#fdf3d7">🔔</div><div class="stxt"><div class="stt">2. Notifications</div><div class="sds">Lets you know when the minutes are ready</div></div><div class="sside"><button class="btn ghost sbtn">Allow</button></div></div>
+        <div class="srow"><div class="sico" style="background:#e3ecfd">📝</div><div class="stxt"><div class="stt">3. Speech-to-text model<span class="sreq">Required</span></div><div class="sds">About 1.6 GB</div></div><div class="sside"><span class="swait">Downloading 42%</span><div class="sbar"><i style="width:42%"></i></div></div></div>
+        <div class="srow"><div class="sico" style="background:#ece3fb">👥</div><div class="stxt"><div class="stt">4. Speaker recognition model</div><div class="sds">About 28 MB</div></div><div class="sside"><button class="btn ghost sbtn">Download</button></div></div>
+        <div class="srow"><div class="sico" style="background:#fde8d7">🤖</div><div class="stxt"><div class="stt">5. AI that writes the minutes<span class="sreq">Required</span></div><div class="sds">Pick one, then install it and sign in on this Mac</div><div class="spills"><button class="spill on">Claude Code</button><button class="spill">Codex</button><button class="spill">Antigravity</button></div></div><div class="sside"><button class="btn ghost sbtn">Sign in</button></div></div>
+        <div class="srow"><div class="sico" style="background:#eef0f2">🔑</div><div class="stxt"><div class="stt">6. Google connection</div><div class="sds">About 15 minutes, with step-by-step help</div></div><div class="sside"><button class="btn ghost sbtn">Set up</button></div></div>
+        <div class="srow"><div class="sico" style="background:#eef0f2">👤</div><div class="stxt"><div class="stt">7. Google sign-in</div><div class="sds">Use your work Google account</div></div><div class="sside"><span class="slock">Finish the Google connection first</span></div></div>
+      </div>
+      <div class="sfoot"><span class="scount">1 of 10 done</span><button class="btn ghost">Close</button></div>
+    </div></div>
+    <p class="cap">第一次打開 Vinutes 的人，會先看到這份設定清單。清單右上角也可以換語言，不用先去找選單列。</p>
+  </section>
+
+  <section class="frame tobe">
+    <div class="ftag">調整後的會議紀錄：英文會議</div>
+    <div class="mdl">
+      <h3>英文會議紀錄的章節，跟中文版一一對應</h3>
+      <table>
+        <tr><th>中文版</th><th>英文版</th></tr>
+        <tr><td>一、會議基本資訊</td><td>1. Meeting Details</td></tr>
+        <tr><td>二、會議目的</td><td>2. Purpose</td></tr>
+        <tr><td>三、討論摘要</td><td>3. Discussion Summary</td></tr>
+        <tr><td>四、初步共識</td><td>4. Agreements</td></tr>
+        <tr><td>五、待確認事項</td><td>5. Open Questions</td></tr>
+        <tr><td>六、行動方案</td><td>6. Action Items</td></tr>
+        <tr><td>七、其他建議</td><td>7. Other Suggestions</td></tr>
+        <tr><td>八、補充資訊</td><td>8. Supporting Materials</td></tr>
+      </table>
+    </div>
+    <p class="cap">英文會議的紀錄照英文商務文件的寫法，人名、日期、待補充與待確認的標記，跟中文版用同一套規則。中文會議的紀錄照現在的台灣用語寫，寫法規則不會動。</p>
+  </section>
+</div>
+
+</div>
+<script>
+const IC = {
+  search: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+  working: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a8a90" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9"/></svg>',
+  ready: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a64d8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  sent: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16 9.8"/></svg>',
+  lines: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 11h16M4 16h10"/></svg>',
+  headset: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg>',
+  chevR: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>',
+  chevL: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  chevU: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg>',
+  open: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M10 14l7-7M12 7h5v5"/></svg>',
+  check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  checkSmall: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  collapse: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></svg>',
+  plus: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  image: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-8 8"/></svg>',
+  up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  mail: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+};
+const mark = (t, kind) => `<span style="background:var(--${kind}-bg);color:var(--${kind}-ink);padding:0 4px;border-radius:3px">${t}</span>`;
+
+// what the window says in each language; the zh column is today's wording, unchanged
+const T = {
+  en: {
+    all: 'All meetings', find: 'Date or keyword', proj: 'Project', any: 'All', count: (n) => `${n} meetings`,
+    status: { working: 'Writing up', ready: 'Ready to send', sent: 'Sent' }, read: 'Read transcript', listen: 'Play recording',
+    ver: 'Version 0.2.0', upd: 'Update',
+    prev: 'Previous meeting', next: 'Next meeting', saved: 'Saved to Google Docs 14:52', openTip: 'Open the Google Doc in your browser',
+    comments: 'Comments', log: 'Activity', resolve: 'Mark as resolved', reply: 'Reply',
+    quick: ['Shorter', 'More detail', 'More formal', 'Use tables', 'External version'],
+    ask: (ai) => `Tell ${ai} what to change, e.g. The chair was Amy Chen`,
+    todo: 'To fill', check: 'To confirm', ok: 'Looks right', openG: 'Open in Google Docs', mail: 'Send email',
+    days: ['Wed, Oct 15', 'Tue, Oct 14'],
+    jobs: [
+      { d: 0, t: 'Website redesign kickoff', time: '14:00', s: 'ready', p: 'Website', on: true },
+      { d: 0, t: 'Writing up', time: '11:30', s: 'working' },
+      { d: 0, t: 'Weekly sales sync', time: '10:30', s: 'sent', p: 'Sales' },
+      { d: 1, t: 'Q4 campaign review', time: '16:00', s: 'sent', p: 'Marketing' },
+    ],
+    crumbs: ['Website', '10/15', 'Website redesign kickoff'],
+    doc: `<h1>Website Redesign Kickoff</h1><h1>Meeting Minutes</h1>
+      <h2>1. Meeting Details</h2><ul><li>Date: Wednesday, October 15, 2026, 14:00–15:10</li><li>Location: ${mark('[To fill]', 'red')}</li>
+      <li>Chair: Amy Chen</li><li>Attendees: Amy Chen, David Lee, Grace Wu, Vin Kao</li></ul>
+      <h2>2. Purpose</h2><p>Agree on the scope and timeline of phase one of the website redesign, so design and development can start next week.</p>
+      <h2>3. Discussion Summary</h2><h3>(a) Homepage</h3><ul><li>Amy Chen explained that phase one covers only the homepage and the events page.</li>
+      <li>David Lee said the events page needs the new booking widget, which takes about two weeks.</li></ul>
+      <h3>(b) Launch date</h3><ul><li>Grace Wu proposed launching on ${mark('November 20', 'yellow')}, after the November campaign ends.</li></ul>`,
+    cards: [{ who: 'Amy Chen', at: '10/15 15:20', quote: 'launching on November 20', text: 'Can we make it November 27? QA needs one more week.' }],
+    logs: [['10/15 15:12', 'Vinutes', 'Recording ended, 1 h 10 min'], ['10/15 15:14', 'Claude', 'Wrote the minutes'], ['10/15 15:15', 'Vinutes', 'Published as a Google Doc'], ['10/15 15:20', 'Amy Chen', 'Commented on “launching on November 20”']],
+    todos: ['Location'], checks: ['Launch date: November 20', 'Budget: $40,000'],
+    tag: '調整後的畫面：英文', cls: 'tobe',
+    cap: '介面和這場會議都是英文。按鈕、提示字、狀態和操作紀錄都換成英文，版面跟現在一樣。右邊「Comments／Activity」兩個分頁可以切換。',
+  },
+  zh: {
+    all: '所有會議記錄', find: '日期或關鍵字', proj: '專案', any: '全部', count: (n) => `${n} 筆`,
+    status: { working: '整理中', ready: '待寄出', sent: '已寄出' }, read: '看逐字稿', listen: '聽錄音檔',
+    ver: '版本 0.2.0', upd: '版本更新',
+    prev: '上次會議', next: '下次會議', saved: '已同步 Google 文件 14:52', openTip: '在瀏覽器打開 Google 文件',
+    comments: '留言', log: '操作紀錄', resolve: '標記為已解決', reply: '回覆',
+    quick: ['精簡摘要', '完整詳盡', '正式嚴謹', '視覺呈現', '對外版本'],
+    ask: (ai) => `跟 ${ai} 說要改什麼，例如：主持人是王小明`,
+    todo: '待補充', check: '待確認', ok: '確認無誤', openG: '在 Google 文件打開', mail: '發送信件',
+    days: ['10/15（三）', '10/14（二）'],
+    jobs: [
+      { d: 0, t: '官網會員專區改版第二次討論', time: '14:00', s: 'ready', p: '官網改版', on: true },
+      { d: 0, t: '整理中', time: '11:30', s: 'working' },
+      { d: 0, t: '業務週會', time: '10:30', s: 'sent', p: '業務' },
+      { d: 1, t: '第四季活動檢討', time: '16:00', s: 'sent', p: '行銷' },
+    ],
+    crumbs: ['官網改版', '10/15', '官網會員專區改版第二次討論'],
+    doc: `<h1>官網會員專區改版第二次討論</h1><h1>會議紀錄</h1>
+      <h2>一、會議基本資訊</h2><ul><li>會議日期：2026 年 10 月 15 日（星期三）14:00–15:00</li><li>地點：${mark('【待補充】', 'red')}</li>
+      <li>主持人：陳怡君</li><li>與會人員：陳怡君（Jessie）、王小明（Ming）、李志偉（David）</li></ul>
+      <h2>二、會議目的</h2><p>本次會議承接 10 月 8 日的第一次討論，確認會員專區首頁要放哪些區塊、上線時程與會員通知方式。</p>
+      <h2>三、討論摘要</h2><h3>（一）首頁區塊</h3><ul><li>陳怡君說明：會員專區首頁先放「我的訂單」「點數紀錄」「常見問題」三個區塊。</li>
+      <li>王小明提出：會員最常來查的是訂單狀態，「我的訂單」應放在最上面。</li></ul>
+      <h3>（二）上線時程</h3><ul><li>李志偉說明：開發約需 3 週，可以在${mark('11 月 20 日', 'yellow')}上線。</li></ul>`,
+    cards: [{ who: '陳怡君', at: '10/15 15:20', quote: '11 月 20 日上線', text: '可以改成 11/27 嗎？測試還要多一週。' }],
+    logs: [['10/15 15:12', 'Vinutes', '錄音結束，1 小時 10 分'], ['10/15 15:14', 'Claude', '整理成會議紀錄'], ['10/15 15:15', 'Vinutes', '發成 Google 文件'], ['10/15 15:20', '陳怡君', '在「11 月 20 日上線」留言']],
+    todos: ['地點'], checks: ['上線日：11 月 20 日', '預算：120 萬'],
+    tag: '選繁體中文的畫面：跟現在一樣', cls: 'asis',
+    cap: '選繁體中文之後，畫面上每一個字都跟現在一樣，中文會議的紀錄也照現在的寫法寫。',
+  },
+};
+
+let lang = 'en', tab = 'comments';
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function draw() {
+  const L = T[lang];
+  document.getElementById('winFrame').className = 'frame ' + L.cls;
+  document.getElementById('winTag').textContent = L.tag;
+  document.getElementById('winCap').textContent = L.cap;
+  document.getElementById('side').innerHTML = `<div class="sidelist"><h1>${L.all}</h1>
+    <div class="search">${IC.search}<input placeholder="${L.find}"></div>
+    <div class="proj"><label>${L.proj}</label><select><option>${L.any}</option></select></div>
+    <div class="count">${L.count(L.jobs.length)}</div>
+    ${L.days.map((day, di) => `<div class="day"><span>${day}</span><i></i></div>` + L.jobs.filter((j) => j.d === di).map((j) => `
+      <div class="item${j.on ? ' on' : ''}"><span class="ico">${IC[j.s]}</span>
+        <span class="txt"><span class="t">${esc(j.t)}</span><span class="s">${j.time}　${L.status[j.s]}${j.p ? '　·　' + esc(j.p) : ''}</span></span>
+        <span class="tools"><button class="tb" title="${L.read}">${IC.lines}</button><button class="tb" title="${L.listen}">${IC.headset}</button></span></div>`).join('')).join('')}
+    </div><div class="ver"><span>${L.ver}</span><button class="upd">${L.upd}</button></div>`;
+  const c = L.crumbs;
+  const railBody = tab === 'comments'
+    ? L.cards.map((k) => `<div class="card"><div class="top"><span class="who">${esc(k.who)}</span><span class="at">${k.at}</span><span style="flex:1"></span><button class="okc" title="${L.resolve}">${IC.check}</button></div>
+        <div class="quote">${esc(k.quote)}</div><div class="text">${esc(k.text)}</div><input placeholder="${L.reply}"></div>`).join('')
+    : L.logs.map(([at, who, what]) => `<div class="logrow"><span class="when">${at}</span><span class="what"><b>${esc(who)}</b>　${esc(what)}</span></div>`).join('');
+  document.getElementById('main').innerHTML = `
+    <div class="head"><nav class="crumbs"><button class="crumb">${esc(c[0])}</button>${IC.chevR}<button class="crumb">${c[1]}</button><b>（${esc(c[2])}）</b></nav>
+      <button class="sib off">${IC.chevL}<span>${L.prev}</span></button><button class="sib off"><span>${L.next}</span>${IC.chevR}</button>
+      <span class="savetext">${L.saved}</span><span class="iconlink" title="${L.openTip}">${IC.open}</span></div>
+    <div class="body"><div class="paper"><div id="doc">${L.doc}</div></div>
+      <aside class="rail"><div class="railhead"><div class="tabs"><button class="tab${tab === 'comments' ? ' on' : ''}" data-t="comments">${L.comments} 1</button><button class="tab${tab === 'log' ? ' on' : ''}" data-t="log">${L.log}</button></div>
+        <span style="flex:1"></span><button class="iconbtn">${IC.collapse}</button></div><div class="railbody">${railBody}</div></aside></div>
+    <div class="ask"><div class="quick">${L.quick.map((q) => `<button class="qk">${q}</button>`).join('')}</div>
+      <div class="prompt with-tools"><button class="model"><i class="dot claude"></i>Claude ${IC.chevU}</button><span class="sep"></span>
+        <button class="ib">${IC.plus}</button><button class="ib">${IC.image}</button><input placeholder="${esc(L.ask('Claude'))}"><button class="send">${IC.up}</button></div></div>
+    <div class="foot"><div class="row"><span class="lbl" style="color:var(--red)">${L.todo} ${L.todos.length}</span><div class="chips">${L.todos.map((t) => `<button class="chip red">${esc(t)}</button>`).join('')}</div></div>
+      <div class="row"><span class="lbl" style="color:var(--yellow-label)">${L.check} ${L.checks.length}</span><div class="chips">${L.checks.map((t) => `<span class="chip yellow"><span>${esc(t)}</span><button class="okbtn" title="${L.ok}">${IC.checkSmall}</button></span>`).join('')}</div></div>
+      <div class="buttons"><span style="flex:1"></span><button class="btn ghost">${IC.open}<span>${L.openG}</span></button><button class="btn primary">${IC.mail}<span>${L.mail}</span></button></div></div>`;
+  document.querySelectorAll('.rail .tab').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; draw(); }));
+  const m = document.getElementById('langMenu');
+  m.innerHTML = `<div class="mi2 pick" data-l="en"><span class="ck">${lang === 'en' ? '✓' : ''}</span>English</div>
+    <div class="mi2 pick" data-l="zh"><span class="ck">${lang === 'zh' ? '✓' : ''}</span>繁體中文</div>
+    <div class="sp"></div><div class="note">Until you pick one, Vinutes uses your Mac’s language.</div>`;
+  m.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => { lang = b.dataset.l; draw(); }));
+}
+draw();
+</script>
+</body></html>

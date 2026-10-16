@@ -10,11 +10,14 @@ it uses mlx-whisper with the whisper-large-v3-turbo model (about 1.6 GB, downloa
 Audio is decoded with macOS's own afconvert, so m4a, mp3, wav, aac and caf work without ffmpeg.
 The words in the correct-name column of references/glossary.md and $MINUTES_HOME/glossary.md are given
 to the model as a hint, so product and system names come out right more often.
-The text is converted to Traditional Chinese with Taiwan wording (OpenCC s2twp); each line starts with
-[mm:ss] (or [h:mm:ss]), counted from the start of the recording.
+The meeting's language comes from "meeting_language" in settings.json: "zh" or "en", or "auto" (the default),
+where three 30-second stretches (start, middle, end) are each given to the model to name the language and the
+most common answer wins. A Chinese meeting is converted to Traditional Chinese with Taiwan wording (OpenCC
+s2twp); any other language keeps the model's own text. Each line starts with [mm:ss] (or [h:mm:ss]), counted
+from the start of the recording. The language is kept in <out>.json as "language" (Whisper's code: zh, en, ja...).
 
 Install the two packages with recorder/install.sh, or: pip install mlx-whisper opencc-python-reimplemented
-Environment: MINUTES_WHISPER_MODEL picks another model.
+Environment: MINUTES_WHISPER_MODEL picks another model; MINUTES_MEETING_LANG (zh, en, auto) overrides the setting.
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from google_setup import CONFIG  # noqa: E402  (standard library only)
+from google_setup import CONFIG, settings  # noqa: E402  (standard library only)
 
 MODEL = os.environ.get('MINUTES_WHISPER_MODEL') or 'mlx-community/whisper-large-v3-turbo'
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -102,6 +105,31 @@ def pcm_frames(blob: bytes) -> bytes:
     sys.exit('CANNOT READ AUDIO: no sound data in the converted file')
 
 
+def meeting_setting() -> str:
+    v = (os.environ.get('MINUTES_MEETING_LANG') or str(settings().get('meeting_language') or 'auto')).strip().lower()
+    return v if v in ('auto', 'zh', 'en') else 'auto'
+
+
+def detect(audio, transcribe) -> str:
+    """The meeting's language by majority of three 30-second stretches (start, middle, end); a tie goes to the
+    earliest. Cantonese counts as Chinese: its minutes are written in Chinese either way."""
+    window = 30 * 16000
+    if len(audio) <= window:
+        starts = [0]
+    else:
+        last = len(audio) - window
+        starts = sorted({0, last // 2, last})
+    votes = []
+    for s in starts:
+        got = transcribe(audio[s:s + window], path_or_hf_repo=MODEL, language=None,
+                         condition_on_previous_text=False, verbose=None)
+        if (got.get('text') or '').strip():
+            votes.append('zh' if got.get('language') == 'yue' else got.get('language') or 'zh')
+    if not votes:
+        return 'zh'
+    return max(votes, key=lambda v: (votes.count(v), -votes.index(v)))
+
+
 def tidy(text: str, convert) -> str:
     text = convert(text.strip())
     cjk = '[一-鿿]'
@@ -130,12 +158,15 @@ def main():
 
     began = time.time()
     audio = load_audio(src)
-    result = mlx_whisper.transcribe(audio, path_or_hf_repo=MODEL, language='zh', initial_prompt=hint(),
-                                    condition_on_previous_text=False, verbose=None)
+    setting = meeting_setting()
+    lang = detect(audio, mlx_whisper.transcribe) if setting == 'auto' else setting
+    extra = {'initial_prompt': hint()} if lang == 'zh' else {}
+    result = mlx_whisper.transcribe(audio, path_or_hf_repo=MODEL, language=lang, condition_on_previous_text=False,
+                                    verbose=None, **extra)
     convert = OpenCC('s2twp').convert
     lines, spans, last = [], [], ''
     for seg in result.get('segments', []):
-        text = tidy(seg.get('text', ''), convert)
+        text = tidy(seg.get('text', ''), convert) if lang == 'zh' else seg.get('text', '').strip()
         if not text or text == last or any(h in text for h in HALLUCINATIONS):
             continue
         lines.append(f'{stamp(seg.get("start", 0))} {text}')
@@ -143,8 +174,8 @@ def main():
         last = text
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     # each line's start and end in seconds, for telling the voices apart (speakers.py)
-    out.with_suffix('.json').write_text(json.dumps({'lines': spans}), encoding='utf-8')
-    print(f'TRANSCRIPT {out} ({len(lines)} lines, audio {stamp(len(audio) / 16000)[1:-1]}, '
+    out.with_suffix('.json').write_text(json.dumps({'lines': spans, 'language': lang}), encoding='utf-8')
+    print(f'TRANSCRIPT {out} ({len(lines)} lines, language {lang}, audio {stamp(len(audio) / 16000)[1:-1]}, '
           f'took {time.time() - began:.0f}s)')
 
 

@@ -1,0 +1,2 @@
+/* What macOS shows when Vinutes first asks for the microphone. */
+"NSMicrophoneUsageDescription" = "錄下會議的聲音，整理成會議紀錄。";

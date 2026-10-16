@@ -2,7 +2,7 @@
 
 Vinutes records your meetings on a Mac and turns them into formal, well-structured minutes. The minutes are published as a Google Doc your colleagues can edit and comment on, and the follow-up email goes out only when you press Send.
 
-> **Status: early.** Vinutes runs on Macs with Apple silicon. The app and the minutes are in Traditional Chinese today. English is being added next and will become the default language, followed by Chinese.
+> **Status: early.** Vinutes runs on Macs with Apple silicon. The app speaks English and Traditional Chinese. 中文說明：[README.zh-TW.md](README.zh-TW.md)
 
 ## What it does
 
@@ -14,6 +14,25 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Publishes a Google Doc** and keeps it in sync: your colleagues' edits and comments show up in the app, and when you edit in the app only the paragraphs you changed are updated, so their comments stay where they were.
 - **Learns from your corrections.** A misheard name you fix once goes into your glossary, and the next meeting gets it right.
 - **Prepares the email** to the attendees. Nothing is sent until you press Send.
+- **Keeps the list tidy.** Archive the meetings you no longer need to see, or delete them: the recording, transcript and minutes go to the Trash, and the Google Doc to Google Drive's trash. Select several at once, or right-click one.
+
+## Languages
+
+**The app** follows your Mac's language: Traditional Chinese if Chinese comes first in System Settings > Language & Region, English otherwise. Pick English or Traditional Chinese under Settings > App Language in the menu bar, or at the top of the setup checklist; Same as Mac goes back to following the Mac.
+
+**The meeting.** Vinutes listens to the start, middle and end of each recording and decides which language was spoken. If your meetings are always in one language, pick it under Settings > Meeting Language and Vinutes stops guessing.
+
+**The minutes** are written in the meeting's language when it is English or Chinese. A meeting in any other language gets its minutes in the app's language, and the transcript keeps the original words.
+
+How well each language is heard, measured on real speech (24 read sentences per language, October 2026):
+
+| | Languages | Transcript errors per 100 words (characters for Chinese, Japanese, Korean, Thai) |
+|---|---|---|
+| Works well | English, Chinese, Japanese, Korean, Spanish, French, German | 3–7 |
+| Usable, check the minutes more closely | Vietnamese, Indonesian, Filipino | 10–11 |
+| Usable, more errors | Thai, Cantonese (treated as a Chinese meeting) | about 18 |
+
+Names, numbers and dates are what most often come out wrong. In a meeting held in a language your team doesn't read, check them in the minutes before you send.
 
 ## Requirements
 
@@ -49,7 +68,7 @@ Your settings, Google sign-in, glossary and recordings are kept in `~/.config/vi
 |---|---|
 | `recorder/` | The Mac app (Swift) and the meeting window (HTML, CSS, JavaScript), plus `install.sh` |
 | `scripts/` | Python: transcription, speakers, writing the minutes, Google Docs sync, Gmail and Calendar, the setup checklist |
-| `SKILL.md`, `references/` | How the minutes are written (Traditional Chinese, Taiwan usage); the AI reads these for every meeting |
+| `SKILL.md`, `references/` | How the minutes are written: `SKILL.md` for Chinese minutes (Taiwan usage), `references/minutes-guide-en.md` for English ones; the AI reads the right one for every meeting |
 | `tests/` | `python3 -m unittest discover -s tests` |
 
 ## Only have a transcript?

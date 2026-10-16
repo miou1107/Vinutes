@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 from google_setup import CONFIG, read_settings, setting
+from i18n import t
 
 AIS = {'claude': 'Claude Code', 'codex': 'Codex', 'antigravity': 'Antigravity'}
 SHORT = {'claude': 'Claude', 'codex': 'Codex', 'antigravity': 'Antigravity'}
@@ -64,10 +65,10 @@ def name(key: str | None = None) -> str:
 def choose(key: str):
     """The AI the minutes are written with from now on, kept in settings.json."""
     if key not in AIS:
-        raise SystemExit('沒有這個 AI。')
+        raise SystemExit(t('ai_unknown'))
     mine, problem = read_settings()
     if problem:
-        raise SystemExit('settings.json 的格式不對，沒辦法換 AI。')
+        raise SystemExit(t('ai_bad_settings'))
     mine['ai'] = key
     CONFIG.mkdir(parents=True, exist_ok=True)
     path = CONFIG / 'settings.json'
@@ -166,7 +167,7 @@ def run(prompt: str, folder: Path, *, write: bool, timeout: int, env: dict, stdo
     key = key or chosen()
     exe = find(key)
     if not exe:
-        raise SystemExit(f'找不到 {AIS[key]}。請到「環境設定自檢」的第 5 項安裝並登入。')
+        raise SystemExit(t('ai_missing', ai=AIS[key]))
     cmd, profile = command(key, exe, prompt, folder, write)
     scratch = folder / '.ai-tmp'
     if profile:                                       # agy's temporary files stay inside the folder it may write

@@ -49,7 +49,25 @@ from pathlib import Path
 GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me'
 CALENDARS = 'https://www.googleapis.com/calendar/v3'
 PEOPLE = 'https://people.googleapis.com/v1'
-TZ = '+08:00'
+
+
+def zone_name() -> str:
+    """The Mac's own time zone (System Settings > General > Date & Time), e.g. Asia/Taipei; UTC if it cannot tell."""
+    if os.environ.get('TZ'):
+        return os.environ['TZ']
+    try:
+        link = os.readlink('/etc/localtime')
+    except OSError:
+        return 'UTC'
+    return link.split('zoneinfo/', 1)[1] if 'zoneinfo/' in link else 'UTC'
+
+
+def offset(day: date) -> str:
+    """The Mac's offset from UTC at the start of `day`, as +08:00 (it changes with daylight saving time)."""
+    z = datetime(day.year, day.month, day.day).astimezone().strftime('%z')
+    return f'{z[:3]}:{z[3:]}'
+
+
 ADDRESS = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
 AUTH = {}
 
@@ -148,7 +166,8 @@ def pull(query: str, out_dir: Path):
 
 
 def day_query(day: date, extra=None) -> str:
-    return urllib.parse.urlencode({'timeMin': f'{day}T00:00:00{TZ}', 'timeMax': f'{day + timedelta(days=1)}T00:00:00{TZ}',
+    after = day + timedelta(days=1)
+    return urllib.parse.urlencode({'timeMin': f'{day}T00:00:00{offset(day)}', 'timeMax': f'{after}T00:00:00{offset(after)}',
                                    'singleEvents': 'true', 'orderBy': 'startTime', 'maxResults': 50, **(extra or {})})
 
 
@@ -199,8 +218,8 @@ def invite(day: str, hours: str, title: str, room: str, emails: str, really: boo
     begin, end = re.split(r'\s*[-–—~～]\s*', hours.strip())
     guests = addresses(emails)
     event = {'summary': title, 'location': room,
-             'start': {'dateTime': f'{day}T{begin}:00{TZ}', 'timeZone': 'Asia/Taipei'},
-             'end': {'dateTime': f'{day}T{end}:00{TZ}', 'timeZone': 'Asia/Taipei'},
+             'start': {'dateTime': f'{day}T{begin}:00', 'timeZone': zone_name()},     # the Mac's own time zone
+             'end': {'dateTime': f'{day}T{end}:00', 'timeZone': zone_name()},
              'attendees': [{'email': g} for g in guests]}
     code = confirm_code(day, begin, end, title, room, sorted(guests))
     print(f'{day} {begin}–{end} {title}\n地點: {room}\n邀請: {", ".join(guests)}\n確認碼: {code}')

@@ -2069,8 +2069,9 @@ def main():
 
 
 if __name__ == '__main__':
+    import vlog
     try:
-        main()
+        vlog.run(main)
     except subprocess.TimeoutExpired:
         sys.exit(t('timeout'))
     except Exception as err:                         # the window shows the last line; a traceback means nothing there

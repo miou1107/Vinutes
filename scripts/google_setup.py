@@ -287,7 +287,12 @@ def login():
         print(f'saved for {claims.get("email") or "the account"}; now run google_setup.py check')
 
 
-if __name__ == '__main__':
+def main():
     if len(sys.argv) < 2 or sys.argv[1] not in ('check', 'login'):
         sys.exit(__doc__)
     check() if sys.argv[1] == 'check' else login()
+
+
+if __name__ == '__main__':
+    import vlog
+    vlog.run(main)

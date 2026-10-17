@@ -13,14 +13,14 @@ import AVFoundation
 import Foundation
 import Speech
 
-/// Every step, with the time and this process's id: ~/Library/Logs/Vinutes/captions.log, cut to its last 2 MB
+/// Every step, with the time and this process's id: ~/Library/Logs/Vinutes/captions.log, at most 5 MB (+ one older)
 func log(_ line: String) {
     let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Vinutes")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let file = dir.appendingPathComponent("captions.log")
-    if let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int, size > 2_000_000,
-       let all = try? Data(contentsOf: file) {
-        try? all.suffix(1_000_000).write(to: file)
+    // past 5 MB the log becomes captions.log.1 (replacing the one before), as the app does with its own logs
+    if let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int, size > 5_000_000 {
+        _ = rename(file.path, dir.appendingPathComponent("captions.log.1").path)   // one step, replacing the older
     }
     let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
     let text = "[\(stamp)] captions[\(getpid())] \(line)\n"

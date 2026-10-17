@@ -21,6 +21,7 @@ from pathlib import Path
 os.environ['VINUTES_LANG'] = 'zh-TW'
 HOME = tempfile.mkdtemp(prefix='minutes-test-')
 os.environ['MINUTES_HOME'] = HOME                  # nothing here touches the real settings, glossary or notes
+os.environ['VINUTES_LOG_DIR'] = os.path.join(HOME, 'logs')   # nor the real logs
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
 import doc_sync as ds  # noqa: E402
 import minutes_app  # noqa: E402
@@ -2295,6 +2296,80 @@ class CalendarForTheAgent(unittest.TestCase):
         job.mkdir()
         self.answer('', code=1)
         self.assertTrue(self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00'}).startswith('（讀不到行事曆'))
+
+
+class ScriptLog(unittest.TestCase):
+    """vlog: every script run is two lines in scripts.log, never the user's words, and the file stays bounded."""
+
+    def setUp(self):
+        import vlog
+        self.vlog = vlog
+        self.dir = Path(tempfile.mkdtemp(prefix='logs-'))
+        os.environ['VINUTES_LOG_DIR'] = str(self.dir)
+        self.argv = sys.argv
+        sys.argv = ['/x/minutes_app.py', 'ask', '/r/recordings/20261017-153005', 'make Alex Wang the chair']
+
+    def tearDown(self):
+        sys.argv = self.argv
+        os.environ['VINUTES_LOG_DIR'] = os.path.join(HOME, 'logs')
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def text(self):
+        return (self.dir / 'scripts.log').read_text(encoding='utf-8')
+
+    def test_a_run_logs_its_command_and_meeting_but_not_what_the_user_typed(self):
+        self.vlog.run(lambda: None)
+        self.assertIn('minutes_app[', self.text())
+        self.assertIn('start ask 20261017-153005', self.text())
+        self.assertIn('end ok', self.text())
+        self.assertNotIn('Alex Wang', self.text())
+
+    def test_a_failure_logs_its_message_and_a_crash_its_traceback(self):
+        with self.assertRaises(SystemExit):
+            self.vlog.run(lambda: sys.exit('Google did not answer. Please try again.'))
+        self.assertIn('end failed', self.text())
+        self.assertIn('Google did not answer', self.text())
+
+        def boom():
+            raise ValueError('bad page')
+        with self.assertRaises(ValueError):
+            self.vlog.run(boom)
+        self.assertIn('end crashed', self.text())
+        self.assertIn('ValueError: bad page', self.text())
+
+    def test_an_address_in_a_message_never_reaches_the_log(self):
+        with self.assertRaises(SystemExit):
+            self.vlog.run(lambda: sys.exit('STOP: give plain addresses only: Alex <alex.wang@example.com>'))
+        self.assertNotIn('alex.wang@example.com', self.text())
+        self.assertIn('<address>', self.text())
+
+    def test_an_empty_message_does_not_break_the_script(self):
+        with self.assertRaises(SystemExit) as stop:           # the script's own exit, not an IndexError from the log
+            self.vlog.run(lambda: sys.exit(''))
+        self.assertEqual(stop.exception.code, '')
+        self.assertIn('end failed', self.text())
+
+    def test_what_the_window_asks_every_few_seconds_is_logged_only_when_it_fails(self):
+        sys.argv = ['/x/minutes_app.py', 'refresh', '/r/recordings/20261017-153005']
+        self.vlog.run(lambda: None)
+        self.assertFalse((self.dir / 'scripts.log').exists())
+        with self.assertRaises(SystemExit):
+            self.vlog.run(lambda: sys.exit('Google did not answer.'))
+        self.assertIn('end failed', self.text())
+        self.assertIn('refresh 20261017-153005', self.text())
+
+    def test_the_log_turns_over_past_its_limit_and_keeps_one_older_file(self):
+        saved = self.vlog.LIMIT
+        self.vlog.LIMIT = 200
+        try:
+            for i in range(40):
+                self.vlog.log(f'line {i}')
+        finally:
+            self.vlog.LIMIT = saved
+        files = sorted(p.name for p in self.dir.iterdir())
+        self.assertEqual(files, ['scripts.log', 'scripts.log.1'])
+        self.assertLess((self.dir / 'scripts.log').stat().st_size, 400)
+        self.assertIn('line 39', self.text())
 
 
 class MeetingLanguage(unittest.TestCase):

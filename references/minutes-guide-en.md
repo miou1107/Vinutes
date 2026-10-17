@@ -36,7 +36,7 @@ The prompt gives you the job folder (written `job` below), the recording's start
 
    ```json
    {"status": "ok", "title": "Website redesign kickoff", "when": "Wed, Oct 15, 14:00–15:00",
-    "place": "Room 3A, or [__] if unknown", "project": "Website", "next_meeting": "Wed, Oct 29, 14:00",
+    "place": "Room 3A, or [__] if unknown", "project": "Website", "tags": ["External"], "next_meeting": "Wed, Oct 29, 14:00",
     "mail": {"to": ["a@example.com", "the user's own address"], "subject": "Minutes: Website redesign kickoff (Oct 15)"},
     "todo": [{"label": "Chair", "line": "Chair:"}, {"label": "Budget", "line": "Campaign rollout"}],
     "check": [{"text": "Speaker B is probably Amy Chen", "heard": "", "meant": ""},
@@ -48,6 +48,10 @@ The prompt gives you the job folder (written `job` below), the recording's start
      name already in `最近的會議.json`; otherwise make one of 1–4 words from the meeting name, the calendar title or
      the case name that keeps coming up, without words like "weekly", "sync", "meeting", "review"
      (e.g. "Website redesign weekly" → "Website redesign"). Write "" only when no project can be told.
+   - `tags`: up to 3 tags to suggest for this meeting, 1–2 words each, or `[]`. Good ones are the kind of meeting
+     (External, Internal, Monthly) and other projects the meeting also covered besides its main one. Reuse tags
+     already in `最近的會議.json` rather than a new word for the same thing, and do not repeat `project`. They are
+     only suggestions: a tag is on the meeting once the user adds it in the window.
    - `next_meeting`: the next meeting's time if the minutes give one, else "".
    - `todo`: one item per `[__]` in the minutes. `label` is a field name of 1–3 words; `line` is a short piece of the
      original text on the same line (or table row) as that `[__]`, apart from the `[__]` itself; the app uses it to

@@ -240,7 +240,8 @@ def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
     for other in sorted(job.parent.iterdir(), reverse=True):
         r = read_json(other / 'result.json')
         if other != job and r.get('status') == 'ok' and r.get('title'):
-            recent.append({'date': other.name[:8], 'title': r['title'], 'project': r.get('project') or ''})
+            project, tags = sorted_as(other, r)
+            recent.append({'date': other.name[:8], 'title': r['title'], 'project': project, 'tags': tags})
         if len(recent) >= 40:
             break
     (ref / '最近的會議.json').write_text(json.dumps(recent, ensure_ascii=False, indent=1), encoding='utf-8')
@@ -284,7 +285,7 @@ def prompt(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str
         f'- 錄音時間：{started} 到 {ended}{length}\n'
         f'- 當天行事曆：{job}/行事曆.txt\n'
         f'- 詞彙表與使用者設定：{job}/參考/\n'
-        f'- 之前的會議名稱與專案：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
+        f'- 之前的會議名稱、專案與標籤：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
         f'- 之前的會議紀錄（補背景用）：{job}/參考/舊紀錄/\n'
         f'- 紀錄寫成 {job}/{DRAFT}，程式會照 result.json 的 title 存進紀錄資料夾。\n'
         f'- 信件內文寫成 {job}/{BODY}，最後寫 {job}/result.json。\n'
@@ -314,7 +315,7 @@ def prompt_en(job: Path, meta: dict, spoken: str) -> str:
         f'- Recording: {started} to {ended}{length}\n'
         f'- That day\'s calendar: {job}/行事曆.txt\n'
         f'- Glossaries and the user\'s settings: {job}/參考/\n'
-        f'- Earlier meeting names and projects: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
+        f'- Earlier meeting names, projects and tags: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
         f'- Earlier minutes, for background: {job}/參考/舊紀錄/\n'
         f'- Write the minutes to {job}/{DRAFT}; the program files them under the title in result.json.\n'
         f'- Write the mail text to {job}/{BODY}, and last {job}/result.json.\n'
@@ -388,10 +389,29 @@ def check_result(work: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> d
     return {'status': 'ok', 'title': title, 'minutes_md': str(md),
             'when': line(result.get('when'), 40), 'place': line(result.get('place'), 40), 'mail': mail,
             'project': line(result.get('project'), 30),
+            'tag_suggestions': tag_list(result.get('tags'))[:3],
             'next_meeting': line(result.get('next_meeting'), 40),
             'todo': items(result.get('todo'), ('label', 'line'))[:10],
             'check': items(result.get('check'), ('text', 'heard', 'meant'))[:10],
             'notes': strings(result.get('notes'))[:5]}
+
+
+def tag_list(value) -> list:
+    """Short tags, each once (minutes_app.clean_tags keeps the user's the same way)."""
+    found = []
+    for v in value if isinstance(value, list) else []:
+        tag = line(v, 20) if isinstance(v, str) else ''
+        if tag and tag not in found:
+            found.append(tag)
+    return found
+
+
+def sorted_as(job: Path, result: dict) -> tuple:
+    """A meeting's project and tags as the window shows them: what the user set in 分類.json (minutes_app.py),
+    else the project Claude named."""
+    mine = read_json(job / '分類.json')
+    project = mine['project'] if isinstance(mine.get('project'), str) else result.get('project')
+    return line(project, 30), tag_list(mine.get('tags'))
 
 
 def items(value, keys: tuple) -> list:

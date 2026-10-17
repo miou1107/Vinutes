@@ -36,6 +36,7 @@
 | `scripts/md_to_gdoc.py` | Publishes the minutes as a Google Doc, updating the same Doc each time |
 | `scripts/gdoc_to_md.py` | Pulls a Google Doc back as Markdown |
 | `scripts/workspace.py` | Gmail, Calendar and the company directory: reading, sending, invitations, and which calendar event a recording was |
+| `scripts/vlog.py` | The scripts' log: one start and one end line per run in ~/Library/Logs/Vinutes/scripts.log, under 5 MB plus one older file |
 | `scripts/notify.py` | Sends the Doc link through Google Docs sharing when Gmail is not available |
 | `scripts/check_update.py` | Looks up the newest version on GitHub |
 | `tests/` | `python3 -m unittest discover -s tests` |

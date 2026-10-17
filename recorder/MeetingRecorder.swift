@@ -379,6 +379,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // MARK: launch
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        appLog("start: Vinutes \(version), macOS \(ProcessInfo.processInfo.operatingSystemVersionString), " +
+               "language \(uiLanguage()), meeting language \(meetingLanguage()), " +
+               "microphone \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
         NSApp.mainMenu = mainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
@@ -409,6 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        appLog("quit asked" + (recording ? " while recording" : ""))
         if recording {
             let alert = NSAlert()
             alert.messageText = tr("quit.title")
@@ -418,8 +423,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
             stopRecording()
         }
-        guard let manager, manager.window.isVisible else { return .terminateNow }
-        manager.finish { NSApp.reply(toApplicationShouldTerminate: true) }      // what was typed is saved first
+        guard let manager, manager.window.isVisible else { appLog("quit", wait: true); return .terminateNow }
+        manager.finish { appLog("quit after the meeting window saved", wait: true); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
 
@@ -439,11 +444,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             let id = EventHotKeyID(signature: OSType(0x564D_5243), id: number)       // 'VMRC'
             if RegisterEventHotKey(UInt32(key), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &ref) == noErr {
                 hotKeys.append(ref)
+            } else {
+                appLog("shortcut \(number == 1 ? "⌃⌥R" : "⌃⌥P") could not be registered (another app has it?)")
             }
         }
     }
 
     func hotKey(_ id: UInt32) {
+        appLog("shortcut \(id == 1 ? "⌃⌥R" : "⌃⌥P")" + (recording ? " while recording" : ""))
         switch id {
         case 1: recording ? stopRecording() : startRecording()
         case 2: if recording { togglePause() }
@@ -663,10 +671,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case .authorized:
             beginRecording()
         case .notDetermined:
+            appLog("asking for the microphone")
             AVCaptureDevice.requestAccess(for: .audio) { ok in
+                appLog("microphone " + (ok ? "allowed" : "refused"))
                 DispatchQueue.main.async { ok ? self.beginRecording() : self.micDenied() }
             }
         default:
+            appLog("recording refused: no microphone permission")
             micDenied()
         }
     }
@@ -708,7 +719,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refreshIcon() }
             bar.show()
             refreshIcon()
+            appLog("recording started: \(dir.lastPathComponent)")
         } catch {
+            appLog("recording could not start: \(error.localizedDescription)")
             try? FileManager.default.removeItem(at: dir)
             showError(tr("start.failTitle"), tr("start.failText", error.localizedDescription))
         }
@@ -720,9 +733,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             rec.record()
             pausedTotal += Date().timeIntervalSince(since)
             pausedAt = nil
+            appLog("recording resumed")
         } else {
             rec.pause()
             pausedAt = Date()
+            appLog("recording paused")
         }
         refreshIcon()
     }
@@ -746,7 +761,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         meta["ended"] = isoString(Date())
         meta["paused_seconds"] = paused
         writeJSON(meta, dir.appendingPathComponent("job.json"))
+        let size = (try? FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("錄音.caf").path))?[.size] as? Int ?? 0
+        appLog("recording stopped: \(dir.lastPathComponent), \(Int(elapsedFor(meta))) s, paused \(paused) s, \(size / 1024) KB")
         process(dir)
+    }
+
+    /// how long a finished recording ran, from its job.json
+    func elapsedFor(_ meta: [String: Any]) -> TimeInterval {
+        let f = ISO8601DateFormatter()
+        guard let a = (meta["started"] as? String).flatMap({ f.date(from: $0) }),
+              let b = (meta["ended"] as? String).flatMap({ f.date(from: $0) }) else { return 0 }
+        return b.timeIntervalSince(a)
     }
 
     @objc func cancelRecording() {
@@ -757,6 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         alert.addButton(withTitle: tr("btn.delete"))
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertSecondButtonReturn, let dir = endRecording() else { return }
+        appLog("recording discarded: \(dir.lastPathComponent)")
         try? FileManager.default.removeItem(at: dir)
     }
 
@@ -771,9 +797,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         try? FileManager.default.removeItem(at: Job(dir: dir).notifiedMarker)
         writeStatus(dir, "transcribing", tr("status.preparing"))
         refreshIcon()
+        appLog("write-up started: \(dir.lastPathComponent)")
         runPipeline([dir.path]) { [weak self] code, out in
             // the script records its own failures; this covers a crash before it could
             let job = Job(dir: dir)
+            appLog("write-up ended: \(dir.lastPathComponent), exit \(code), step \(job.status["step"] as? String ?? "?")")
             if code != 0 && !job.finished {
                 self?.writeStatus(dir, "failed", lastLine(out).isEmpty ? tr("status.stopped") : lastLine(out))
             }
@@ -792,6 +820,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                   let modified = attrs[.modificationDate] as? Date else { continue }
             meta["ended"] = isoString(modified)
             writeJSON(meta, job.dir.appendingPathComponent("job.json"))
+            appLog("recording found unfinished after a stop: \(job.dir.lastPathComponent)")
             process(job.dir)
         }
     }
@@ -808,7 +837,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     /// Runs one of the Python scripts through a login shell, so the claude command is found on the user's PATH.
     func runScript(_ name: String, _ args: [String], done: @escaping (Int32, String) -> Void) {
+        // the script, its command and the meeting folder: never what the user typed (a request, a name, a subject)
+        var parts = [name]
+        if let first = args.first { parts.append(first.hasPrefix("/") ? URL(fileURLWithPath: first).lastPathComponent : first) }
+        if args.count > 1, args[1].hasPrefix("/") { parts.append(URL(fileURLWithPath: args[1]).lastPathComponent) }
+        let what = parts.joined(separator: " ")
+        let began = Date()
+        // asked every few seconds while the window is open: logged only when they fail
+        let quiet = name == "minutes_app.py" && ["refresh", "list", "version", "log", "locate"].contains(args.first ?? "")
+        let done: (Int32, String) -> Void = { code, out in
+            let took = String(format: "%.1f s", Date().timeIntervalSince(began))
+            if code == 0 { if !quiet { appLog("ran \(what): ok, \(took)") } }
+            else { appLog("ran \(what): exit \(code), \(took): \(String(lastLine(out).prefix(300)))") }
+            done(code, out)
+        }
         guard let cfg = recorderConfig() else {
+            appLog("no recorder.json: install.sh has not been run")
             showError(tr("noApp.title"), tr("noApp.text"))
             done(1, "")
             return
@@ -907,7 +951,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     @objc func showAll() { showManager(select: nil) }
 
     func showManager(select id: String?, setup: Bool = false) {
-        if manager == nil { manager = ManagerWindow(owner: self) }
+        if manager == nil { appLog("meeting window opened" + (setup ? " on the setup checklist" : "")); manager = ManagerWindow(owner: self) }
         manager?.show(select: id, setup: setup)
     }
 
@@ -932,6 +976,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// While the meeting window is open the app is in the Dock and in ⌘Tab, so clicking another app
     /// does not lose the window; with it closed the app is back to the menu bar only.
     func managerClosed() {
+        appLog("meeting window closed")
         manager = nil
         NSApp.setActivationPolicy(.accessory)
     }
@@ -942,6 +987,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     func showError(_ title: String, _ text: String) {
+        appLog("error shown: \(title): \(String(text.prefix(300)))")
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
@@ -983,19 +1029,40 @@ func defaultCaptionLanguage() -> String {
     }
 }
 
-/// What Vinutes did with the captions, in the same file as the caption helper's own steps:
-/// ~/Library/Logs/Vinutes/captions.log
-func captionLog(_ line: String) {
-    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Vinutes")
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let file = dir.appendingPathComponent("captions.log")
+// MARK: logs
+// What Vinutes does goes to ~/Library/Logs/Vinutes/ (Console.app shows them too): app.log for the app, captions.log
+// for live captions (app and helper), scripts.log for the Python scripts. Only what happened and how long it took:
+// no transcript, minutes, mail text or addresses. Each file is kept under 5 MB; past that it becomes <name>.1
+// (replacing the one before), so a log never takes more than 10 MB.
+
+let LOG_DIR = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Vinutes")
+let LOG_LIMIT = 5_000_000
+private let logQueue = DispatchQueue(label: "vinutes.log")
+
+func writeLog(_ name: String, _ line: String, wait: Bool = false) {
     let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
-    let text = "[\(stamp)] app \(line)\n"
-    let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)      // whole lines, also beside the helper's
-    guard fd >= 0 else { return }
-    _ = text.withCString { write(fd, $0, strlen($0)) }
-    close(fd)
+    // a message may name a recipient: never an address in a log
+    let clean = line.replacingOccurrences(of: #"[\w.+-]+@[\w-]+(\.[\w-]+)+"#, with: "<address>", options: .regularExpression)
+    let text = "[\(stamp)] \(clean)\n"
+    let work = {
+        try? FileManager.default.createDirectory(at: LOG_DIR, withIntermediateDirectories: true)
+        let file = LOG_DIR.appendingPathComponent(name)
+        if let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int, size > LOG_LIMIT {
+            _ = rename(file.path, LOG_DIR.appendingPathComponent(name + ".1").path)   // one step, replacing the older
+        }
+        let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)      // whole lines, also beside other writers
+        guard fd >= 0 else { return }
+        _ = text.withCString { write(fd, $0, strlen($0)) }
+        close(fd)
+    }
+    if wait { logQueue.sync(execute: work) } else { logQueue.async(execute: work) }
 }
+
+/// what the app did: app.log (wait: written before returning, for the last lines before quitting)
+func appLog(_ line: String, wait: Bool = false) { writeLog("app.log", line, wait: wait) }
+
+/// what the app did with live captions, beside the caption helper's own steps: captions.log
+func captionLog(_ line: String) { writeLog("captions.log", "app " + line) }
 
 /// Runs the caption helper (Contents/MacOS/VinutesCaptions, built from Captions.swift) on the recording file and passes
 /// what it hears to the panel. In a process of its own: Apple's transcriber can fail or crash there without touching
@@ -1524,7 +1591,15 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             waiting.forEach { $0() }
             return
         }
-        handle(cmd, body["args"] as? [String: Any] ?? [:]) { [weak self] ok, data in self?.reply(id, ok, data) }
+        let began = Date()
+        let quiet = ["refresh", "gdoc", "blink", "version", "audio", "find", "log"].contains(cmd)  // asked every few seconds
+        handle(cmd, body["args"] as? [String: Any] ?? [:]) { [weak self] ok, data in
+            if !ok || !quiet {
+                let why = ok ? "" : ": " + String(((data as? [String: Any])?["message"] as? String ?? "").prefix(200))
+                appLog(String(format: "window %@: %@, %.1f s%@", cmd, ok ? "ok" : "failed", Date().timeIntervalSince(began), why))
+            }
+            self?.reply(id, ok, data)
+        }
     }
 
     /// minutes_app.py: the last line `JSON {...}` is the answer; anything else, its last line is the message.

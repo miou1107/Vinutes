@@ -24,6 +24,12 @@ The floating bar shows that the recording is running, and can show live captions
 - Captions come from Apple's transcriber on the Mac itself; nothing is sent anywhere, and they are not written into the transcript or the minutes. The arrow next to CC picks the language (Chinese, English, Japanese, Korean, Spanish, French); each recording starts in the meeting language from Settings. The first time a language is used, the Mac downloads it once.
 - The captions run in a helper of their own that reads the recording file, so they can't stop or spoil the recording. What they did is logged to ~/Library/Logs/Vinutes/captions.log.
 
+Vinutes keeps logs, to find out why something went wrong.
+
+- ~/Library/Logs/Vinutes/ holds app.log (starting and quitting, recording started, paused, stopped or discarded, the shortcuts, the microphone permission, the meeting window and each thing done in it, every script run with how long it took and how it ended, every error shown), scripts.log (each run of a script, and the traceback when one crashes) and captions.log. Console.app shows them too.
+- They hold what happened, never the transcript, the minutes, what you typed, mail text or addresses.
+- Each log stays under 5 MB; past that it becomes an .1 file that replaces the older one, so a log never takes more than 10 MB.
+
 ## v0.3.0 (2026-10-16)
 
 Meetings can be archived and deleted from the list.

@@ -271,4 +271,5 @@ def main():
 
 if __name__ == '__main__':
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    main()
+    import vlog
+    vlog.run(main)

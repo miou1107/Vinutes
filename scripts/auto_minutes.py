@@ -13,7 +13,7 @@ A job folder is $MINUTES_HOME/recordings/<YYYYMMDD-HHMMSS>/ with the recording a
 ({"step": "transcribing|writing|done|failed", "message", "pid"}), the outcome to result.json.
 
 Who does what, so that nothing goes out without the user:
-  - this script transcribes (transcribe.py), reads that day's calendar (workspace.py events) into 行事曆.txt and
+  - this script transcribes (transcribe.py), finds the meeting on the calendar (workspace.py meeting) for 行事曆.txt and
     copies the transcript, the calendar, SKILL.md, the glossaries, notes.md, the user's settings and copies of
     earlier minutes into the job's 整理/ folder;
   - the Claude Code CLI then runs restricted (claude -p --restricted --strict-mcp-config) in 整理/: no shell, no
@@ -245,16 +245,48 @@ def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
         if len(recent) >= 40:
             break
     (ref / '最近的會議.json').write_text(json.dumps(recent, ensure_ascii=False, indent=1), encoding='utf-8')
-    day = (meta.get('started') or '')[:10]
-    if day:
-        try:
-            done = script('workspace.py', 'events', day, timeout=120)
-            found = done.stdout if done.returncode == 0 else '（讀不到行事曆：' + friendly(done.stderr, '原因不明') + '）\n'
-        except subprocess.TimeoutExpired:
-            found = '（讀不到行事曆：連線逾時）\n'
-        (job / '行事曆.txt').write_text(found or '（這一天沒有行程）\n', encoding='utf-8')
+    if meta.get('started'):
+        (job / '行事曆.txt').write_text(read_calendar(job, meta), encoding='utf-8')
         shutil.copy(job / '行事曆.txt', work / '行事曆.txt')
     return work
+
+
+def read_calendar(job: Path, meta: dict) -> str:
+    """行事曆.txt for the agent: the meeting the recording was, as workspace.py meeting picked it (only one the
+    user is on), the next one of its series, and how earlier meetings of the series were named and filed.
+    The pick is kept in 行事曆.json, so a later recording of the same series finds this one."""
+    started = meta.get('started') or ''
+    try:
+        done = script('workspace.py', 'meeting', started, meta.get('ended') or started, timeout=120)
+    except subprocess.TimeoutExpired:
+        return '（讀不到行事曆：連線逾時）\n'
+    if done.returncode:
+        return '（讀不到行事曆：' + friendly(done.stderr, '原因不明') + '）\n'
+    lines, match = [], {}
+    for text in done.stdout.splitlines():
+        if text.startswith('MATCH '):
+            try:
+                match = json.loads(text[6:])
+            except ValueError:
+                match = {}
+        else:
+            lines.append(text)
+    write_json(job / '行事曆.json', match if isinstance(match, dict) else {})
+    found = '\n'.join(lines).strip() + '\n'
+    match = match if isinstance(match, dict) else {}
+    key = ('recurring', match['recurring']) if match.get('recurring') else ('series', match.get('series'))
+    before = []
+    # only meetings recorded before this one, newest first: a recording written up again doesn't learn from later ones
+    for other in sorted((p for p in job.parent.iterdir() if p.name < job.name), reverse=True) if key[1] else []:
+        r = read_json(other / 'result.json')
+        if r.get('status') == 'ok' and read_json(other / '行事曆.json').get(key[0]) == key[1]:
+            project, _ = sorted_as(other, r)
+            before.append(f'   {other.name[:4]}-{other.name[4:6]}-{other.name[6:8]} {r.get("title", "")}　專案：{project or "（沒有）"}')
+        if len(before) >= 3:
+            break
+    if before:
+        found += '\n== 同一系列之前整理過的會議（會議名稱與專案照抄）\n' + '\n'.join(before) + '\n'
+    return found
 
 
 def unnamed(lang: str) -> str:
@@ -283,7 +315,7 @@ def prompt(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str
            '一律用繁體中文（台灣用語）寫，人名照逐字稿的寫法，金額保留原本的幣別。\n' if spoken not in ('zh', 'yue') else '') +
         f'- 逐字稿：{job}/逐字稿.txt（每行開頭是從錄音開始算的時間，有講者的話接著是講者，見 SKILL.md 第 2 節「辨識講者」）\n'
         f'- 錄音時間：{started} 到 {ended}{length}\n'
-        f'- 當天行事曆：{job}/行事曆.txt\n'
+        f'- 行事曆（程式已經挑好這場會議）：{job}/行事曆.txt\n'
         f'- 詞彙表與使用者設定：{job}/參考/\n'
         f'- 之前的會議名稱、專案與標籤：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
         f'- 之前的會議紀錄（補背景用）：{job}/參考/舊紀錄/\n'
@@ -313,7 +345,7 @@ def prompt_en(job: Path, meta: dict, spoken: str) -> str:
         f'- Transcript: {job}/逐字稿.txt (each line starts with the time from the start of the recording, then the '
         'speaker when known; see the guide\'s section "Reading the transcript")\n'
         f'- Recording: {started} to {ended}{length}\n'
-        f'- That day\'s calendar: {job}/行事曆.txt\n'
+        f'- The calendar (the program has picked the meeting): {job}/行事曆.txt\n'
         f'- Glossaries and the user\'s settings: {job}/參考/\n'
         f'- Earlier meeting names, projects and tags: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
         f'- Earlier minutes, for background: {job}/參考/舊紀錄/\n'

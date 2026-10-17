@@ -21,6 +21,10 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py locate <job> <words>              how far down the Doc those words are ({"at": 0.0–1.0})
   minutes_app.py speaker <job> <group> <name> [line]  the user named a voice (講者 A -> Alex), or one line's
   minutes_app.py archive <job> | unarchive <job>   封存: the list hides the meeting (shown under 已封存) or shows it again
+  minutes_app.py move <job> <project>             the meeting belongs to this project ('' = 未分類)
+  minutes_app.py tags <job> <tags JSON>            the meeting's tags, as the user left them
+  minutes_app.py rename_project <old> <new>        every meeting of a project, archived ones too, gets the new name;
+                                                   a name already in use puts the two projects together
   minutes_app.py delete <job>                      刪除: the Doc and the meeting's Drive folder (only its own files
                                                    when another meeting shares the folder) go to Google's trash;
                                                    answers {"trash": [...]}, the files beside the minutes, which the
@@ -41,6 +45,8 @@ Files in the job folder, next to what auto_minutes.py writes:
                     each page it saved; a save is compared with that, not with what the minutes became meanwhile
   操作紀錄.jsonl    the activity log, one JSON object per line: {"at", "who", "text", "kind"}
   封存.json         there when the meeting is archived: {"at"}
+  分類.json         the project and tags as the user set them: {"project", "tags", "dropped"}; without "project"
+                    the one Claude named in result.json counts. Never in result.json: the mail step rewrites that.
 What is learned goes to $MINUTES_HOME/glossary.md (words) and notes.md (wording), which the next minutes read.
 """
 from __future__ import annotations
@@ -311,7 +317,8 @@ def summary(job: Job) -> dict:
     return {'id': job.id, 'day': day_words(started), 'date': f'{started:%Y-%m-%d}', 'time': f'{started:%H:%M}',
             'started': started.isoformat(),
             'ended_time': ended,
-            'title': job.result.get('title') or '', 'project': (job.result.get('project') or '').strip(),
+            'title': job.result.get('title') or '', 'project': project_of(job),
+            'tags': tags_of(job), 'suggested': suggested_tags(job),
             'status': job.status_word(), 'step': job.status.get('step', ''), 'message': job.status.get('message', ''),
             'sent_at': job.result.get('sent_at') or '', 'sent_count': len((job.result.get('mail') or {}).get('to', [])),
             'sent_format': job.result.get('sent_format') or '',
@@ -322,6 +329,83 @@ def summary(job: Job) -> dict:
 
 def cmd_list():
     out({'jobs': [summary(j) for j in all_jobs()]})
+
+
+# --- project and tags --------------------------------------------------------------------------
+# Claude names the project when it writes the minutes and suggests a few tags (result.json); what the user sets in
+# the window goes to 分類.json, which only these commands write.
+
+SORTING = '分類.json'
+MAX_TAGS = 8
+
+
+def one_line(text, most: int) -> str:
+    return ' '.join(str(text or '').split())[:most].strip()
+
+
+def clean_tags(value) -> list[str]:
+    found = []
+    for item in value if isinstance(value, list) else []:
+        tag = one_line(item, 20) if isinstance(item, str) else ''
+        if tag and tag not in found:
+            found.append(tag)
+    return found
+
+
+def sorting(job: Job) -> dict:
+    return read_json(job.dir / SORTING)
+
+
+def project_of(job: Job) -> str:
+    mine = sorting(job)
+    return one_line(mine['project'] if isinstance(mine.get('project'), str) else job.result.get('project'), 30)
+
+
+def tags_of(job: Job) -> list[str]:
+    return clean_tags(sorting(job).get('tags'))[:MAX_TAGS]
+
+
+def suggested_tags(job: Job) -> list[str]:
+    """Claude's suggestions the user has not added or taken off again; none once the minutes went out."""
+    if job.result.get('sent_at'):
+        return []
+    mine = sorting(job)
+    skip = set(clean_tags(mine.get('tags'))) | set(clean_tags(mine.get('dropped')))
+    return [tag for tag in clean_tags(job.result.get('tag_suggestions')) if tag not in skip]
+
+
+def save_sorting(job: Job, **change):
+    write_json(job.dir / SORTING, {**sorting(job), **change})
+
+
+def cmd_move(job: Job, project: str):
+    save_sorting(job, project=one_line(project, 30))
+    out({'project': project_of(job)})
+
+
+def cmd_tags(job: Job, raw: str):
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        value = None
+    if not isinstance(value, list):
+        sys.exit(t('bad_tags'))
+    tags = clean_tags(value)[:MAX_TAGS]
+    offered = set(clean_tags(job.result.get('tag_suggestions')))
+    taken_off = [tag for tag in tags_of(job) if tag in offered and tag not in tags]
+    dropped = [tag for tag in clean_tags(sorting(job).get('dropped')) + taken_off if tag not in tags]
+    save_sorting(job, tags=tags, dropped=list(dict.fromkeys(dropped)))
+    out({'tags': tags_of(job), 'suggested': suggested_tags(job)})
+
+
+def cmd_rename_project(old: str, new: str):
+    old, new = one_line(old, 30), one_line(new, 30)
+    if not old or not new:
+        sys.exit(t('bad_project'))
+    moved = [job for job in all_jobs() if project_of(job) == old]
+    for job in moved:
+        save_sorting(job, project=new)
+    out({'project': new, 'count': len(moved)})
 
 
 # --- archive and delete ------------------------------------------------------------------------
@@ -1732,9 +1816,9 @@ def mail_defaults(job: Job) -> dict | None:
 
 def neighbours(job: Job) -> dict:
     """The same meeting before and after: same title in the same project."""
-    title, project = job.result.get('title') or '', (job.result.get('project') or '').strip()
+    title, project = job.result.get('title') or '', project_of(job)
     series = [j for j in all_jobs() if j.status_word() in ('ready', 'sent') and (j.result.get('title') or '') == title
-              and (j.result.get('project') or '').strip() == project and (j.archived == job.archived or j.id == job.id)]
+              and project_of(j) == project and (j.archived == job.archived or j.id == job.id)]
     ids = [j.id for j in series]
     at = ids.index(job.id) if job.id in ids else -1
     prev = series[at + 1] if 0 <= at < len(series) - 1 else None
@@ -1923,6 +2007,8 @@ def main():
         return cmd_version(argv[1] if len(argv) > 1 else '')
     if cmd == 'update':
         return cmd_update()
+    if cmd == 'rename_project' and len(argv) == 3:  # every meeting of the project, not one job
+        return cmd_rename_project(argv[1], argv[2])
     if len(argv) < 2:
         sys.exit(__doc__)
     job = Job(Path(argv[1]))
@@ -1931,6 +2017,10 @@ def main():
         return cmd_locate(job, ' '.join(rest).strip())
     if cmd in ('archive', 'unarchive'):              # only a marker file: no turn to wait for either
         return cmd_archive(job, cmd == 'archive')
+    if cmd == 'move' and len(rest) == 1:              # only 分類.json, which nothing else writes
+        return cmd_move(job, rest[0])
+    if cmd == 'tags' and len(rest) == 1:
+        return cmd_tags(job, rest[0])
     if cmd == 'refresh':                             # asked every few seconds: never queue behind a Claude rewrite
         lock = try_turn(job)
         if not lock:

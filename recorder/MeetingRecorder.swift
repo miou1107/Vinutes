@@ -1172,7 +1172,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach"]
+                                     "speaker", "attach", "move", "tags"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1304,6 +1304,19 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             }
             let line = (args["line"] as? NSNumber).map { [String($0.intValue)] } ?? []
             app(["speaker", dir.path, group, name] + line, done)
+        case "move":
+            // the project this meeting belongs to ('' = 未分類); minutes_app.py trims it to one line
+            app(["move", dir.path, args["project"] as? String ?? ""], done)
+        case "tags":
+            // a list of words or nothing: anything else would empty the meeting's tags
+            guard let given = args["tags"] as? [String] else { return done(false, ["message": tr("err.tryAgain")]) }
+            let tags = given.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard let data = try? JSONSerialization.data(withJSONObject: tags),
+                  let json = String(data: data, encoding: .utf8) else { return done(false, ["message": tr("err.tryAgain")]) }
+            app(["tags", dir.path, json], done)
+        case "renameProject":
+            let old = args["old"] as? String ?? "", new = args["new"] as? String ?? ""
+            app(["rename_project", old, new], done)
         case "retry":
             // only a recording that failed starts over; a finished one keeps its Doc and its sent mail
             guard Job(dir: dir).step == "failed" else { return done(false, ["message": tr("err.alreadyDone")]) }

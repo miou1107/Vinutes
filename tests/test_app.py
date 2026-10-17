@@ -1990,6 +1990,133 @@ class Languages(unittest.TestCase):
                                                 'Amy 的簡報', 'zh-TW')[0])
 
 
+class ProjectTags(Flows):
+    """The list groups meetings by project (Claude names it, the user can change it) and tags (Claude suggests some,
+    only the ones the user adds stay); what the user changes is kept in 分類.json, never in result.json."""
+
+    def setUp(self):
+        super().setUp()
+        self.others = []
+        self.saved_all = minutes_app.all_jobs
+        minutes_app.all_jobs = lambda: [self.job(), *[minutes_app.Job(d) for d in self.others]]
+
+    def tearDown(self):
+        minutes_app.all_jobs = self.saved_all
+        super().tearDown()
+
+    def result(self, **more):
+        result = json.loads((self.job_dir / 'result.json').read_text())
+        result.update(more)
+        (self.job_dir / 'result.json').write_text(json.dumps(result))
+
+    def meeting(self, stamp, project, archived=False):
+        folder = self.root / stamp
+        folder.mkdir()
+        (folder / 'job.json').write_text(json.dumps({'started': f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T10:30:00+08:00'}))
+        (folder / 'status.json').write_text(json.dumps({'step': 'done'}))
+        (folder / 'result.json').write_text(json.dumps({'title': '週會', 'project': project,
+                                                        'minutes_md': str(self.md_path)}))
+        if archived:
+            (folder / '封存.json').write_text('{}')
+        self.others.append(folder)
+        return folder
+
+    def test_the_project_claude_named_shows_until_the_user_moves_the_meeting(self):
+        self.result(project='新品上市')
+        self.assertEqual(minutes_app.summary(self.job())['project'], '新品上市')
+        before = (self.job_dir / 'result.json').read_text()
+        minutes_app.cmd_move(self.job(), '  悠遊卡 ')
+        self.assertEqual(minutes_app.summary(self.job())['project'], '悠遊卡')
+        self.assertEqual((self.job_dir / 'result.json').read_text(), before)    # the mail step may be rewriting it
+        minutes_app.cmd_move(self.job(), '')
+        self.assertEqual(minutes_app.summary(self.job())['project'], '')       # 未分類
+
+    def test_a_project_name_is_one_line_of_at_most_30_characters(self):
+        minutes_app.cmd_move(self.job(), '台北\n捷運   合作' + '案' * 40)
+        name = minutes_app.summary(self.job())['project']
+        self.assertTrue(name.startswith('台北 捷運 合作'))
+        self.assertEqual(len(name), 30)
+
+    def test_renaming_a_project_renames_it_on_every_meeting_archived_ones_too(self):
+        self.result(project='新品上市')
+        self.meeting('20261007-103000', '新品上市', archived=True)
+        self.meeting('20261008-103000', '悠遊卡')
+        minutes_app.cmd_rename_project('新品上市', '新品上市一期')
+        projects = {j.id: minutes_app.summary(j)['project'] for j in minutes_app.all_jobs()}
+        self.assertEqual(projects, {'20261014-103000': '新品上市一期', '20261007-103000': '新品上市一期',
+                                    '20261008-103000': '悠遊卡'})
+        self.assertEqual(self.outs[-1], {'project': '新品上市一期', 'count': 2})
+
+    def test_renaming_to_a_name_already_in_use_puts_the_two_projects_together(self):
+        self.result(project='新品上市專案')
+        self.meeting('20261008-103000', '新品上市')
+        minutes_app.cmd_rename_project('新品上市專案', '新品上市')
+        self.assertEqual({minutes_app.summary(j)['project'] for j in minutes_app.all_jobs()}, {'新品上市'})
+
+    def test_a_project_is_not_renamed_to_nothing(self):
+        self.result(project='新品上市')
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_rename_project('新品上市', '   ')
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_rename_project('', '悠遊卡')               # 未分類 is not a project
+        self.assertEqual(minutes_app.summary(self.job())['project'], '新品上市')
+
+    def test_previous_and_next_follow_the_project_the_user_set(self):
+        self.result(project='官網改版')
+        older = self.meeting('20261007-103000', '新品上市')
+        self.assertEqual(minutes_app.neighbours(self.job())['prev'], '')
+        minutes_app.cmd_move(self.job(), '新品上市')
+        self.assertEqual(minutes_app.neighbours(self.job())['prev'], older.name)
+
+    def test_tags_are_trimmed_one_each_and_at_most_eight(self):
+        minutes_app.cmd_tags(self.job(), json.dumps([' 對外 ', '對外', '', '月會', 'x' * 40, *map(str, range(10))]))
+        tags = minutes_app.summary(self.job())['tags']
+        self.assertEqual(tags[:3], ['對外', '月會', 'x' * 20])
+        self.assertEqual(len(tags), 8)
+        self.assertEqual(self.outs[-1]['tags'], tags)
+
+    def test_claude_s_suggestions_show_until_added_and_one_removed_later_does_not_come_back(self):
+        self.result(tag_suggestions=['對外', '月會'])
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], ['對外', '月會'])
+        minutes_app.cmd_tags(self.job(), json.dumps(['對外']))
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], ['月會'])
+        minutes_app.cmd_tags(self.job(), json.dumps([]))
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], ['月會'])
+
+    def test_suggestions_are_gone_once_the_minutes_are_sent(self):
+        self.result(tag_suggestions=['對外'], sent_at='2026-10-14T12:00:00')
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], [])
+
+    def test_bad_tags_change_nothing(self):
+        minutes_app.cmd_tags(self.job(), json.dumps(['對外']))
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_tags(self.job(), '{"not": "a list"}')
+        self.assertEqual(minutes_app.summary(self.job())['tags'], ['對外'])
+
+    def test_claude_s_next_minutes_see_the_names_the_user_chose(self):
+        import auto_minutes
+        self.result(project='新品上市專案')
+        minutes_app.cmd_move(self.job(), '新品上市')
+        minutes_app.cmd_tags(self.job(), json.dumps(['對外']))
+        self.assertEqual(auto_minutes.sorted_as(self.job_dir, json.loads((self.job_dir / 'result.json').read_text())),
+                         ('新品上市', ['對外']))
+
+    def test_claude_s_result_keeps_up_to_three_short_tag_suggestions(self):
+        import auto_minutes
+        work = self.root / 'work'
+        work.mkdir()
+        (work / auto_minutes.DRAFT).write_text(MINUTES, encoding='utf-8')
+        (work / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'project': '新品上市',
+                                                      'tags': ['對外', ' 月會 ', '對外', 'y' * 30, '內部']}))
+        saved = auto_minutes.minutes_path
+        auto_minutes.minutes_path = lambda folder, meta, title, lang: self.md_path
+        try:
+            result = auto_minutes.check_result(work, {}, self.root)
+        finally:
+            auto_minutes.minutes_path = saved
+        self.assertEqual(result['tag_suggestions'], ['對外', '月會', 'y' * 20])
+
+
 class MeetingLanguage(unittest.TestCase):
     """transcribe.detect: which language the meeting was held in, by majority of three stretches."""
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Each meeting shows which project it belongs to, and can carry tags.
+
+- In the list, a meeting's icon is the first character of its project on a colour of its own, the same colour every time. A meeting without a project shows an empty dashed circle. Meetings still being written up and ones that failed keep their own icons, and "Not finished" is in red.
+- Tags sit under the path at the top of a meeting: remove one with its ×, or type a new one with Add tag. Claude suggests a few when it writes the minutes, shown dashed; a suggestion is on the meeting only once you add it, and suggestions go away when the minutes are sent.
+- The list shows each meeting's tags. Pick one in the new Tags menu, or click a tag on a meeting, to see only the meetings with it. Search finds tags too.
+- The gear beside the project name opens Project settings: rename the project (every meeting of it gets the new name; a name another project already uses puts the two together), or move this meeting to another project or a new one.
+- Claude's next minutes see the project names and tags you chose, so a series keeps them.
+- The box of what Claude learned from your edits is three lines high and scrolls; Expand shows six.
+
 ## v0.3.0 (2026-10-16)
 
 Meetings can be archived and deleted from the list.

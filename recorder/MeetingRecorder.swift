@@ -162,6 +162,7 @@ let STRINGS: [String: [String: String]] = [
         "err.alreadyDone": "This meeting has already been written up.",
         "err.updateWhileRecording": "You're recording. You can update when the recording ends.",
         "err.unknownCommand": "Vinutes doesn't recognize that action.",
+        "err.pasteFailed": "The pasted picture could not be saved. You can choose it with the picture button instead.",
         "err.badFormat": "Vinutes doesn't recognize that attachment format.",
         "err.noRecipient": "Add at least one recipient.",
         "err.emptyMail": "The subject and the message both need text.",
@@ -178,6 +179,7 @@ let STRINGS: [String: [String: String]] = [
         "panel.client": "Choose the client file you downloaded from Google Cloud (a JSON file whose name starts with client_secret)",
         "panel.useFile": "Use This File",
         "panel.images": "Choose pictures to insert into the minutes",
+        "paste.name": "Pasted picture",
         "panel.files": "Choose files to add to the minutes",
         "panel.add": "Add",
     ],
@@ -263,6 +265,7 @@ let STRINGS: [String: [String: String]] = [
         "err.alreadyDone": "這場會議已經整理好了。",
         "err.updateWhileRecording": "正在錄音，錄音結束後才能更新。",
         "err.unknownCommand": "不認得的動作。",
+        "err.pasteFailed": "貼上的圖片儲存失敗，可以改用圖片按鈕選擇圖片。",
         "err.badFormat": "不認得的附件格式。",
         "err.noRecipient": "至少要有一位收件人。",
         "err.emptyMail": "主旨和信件內容都要有字。",
@@ -279,6 +282,7 @@ let STRINGS: [String: [String: String]] = [
         "panel.client": "選擇從 Google Cloud 下載的用戶端檔案（client_secret 開頭的 JSON 檔）",
         "panel.useFile": "使用這個檔案",
         "panel.images": "選擇要插入會議記錄的圖片",
+        "paste.name": "貼上的圖片",
         "panel.files": "選擇要加進會議記錄的檔案",
         "panel.add": "加入",
     ],
@@ -1677,6 +1681,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["confirm", dir.path, args["item"] as? String ?? ""], done)
         case "pick":
             pickFiles(images: args["kind"] as? String == "image", done)
+        case "pastePicture":
+            pastedPictures(done)
         case "setupState":
             setupState(progress: args["progress"] as? Bool ?? false, done)
         case "setupMic":
@@ -2063,6 +2069,62 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                 return ["path": url.path, "name": url.lastPathComponent]
             }
             done(true, ["files": files])
+        }
+    }
+
+    /// ⌘V in the box under the Doc: the pictures on the clipboard, as {path, name}, like the picture button's. Picture
+    /// files copied in Finder are used where they are; a picture itself (a screenshot, an image copied from a page) is
+    /// saved as a PNG in the temporary folder first. Nothing else on the clipboard is read.
+    func pastedPictures(_ done: @escaping (Bool, Any) -> Void) {
+        let board = NSPasteboard.general
+        let urls = board.readObjects(forClasses: [NSURL.self],
+                                     options: [.urlReadingFileURLsOnly: true,
+                                               .urlReadingContentsConformToTypes: [UTType.image.identifier]]) as? [URL] ?? []
+        if !urls.isEmpty {
+            for url in urls { picked.insert(url.path) }
+            appLog("pasted \(urls.count) picture file(s)")
+            return done(true, ["files": urls.map { ["path": $0.path, "name": $0.lastPathComponent] }])
+        }
+        // text copied in Excel, Word or Keynote comes with a picture of itself: when the text is what was copied
+        // (it comes first), it pastes as text; a screenshot or "Copy Image" has the picture first
+        let first = board.pasteboardItems?.first?.types.first.flatMap { UTType($0.rawValue) }
+        if let text = board.string(forType: .string), !text.isEmpty, !(first?.conforms(to: .image) ?? false) {
+            return done(true, ["files": []])
+        }
+        let png = board.data(forType: .png)
+        let image = png == nil ? NSImage(pasteboard: board) : nil
+        guard png != nil || image != nil else { return done(true, ["files": []]) }
+        let name = tr("paste.name")
+        // a big picture takes a moment to become a PNG: not on the main thread, where the window would stop
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = png ?? image.flatMap { $0.tiffRepresentation }.flatMap { NSBitmapImageRep(data: $0) }
+                .flatMap { $0.representation(using: .png, properties: [:]) }
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vinutes pasted", isDirectory: true)
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.calendar = Calendar(identifier: .gregorian)
+            fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
+            let stamp = fmt.string(from: Date())
+            var url = folder.appendingPathComponent("\(name) \(stamp).png")
+            var n = 2
+            while FileManager.default.fileExists(atPath: url.path) {      // two pastes in the same second
+                url = folder.appendingPathComponent("\(name) \(stamp) \(n).png")
+                n += 1
+            }
+            var saved = false
+            if let data {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try data.write(to: url)
+                    saved = true
+                } catch { appLog("pasted picture not saved: \(error.localizedDescription)") }
+            }
+            DispatchQueue.main.async {
+                guard saved else { return done(false, ["message": tr("err.pasteFailed")]) }
+                self?.picked.insert(url.path)
+                appLog("pasted a picture, \(data?.count ?? 0) bytes")
+                done(true, ["files": [["path": url.path, "name": url.lastPathComponent]]])
+            }
         }
     }
 

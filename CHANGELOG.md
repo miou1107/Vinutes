@@ -17,6 +17,13 @@ The minutes are filed under the right meeting.
 - The next meeting of the same series is looked up in the next four weeks, so the minutes give its real date instead of one heard in the transcript.
 - A later recording of the same series is given the name and project used before.
 
+The floating bar shows that the recording is running, and can show live captions.
+
+- The red dot is now five small red bars that jump with how loud the room is, so a glance shows both that the recording runs and that the microphone hears. They lie flat and turn orange while paused.
+- CC on the floating bar turns live captions on or off (macOS 26 and later); Vinutes remembers the choice. The captions are one line under the bar and follow it: purple words with a white edge and no background, shown as soon as they are heard, the newest on the right and older words fading out on the left.
+- Captions come from Apple's transcriber on the Mac itself; nothing is sent anywhere, and they are not written into the transcript or the minutes. The arrow next to CC picks the language (Chinese, English, Japanese, Korean, Spanish, French); each recording starts in the meeting language from Settings. The first time a language is used, the Mac downloads it once.
+- The captions run in a helper of their own that reads the recording file, so they can't stop or spoil the recording. What they did is logged to ~/Library/Logs/Vinutes/captions.log.
+
 ## v0.3.0 (2026-10-16)
 
 Meetings can be archived and deleted from the list.

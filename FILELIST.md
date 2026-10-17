@@ -12,7 +12,8 @@
 | `references/example-minutes-en.md` | A made-up, complete set of English minutes the AI uses as a model |
 | `references/example-minutes.md` | A made-up, complete set of minutes the AI uses as a model |
 | `references/glossary.md` | Common speech-recognition mistakes and their correct spelling |
-| `recorder/MeetingRecorder.swift` | The menu-bar app: recording, pause and shortcuts, notifications, the meeting window |
+| `recorder/MeetingRecorder.swift` | The menu-bar app: recording, pause and shortcuts, the floating bar with its level bars and live captions, notifications, the meeting window |
+| `recorder/Captions.swift` | The live-caption helper (built as Contents/MacOS/VinutesCaptions): reads the recording as it grows and runs Apple's on-device transcriber; logs to ~/Library/Logs/Vinutes/captions.log |
 | `recorder/app/` | The meeting window's page (`index.html`, `app.css`, `app.js`, `docblink.js`, `docfind.js`), copied into the app when it is built |
 | `recorder/app/strings.js` | Every word the meeting window shows, in English and Traditional Chinese |
 | `recorder/Info.plist` | The app's name, version and microphone permission text |

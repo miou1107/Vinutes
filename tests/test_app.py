@@ -2389,3 +2389,69 @@ class MeetingLanguage(unittest.TestCase):
 
     def test_cantonese_counts_as_chinese(self):
         self.assertEqual(self.detect('yue', 'en', 'zh'), 'zh')
+
+
+class UsageLimit(unittest.TestCase):
+    """An AI that has used up its limit says when it is back, in the app's language (auto_minutes.limit_until)."""
+    NOW = datetime(2026, 10, 17, 22, 46)
+
+    def tearDown(self):
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+
+    def until(self, text, lang='zh-TW'):
+        import auto_minutes
+        os.environ['VINUTES_LANG'] = lang
+        return auto_minutes.limit_until(text, self.NOW)
+
+    def test_claude_weekly_limit_is_tomorrow_noon(self):
+        self.assertEqual(self.until("You've hit your weekly limit · resets 12pm (Asia/Taipei)"), '明天中午 12 點')
+        self.assertEqual(self.until("You've hit your weekly limit · resets 12pm (Asia/Taipei)", 'en'), 'tomorrow at 12 pm')
+
+    def test_a_later_hour_today_and_minutes(self):
+        self.assertEqual(self.until("You've hit your limit · resets 11:30pm"), '今天晚上 11 點 30 分')
+
+    def test_a_date_and_the_small_hours(self):
+        self.assertEqual(self.until("You've hit your weekly limit · resets Oct 20, 9am"), '10/20 上午 9 點')
+        self.assertEqual(self.until("You've hit your usage limit · resets 3am"), '明天凌晨 3 點')
+
+    def test_other_wordings(self):
+        self.assertEqual(self.until('5-hour limit reached ∙ resets 2am'), '明天凌晨 2 點')
+        self.assertEqual(self.until('Your limit will reset at 5pm'), '明天下午 5 點')
+        self.assertEqual(self.until("You've hit your weekly limit · resets Feb 29, 9am"), '')   # 2026 has no Feb 29
+
+    def test_no_time_no_words(self):
+        self.assertEqual(self.until('Claude AI usage limit reached'), '')
+        self.assertEqual(self.until('something else went wrong'), '')
+
+    def test_the_message_the_user_sees(self):
+        import auto_minutes
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+        said = auto_minutes.friendly("You've hit your weekly limit · resets 12pm (Asia/Taipei)", 'DEFAULT')
+        self.assertIn('才會恢復，可以先換用其他 AI', said)
+        self.assertNotEqual(auto_minutes.friendly('Claude AI usage limit reached', 'DEFAULT'), 'DEFAULT')
+
+
+class People(unittest.TestCase):
+    """人員: a guess about who a voice is goes with that voice; the names on the 與會人員 line are listed."""
+
+    def test_a_guess_about_a_voice_keeps_the_voice_the_name_and_the_role(self):
+        g = minutes_app.SPEAKER_GUESS.match('講者 B 負責文章，可能是 Nina')
+        self.assertEqual((g.group(1), g.group(2).strip(' ，,、:：'), g.group(3)), ('B', '負責文章', 'Nina'))
+        self.assertEqual(minutes_app.SPEAKER_GUESS.match('講者 A 推測是 Vin').group(3), 'Vin')
+        self.assertEqual(minutes_app.SPEAKER_GUESS.match('Speaker C is probably Ming.').group(3), 'Ming')
+
+    def test_no_single_name_no_person(self):
+        for text in ('講者 B 與講者 C 可能是同一人', '講者 B 可能是 Nina 或 Mia', '講者 A 可能是主持人'):
+            g = minutes_app.SPEAKER_GUESS.match(text)
+            self.assertTrue(g is None or minutes_app.NOT_A_NAME.search(g.group(3)), text)
+        self.assertIsNone(minutes_app.SPEAKER_GUESS.match('Speakers A and B are probably Ming'))
+
+    def test_a_guess_about_a_word_is_no_person(self):
+        self.assertIsNone(minutes_app.SPEAKER_GUESS.match('「HOWAN PASS」推測是台灣 PASS'))
+        self.assertIsNone(minutes_app.SPEAKER_GUESS.match('第四項產品聽不出（方圖）'))
+
+    def test_the_attendees_line_without_blanks(self):
+        self.assertEqual(minutes_app.attendees('* 主持人：Vin\n* 與會人員：Vin、Mia、雅婷\n'), ['Vin', 'Mia', '雅婷'])
+        self.assertEqual(minutes_app.attendees('* 與會人員：Vin、[請補姓名]'), ['Vin'])
+        self.assertEqual(minutes_app.attendees('* Attendees: Jessie Chen, Ming Wang'), ['Jessie Chen', 'Ming Wang'])
+        self.assertEqual(minutes_app.attendees('沒有這一行'), [])

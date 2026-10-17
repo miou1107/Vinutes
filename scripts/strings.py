@@ -63,6 +63,7 @@ EN = {
     'err_docs_api': "The Google Docs API isn't turned on in your Google Cloud project yet. Click “Turn on” at item 8 of "
                     'the Setup Checklist.',
     'err_rate_limit': '{ai} has used up its usage limit. Click “Write up again” once it resets.',
+    'err_limit_until': '{ai} has used up its usage limit until {when}. You can switch to another AI meanwhile.',
     'err_codex_old': "Codex is too old to work with a ChatGPT account. Update Codex, then click “Write up again”.",
     'err_not_logged_in': "{ai} isn't signed in. Sign in at item 5 of the Setup Checklist.",
     # auto_minutes.py: the write-up
@@ -309,6 +310,7 @@ ZH = {
     'err_open_comments': 'Google 文件上有還沒處理的留言，請直接到 Google 文件修改。',
     'err_docs_api': 'Google Cloud 專案還沒開啟 Google Docs API，請到「環境設定自檢」的第 8 項按「開啟」。',
     'err_rate_limit': '{ai} 的用量已經用完，等額度恢復後再按「重新整理」。',
+    'err_limit_until': '{ai} 的用量已經用完，{when}才會恢復，可以先換用其他 AI。',
     'err_codex_old': 'Codex 的版本太舊，沒辦法用 ChatGPT 帳號整理。請先更新 Codex，再按「重新整理」。',
     'err_not_logged_in': '{ai} 還沒登入，請到「環境設定自檢」的第 5 項登入。',
     # auto_minutes.py: the write-up

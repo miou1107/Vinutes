@@ -77,13 +77,56 @@ FRIENDLY = [
     ('open comments', 'err_open_comments'),
     ('GOOGLE DOCS API DISABLED', 'err_docs_api'),
     ('rate limit', 'err_rate_limit'),
+    ('usage limit', 'err_rate_limit'),
+    ('weekly limit', 'err_rate_limit'),
+    ('limit reached', 'err_rate_limit'),
+    ('limit will reset', 'err_rate_limit'),
     ('not supported when using Codex with a ChatGPT account', 'err_codex_old'),
     ('not logged in', 'err_not_logged_in'),
 ]
 
 
+LIMIT = re.compile(r'limit\b[^\n]{0,80}?\breset(?:s|s at|s on| at| on)?\s+(?:at\s+)?(?:(?P<mon>[A-Za-z]{3,9})\.?\s+'
+                   r'(?P<day>\d{1,2}),?\s*(?:at\s+)?)?(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>am|pm)', re.I)
+MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+
+def limit_until(text: str, now: datetime | None = None) -> str:
+    """'You've hit your weekly limit · resets 12pm (Asia/Taipei)' -> 明天中午 12 點 / tomorrow at 12 pm; '' if no time"""
+    found = LIMIT.search(text or '')
+    if not found:
+        return ''
+    now = now or datetime.now()
+    hour = int(found['h']) % 12 + (12 if found['ap'].lower() == 'pm' else 0)
+    minute = int(found['m'] or 0)
+    if found['mon'] and found['mon'][:3].lower() in MONTHS:
+        try:
+            at = now.replace(month=MONTHS.index(found['mon'][:3].lower()) + 1, day=int(found['day']), hour=hour,
+                             minute=minute, second=0, microsecond=0)
+        except ValueError:                                   # Feb 29 in another year, a day that is no date
+            return ''
+        if at < now - timedelta(days=1):                     # December's message read in January
+            at = at.replace(year=at.year + 1)
+    else:
+        at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at <= now:
+            at += timedelta(days=1)
+    days = (at.date() - now.date()).days
+    h12 = at.hour % 12 or 12
+    if ui_lang() == 'zh-TW':
+        part = ('凌晨' if at.hour < 6 else '上午' if at.hour < 12 else '中午' if at.hour == 12 else
+                '下午' if at.hour < 18 else '晚上')
+        day = {0: '今天', 1: '明天'}.get(days, f'{at.month}/{at.day} ')
+        return f'{day}{part} {h12} 點' + (f' {at.minute} 分' if at.minute else '')
+    day = {0: 'today', 1: 'tomorrow'}.get(days, f'{at.month}/{at.day}')
+    return f'{day} at {h12}' + (f':{at.minute:02d}' if at.minute else '') + (' am' if at.hour < 12 else ' pm')
+
+
 def friendly(text: str, default: str) -> str:
     import ai_runner
+    when = limit_until(text)
+    if when:
+        return t('err_limit_until', ai=ai_runner.name(), when=when)
     for key, words in FRIENDLY:
         if key.lower() in text.lower():
             return t(words, ai=ai_runner.name())
@@ -361,6 +404,7 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
     ai = ai_runner.chosen()
     # the agent works in its own folder and can write nothing else; the program copies the minutes out
     log(job, f'{ai} in {work}')
+    began = (job / 'log.txt').stat().st_size if (job / 'log.txt').is_file() else 0   # what this run says starts here
     with (job / 'log.txt').open('a', encoding='utf-8') as out:
         try:
             done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
@@ -371,7 +415,10 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
             raise Failed(str(err))
     log(job, f'{ai} exited {done.returncode}')
     if done.returncode:
-        raise Failed(friendly((job / 'log.txt').read_text(encoding='utf-8')[-3000:],
+        with (job / 'log.txt').open('rb') as said:                # not an earlier run's limit message
+            said.seek(began)
+            text = said.read().decode('utf-8', 'replace')[-3000:]
+        raise Failed(friendly(text,
                               t('write_error', ai=ai_runner.name(ai))))
 
 

@@ -566,8 +566,27 @@ GUESS_EN = re.compile(r'[“"](.+?)[”"]\s*(?:is probably|probably means|is lik
                       r'\s*[“"]?([^“”",.]+?)[”"]?\.?\s*$', re.I)
 
 
+# 「講者 B 負責文章，可能是 Nina」: a guess about who a voice is, shown with that voice under 人員
+SPEAKER_GUESS = re.compile(r'^\s*(?:講者|Speaker)\s*((?-i:[A-Z]))(?![A-Za-z])\s*(.*?)\s*(?:推測是|推測為|應該是|可能是|is probably|'
+                           r'is likely|probably|may be)\s*[「“"]?([^「」“”"，。,;；]+?)[」”"]?[。.]?\s*$', re.I)
+# 「可能是 Nina 或 Mia」「可能是同一人」「可能是主持人」: no one name to give the voice
+NOT_A_NAME = re.compile(r'或|與|和|同一|講者|主持|與會|\b(?:and|or|same|host|speaker)\b', re.I)
+NOT_A_ROLE = re.compile(r'從|根據|聽|看|依|\b(?:from|based|judging)\b', re.I)
+ATTENDEES = re.compile(r'^\s*(?:[*+-]\s+)?(?:\*\*)?(?:與會人員|出席人員|Attendees)(?:\*\*)?\s*[：:]\s*(.+)$', re.M | re.I)
+
+
+def attendees(md: str) -> list[str]:
+    """The names on the minutes' 與會人員 line, blanks left out."""
+    found = ATTENDEES.search(md or '')
+    if not found:
+        return []
+    names = [n.strip(' *') for n in re.split(r'[、，,；;]', found.group(1))]
+    return [n for n in names if n and not n.startswith('[') and len(n) <= 30][:30]
+
+
 def check_items(job: Job) -> list[dict]:
-    """Claude's guesses the user has not confirmed yet. Word guesses carry what was heard and what is meant."""
+    """Claude's guesses the user has not confirmed yet. Word guesses carry what was heard and what is meant; a
+    guess about a voice carries the voice (speaker), the name and what it said the person does (role)."""
     done = set(job.state.get('confirmed', []))
     plains = [] if job.missing or not job.md_path else [b.plain for b in doc_sync.parse(job.md)[1]]
     items = []
@@ -580,7 +599,13 @@ def check_items(job: Job) -> list[dict]:
             if m and len(m.group(2).strip()) <= 20:
                 heard, meant = m.group(1).strip(), m.group(2).strip()
         if text and text not in done:
-            items.append({'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)})
+            item = {'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)}
+            who = SPEAKER_GUESS.match(text)
+            name = who.group(3).strip() if who else ''
+            if who and 0 < len(name) <= 30 and not NOT_A_NAME.search(name):
+                role = re.sub(r'[（）()]', '', who.group(2)).strip(' ，,、:：')
+                item.update(speaker=who.group(1), who=name, role='' if len(role) > 12 or NOT_A_ROLE.search(role) else role)
+            items.append(item)
     return items
 
 
@@ -1442,7 +1467,8 @@ def answer(job: Job, result: dict, html: bool = False, **extra):
     md = job.md
     skipped = list(extra.pop('skipped', [])) + list(result.get('skipped', []))
     data = {'saved_at': f'{now():%H:%M}', 'conflicts': result['conflicts'], 'held': result['held'],
-            'warning': result['warning'], 'todo': todo_items(job, md), 'skipped': skipped, **extra}
+            'warning': result['warning'], 'todo': todo_items(job, md), 'attendees': attendees(md), 'skipped': skipped,
+            **extra}
     if result['reload'] or skipped or html:
         data['html'] = preview(md, result['marks'], current_anchors(job, md))
         data['shown'] = page_token(job, data['html'])
@@ -1840,7 +1866,7 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
                      'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
             'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
-            'attach_files': len(linked_files(job, md)), **ai_choice(),
+            'attendees': attendees(md), 'attach_files': len(linked_files(job, md)), **ai_choice(),
             'audio': str(audio) if audio.is_file() else '',
             'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file(), 'minutes_lang': job.lang,
             **neighbours(job)}
@@ -1938,7 +1964,7 @@ def cmd_refresh(job: Job):
     job.save_state()
     md = '' if job.missing else job.md
     out({'todo': todo_items(job, md) if md else [], 'check': check_items(job), 'learned': learned,
-         'log': job.log_entries()[:200], 'warning': warning,
+         'attendees': attendees(md), 'log': job.log_entries()[:200], 'warning': warning,
          'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()})
 
 

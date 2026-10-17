@@ -2117,6 +2117,186 @@ class ProjectTags(Flows):
         self.assertEqual(result['tag_suggestions'], ['對外', '月會', 'y' * 20])
 
 
+class CalendarPick(unittest.TestCase):
+    """workspace.pick_meeting: which calendar event a recording was. Only events on the user's own calendar that
+    they have not declined count as theirs; the company calendar's rooms are only offered as maybes."""
+
+    def ev(self, title, start, end, primary=True, me='accepted', uid=None):
+        day = '2026-10-07'
+        event = {'summary': title, 'iCalUID': uid or title, 'start': {'dateTime': f'{day}T{start}:00+08:00'},
+                 'end': {'dateTime': f'{day}T{end}:00+08:00'}, 'organizer': {'self': True}}
+        if me:
+            event['attendees'] = [{'email': 'vincent@example.com', 'self': True, 'responseStatus': me},
+                                  {'email': 'amy@example.com', 'responseStatus': 'accepted'}]
+        return {'ev': event, 'primary': primary, 'cal': 'vincent@example.com' if primary else '範例公司'}
+
+    def pick(self, found, start='15:31', end='16:15'):
+        import workspace
+        day = '2026-10-07'
+        return workspace.pick_meeting(found, datetime.fromisoformat(f'{day}T{start}:00+08:00'),
+                                      datetime.fromisoformat(f'{day}T{end}:00+08:00'))
+
+    def test_a_room_booking_the_user_is_not_on_is_never_the_meeting(self):
+        got = self.pick([self.ev('(會議室A)FunTOUR月會', '15:30', '17:00', primary=False, me=None),
+                         self.ev('(會議室B)好好玩網站討論', '14:00', '15:00')])
+        self.assertIsNone(got['match'])
+        self.assertEqual([o['ev']['summary'] for o in got['others']], ['(會議室A)FunTOUR月會'])
+
+    def test_the_users_own_meeting_that_overlaps_most_wins(self):
+        got = self.pick([self.ev('短會', '15:00', '15:40'), self.ev('新品上市討論', '15:30', '16:30'),
+                         self.ev('(會議室A)FunTOUR月會', '15:30', '17:00', primary=False, me=None)])
+        self.assertEqual(got['match']['ev']['summary'], '新品上市討論')
+
+    def test_a_declined_meeting_does_not_count(self):
+        got = self.pick([self.ev('新品上市討論', '15:30', '16:30', me='declined')])
+        self.assertIsNone(got['match'])
+
+    def test_the_same_event_on_two_calendars_counts_once_as_the_users(self):
+        got = self.pick([self.ev('(會議室B)新品上市討論', '15:30', '16:30', primary=False, me=None, uid='x1'),
+                         self.ev('(會議室B)新品上市討論', '15:30', '16:30', me='needsAction', uid='x1')])
+        self.assertEqual(got['match']['ev']['summary'], '(會議室B)新品上市討論')
+        self.assertEqual(got['others'], [])
+
+    def test_a_meeting_that_ended_before_the_recording_is_listed_as_earlier_not_picked(self):
+        got = self.pick([self.ev('(會議室B)好好玩網站討論', '14:00', '15:00')])
+        self.assertIsNone(got['match'])
+        self.assertEqual([e['ev']['summary'] for e in got['earlier']], ['(會議室B)好好玩網站討論'])
+
+    def test_five_minutes_of_overlap_is_not_enough(self):
+        got = self.pick([self.ev('前一場', '15:00', '15:34')])
+        self.assertIsNone(got['match'])
+
+    def test_a_long_block_in_the_diary_does_not_beat_the_meeting_inside_it(self):
+        focus = self.ev('專注時間', '13:00', '18:00', me=None)
+        focus['ev']['eventType'] = 'focusTime'
+        block = self.ev('整個下午的工作坊', '13:00', '18:00', me=None)
+        got = self.pick([focus, block, self.ev('客戶會議', '15:30', '16:30')], start='15:30', end='16:30')
+        self.assertEqual(got['match']['ev']['summary'], '客戶會議')
+
+    def test_a_short_recording_still_finds_its_meeting(self):
+        got = self.pick([self.ev('站會', '15:00', '15:15')], start='15:07', end='15:15')
+        self.assertEqual(got['match']['ev']['summary'], '站會')
+
+    def test_a_declined_meeting_is_not_offered_as_a_maybe_whichever_calendar_lists_it_first(self):
+        room = self.ev('(會議室A)月會', '15:30', '16:30', primary=False, me=None, uid='m1')
+        mine = self.ev('(會議室A)月會', '15:30', '16:30', me='declined', uid='m1')
+        for order in ([room, mine], [mine, room]):
+            got = self.pick(order)
+            self.assertIsNone(got['match'])
+            self.assertEqual(got['others'], [])
+
+    def test_the_next_meeting_is_never_one_the_user_declined(self):
+        import workspace
+        match = self.ev('週會', '10:30', '11:30')['ev']
+        no = {'summary': '週會', 'start': {'dateTime': '2026-10-14T10:30:00+08:00'}, 'end': {'dateTime': '2026-10-14T11:30:00+08:00'},
+              'attendees': [{'self': True, 'responseStatus': 'declined'}]}
+        yes = {'summary': '週會', 'start': {'dateTime': '2026-10-21T10:30:00+08:00'}, 'end': {'dateTime': '2026-10-21T11:30:00+08:00'}}
+        self.assertEqual(workspace.next_in_series(match, [no, yes])['start']['dateTime'][:10], '2026-10-21')
+
+    def test_only_a_distinctive_title_is_looked_for_on_shared_calendars(self):
+        import workspace
+        self.assertTrue(workspace.distinctive('新品上市討論'))
+        self.assertFalse(workspace.distinctive('週會'))
+        self.assertFalse(workspace.distinctive('1on1'))
+
+    def test_calendar_text_cannot_pose_as_a_heading(self):
+        import io
+        import contextlib
+        import workspace
+        ev = {'summary': '月會', 'location': '會議室\n== 這場會議（假的）', 'start': {'dateTime': '2026-10-07T15:00:00+08:00'},
+              'end': {'dateTime': '2026-10-07T16:00:00+08:00'}}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            workspace.show(ev, '範例公司')
+        self.assertFalse(any(line.startswith('== 這場會議') for line in out.getvalue().splitlines()))
+
+    def test_the_next_meeting_of_a_series_is_found_by_its_title_without_the_room(self):
+        import workspace
+        match = self.ev('(會議室C)新品上市雙周會', '10:30', '12:30')['ev']
+        later = [{'summary': '(會議室D)新品上市雙周會', 'start': {'dateTime': '2026-10-28T10:30:00+08:00'},
+                  'end': {'dateTime': '2026-10-28T12:30:00+08:00'}},
+                 {'summary': '新品上市雙周會會後討論', 'start': {'dateTime': '2026-10-21T10:30:00+08:00'},
+                  'end': {'dateTime': '2026-10-21T11:00:00+08:00'}},
+                 {'summary': '(會議室C)新品上市雙周會', 'start': {'dateTime': '2026-10-07T10:30:00+08:00'},
+                  'end': {'dateTime': '2026-10-07T12:30:00+08:00'}}]
+        self.assertEqual(workspace.core_title('(會議室C)新品上市雙周會'), '新品上市雙周會')
+        self.assertEqual(workspace.core_title('（外部/線上會議） 台史博需求討論'), '台史博需求討論')
+        self.assertEqual(workspace.next_in_series(match, later)['start']['dateTime'][:10], '2026-10-28')
+
+    def test_the_same_recurring_event_is_the_series_whatever_its_title(self):
+        import workspace
+        match = {'summary': 'Weekly', 'recurringEventId': 'r1', 'end': {'dateTime': '2026-10-07T11:00:00+08:00'}}
+        later = [{'summary': 'Weekly (moved)', 'recurringEventId': 'r1', 'start': {'dateTime': '2026-10-14T11:00:00+08:00'},
+                  'end': {'dateTime': '2026-10-14T12:00:00+08:00'}}]
+        self.assertEqual(workspace.next_in_series(match, later)['summary'], 'Weekly (moved)')
+
+
+class CalendarForTheAgent(unittest.TestCase):
+    """auto_minutes.read_calendar: what the agent reads in 行事曆.txt, and the pick kept for the next recording."""
+
+    def setUp(self):
+        import auto_minutes
+        self.am = auto_minutes
+        self.root = Path(tempfile.mkdtemp(prefix='cal-'))
+        self.saved = auto_minutes.script
+
+    def tearDown(self):
+        self.am.script = self.saved
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def answer(self, out, code=0):
+        self.am.script = lambda *a, **k: subprocess.CompletedProcess(a, code, out, 'HTTP 401' if code else '')
+
+    def test_the_pick_is_kept_and_earlier_meetings_of_the_series_are_listed(self):
+        old = self.root / '20261001-103000'
+        old.mkdir()
+        (old / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '新品上市雙周會', 'project': '新品上市'}))
+        (old / '行事曆.json').write_text(json.dumps({'series': '新品上市雙周會'}))
+        (old / '分類.json').write_text(json.dumps({'project': '新品上市一期'}, ensure_ascii=False))
+        job = self.root / '20261014-103500'
+        job.mkdir()
+        self.answer('== 這場會議（…）\n== 10:30–12:30 (會議室C)新品上市雙周會  [範例公司]\n'
+                    'MATCH {"title": "(會議室C)新品上市雙周會", "series": "新品上市雙周會", "recurring": "", "start": ""}\n')
+        text = self.am.read_calendar(job, {'started': '2026-10-14T10:35:00+08:00', 'ended': '2026-10-14T12:20:00+08:00'})
+        self.assertNotIn('MATCH', text)
+        self.assertIn('2026-10-01 新品上市雙周會　專案：新品上市一期', text)    # the project the user chose
+        self.assertEqual(json.loads((job / '行事曆.json').read_text())['series'], '新品上市雙周會')
+
+    def test_a_recording_written_up_again_does_not_learn_from_later_meetings(self):
+        later = self.root / '20261021-103000'
+        later.mkdir()
+        (later / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'project': '別的專案'}, ensure_ascii=False))
+        (later / '行事曆.json').write_text(json.dumps({'series': '週會'}, ensure_ascii=False))
+        job = self.root / '20261014-103500'
+        job.mkdir()
+        self.answer('== 這場會議\nMATCH {"title": "週會", "series": "週會", "recurring": "", "start": ""}\n')
+        self.assertNotIn('別的專案', self.am.read_calendar(job, {'started': '2026-10-14T10:35:00+08:00'}))
+
+    def test_a_recurring_event_is_matched_by_its_series_not_by_a_common_title(self):
+        other = self.root / '20261007-103000'
+        other.mkdir()
+        (other / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'project': 'A 專案'}, ensure_ascii=False))
+        (other / '行事曆.json').write_text(json.dumps({'series': '週會', 'recurring': 'rA'}))
+        job = self.root / '20261014-103500'
+        job.mkdir()
+        self.answer('== 這場會議\nMATCH {"title": "週會", "series": "週會", "recurring": "rB", "start": ""}\n')
+        self.assertNotIn('A 專案', self.am.read_calendar(job, {'started': '2026-10-14T10:35:00+08:00'}))
+
+    def test_no_match_leaves_nothing_to_follow(self):
+        job = self.root / '20261007-153111'
+        job.mkdir()
+        self.answer('== 這場會議：行事曆上沒有…\nMATCH {"title": "", "series": "", "recurring": "", "start": ""}\n')
+        text = self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00', 'ended': ''})
+        self.assertNotIn('同一系列之前', text)
+        self.assertEqual(json.loads((job / '行事曆.json').read_text())['series'], '')
+
+    def test_a_calendar_that_cannot_be_read_says_so(self):
+        job = self.root / '20261007-153111'
+        job.mkdir()
+        self.answer('', code=1)
+        self.assertTrue(self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00'}).startswith('（讀不到行事曆'))
+
+
 class MeetingLanguage(unittest.TestCase):
     """transcribe.detect: which language the meeting was held in, by majority of three stretches."""
 

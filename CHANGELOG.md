@@ -11,6 +11,12 @@ Each meeting shows which project it belongs to, and can carry tags.
 - Claude's next minutes see the project names and tags you chose, so a series keeps them.
 - The box of what Claude learned from your edits is three lines high and scrolls; Expand shows six.
 
+The minutes are filed under the right meeting.
+
+- Only a calendar event you are invited to (and haven't declined) counts as the meeting you recorded, and the one that overlaps the recording most wins. Room bookings on a shared company calendar that you are not on are only offered to the AI as maybes, to use when the transcript is plainly about them.
+- The next meeting of the same series is looked up in the next four weeks, so the minutes give its real date instead of one heard in the transcript.
+- A later recording of the same series is given the name and project used before.
+
 ## v0.3.0 (2026-10-16)
 
 Meetings can be archived and deleted from the list.

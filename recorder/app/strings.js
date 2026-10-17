@@ -17,7 +17,6 @@ const STRINGS = {
     project: 'Project',
     proj_all: 'All',
     proj_loose: 'Unsorted',
-    count: (n) => (n === 1 ? '1 meeting' : `${n} meetings`),
     st_working: 'Writing up',
     st_ready: 'Ready to send',
     st_sent: 'Sent',
@@ -25,6 +24,7 @@ const STRINGS = {
     untitled: 'Meeting minutes',
     read_transcript: 'Read transcript',
     no_match: 'No meetings match',
+    no_meetings: 'No meetings yet',
     // 選取, 封存, 刪除
     pick: 'Select',
     pick_done: 'Done',
@@ -73,6 +73,13 @@ const STRINGS = {
 
     // the meeting
     no_recording: 'No recordings yet.',
+    first_title: 'Record your first meeting',
+    first_text: 'Press Start recording when the meeting begins; the minutes are written as soon as you stop.',
+    first_notify: 'A notification tells you when they are ready.',
+    start_rec: 'Start recording',
+    first_recording: 'Recording…',
+    rec_now: 'When you stop (the floating bar or ⌃⌥R), the minutes are written.',
+    first_key: 'Or use the shortcut ⌃⌥R',
     try_again: 'Try again',
     loading_doc: 'Loading the latest version of the Google Doc…',
     opening_doc: 'Opening the Google Doc…',
@@ -173,6 +180,7 @@ const STRINGS = {
     speed_aria: 'Playback speed',
     close_rec: 'Close recording',
     sent_line: (at, n, format) => `Sent　${at}　${n === 1 ? '1 person' : `${n} people`}　${format}`,
+    sent_short: (n) => `Sent to ${n === 1 ? '1 person' : `${n} people`}`,
     open_in_docs: 'Open in Google Docs',
     send_mail: 'Send email',
 
@@ -297,7 +305,6 @@ const STRINGS = {
     project: '專案',
     proj_all: '全部',
     proj_loose: '未分類',
-    count: (n) => `${n} 筆`,
     st_working: '整理中',
     st_ready: '待寄出',
     st_sent: '已寄出',
@@ -305,6 +312,7 @@ const STRINGS = {
     untitled: '會議紀錄',
     read_transcript: '看逐字稿',
     no_match: '找不到符合的會議',
+    no_meetings: '還沒有會議記錄',
     pick: '選取',
     pick_done: '完成',
     pick_all: (n) => `全選這 ${n} 場`,
@@ -352,6 +360,13 @@ const STRINGS = {
 
     // the meeting
     no_recording: '還沒有錄音。',
+    first_title: '錄下第一場會議',
+    first_text: '開會時按開始錄音，錄完會自動整理成會議記錄。',
+    first_notify: '整理好會通知你。',
+    start_rec: '開始錄音',
+    first_recording: '正在錄音⋯',
+    rec_now: '按浮動列上的停止或 ⌃⌥R 結束錄音，就會開始整理會議記錄。',
+    first_key: '也可以用快速鍵 ⌃⌥R 開始',
     try_again: '再試一次',
     loading_doc: '正在讀取 Google 文件的最新版本⋯',
     opening_doc: '正在打開 Google 文件⋯',
@@ -452,6 +467,7 @@ const STRINGS = {
     speed_aria: '播放速度',
     close_rec: '關閉錄音',
     sent_line: (at, n, format) => `已寄出　${at}　${n} 人　${format}`,
+    sent_short: (n) => `已寄出 ${n} 人`,
     open_in_docs: '在 Google 文件打開',
     send_mail: '發送信件',
 

@@ -11,6 +11,13 @@ Each meeting shows which project it belongs to, and can carry tags.
 - Claude's next minutes see the project names and tags you chose, so a series keeps them.
 - The box of what Claude learned from your edits is three lines high and scrolls; Expand shows six.
 
+The meeting window is easier to start with and has more room for the Doc.
+
+- Before the first meeting is recorded, the window shows Record your first meeting with a Start recording button and the shortcut ⌃⌥R. The new recording shows up in the list as soon as it starts.
+- Send email is at the right of the top row. Once the minutes are sent, it becomes "Sent to N people" (the time and format show when you point at it), and the bottom row is gone unless a recording is playing.
+- The number of meetings shown is beside the list's title, 所有會議記錄 (2), instead of on a row of its own.
+- The quick buttons (精簡摘要, 完整詳盡 and the rest) are under the box where you ask Claude, and the ＋ menu opens upward like the AI menu.
+
 The minutes are filed under the right meeting.
 
 - Only a calendar event you are invited to (and haven't declined) counts as the meeting you recorded, and the one that overlaps the recording most wins. Room bookings on a shared company calendar that you are not on are only offered to the AI as maybes, to use when the transcript is plainly about them.

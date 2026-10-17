@@ -1633,6 +1633,10 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             pendingSetup = false
         case "list":
             app(["list"], done)
+        case "record":                                   // the button shown before the first meeting is recorded
+            guard let owner else { return done(false, ["message": tr("err.unknownCommand")]) }
+            owner.startRecording()
+            done(true, ["recording": owner.recording])
         case "setLanguage":
             let lang = args["lang"] as? String ?? ""
             guard lang == "en" || lang == "zh-TW", let owner else { return done(false, ["message": tr("err.unknownCommand")]) }

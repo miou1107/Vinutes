@@ -1255,8 +1255,9 @@ function renderAsk() {
         <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>
       <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>`;
     const input = $('#promptInput');
-    const go = () => (S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
+    const go = () => (S.pasting ? null : S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
+    if (canAttach) input.addEventListener('paste', pastePicture);
     $('#askGo').addEventListener('click', go);
     el.querySelectorAll('.qk').forEach((b) => b.addEventListener('click', () => ask('', b.dataset.k)));
     $('#aiPick').addEventListener('click', (e) => {
@@ -1427,6 +1428,30 @@ async function pickAttach(kind) {
     const input = $('#promptInput');
     if (input) input.focus();
   } catch (e) { showAlert(e.message); }
+}
+
+// ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): added like one
+// chosen with the picture button. Text pastes as text.
+async function pastePicture(e) {
+  const clip = e.clipboardData;
+  if (!clip || S.busy) return;
+  const picture = [...clip.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!picture && ![...clip.types].includes('Files')) return;
+  e.preventDefault();
+  const input = e.target;
+  const text = clip.getData('text/plain');
+  const id = S.sel;
+  S.pasting = true;                                // Enter waits: the picture goes with this message
+  try {
+    const r = await call('pastePicture');
+    if (S.sel !== id || S.busy) return;            // another meeting, or the message already went
+    const files = r.files || [];
+    for (const f of files) {
+      if (!S.attach.some((a) => a.path === f.path)) S.attach.push({ kind: 'image', path: f.path, name: f.name });
+    }
+    if (files.length) renderAttach();
+    else if (text) input.setRangeText(text, input.selectionStart, input.selectionEnd, 'end');   // text, or a file that is no picture
+  } catch (err) { showAlert(err.message); } finally { S.pasting = false; }
 }
 
 // the picked items and the sentence about them: one line each in 「八、補充資訊」

@@ -148,8 +148,9 @@ function placeDoc(reload = false) {
   if (reload && !show) { S.reloadDoc = true; return; }          // loads again once the place shows
   if (show && S.reloadDoc) { reload = true; S.reloadDoc = false; }
   const r = show ? el.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 };
-  // the AI menu opens upward, into the Doc's place: the Doc ends above it while it is open
-  const menu = show && S.aiOpen ? $('#aiMenu') : null;
+  // the AI and ＋ menus open upward, into the Doc's place: the Doc ends above the open one
+  const open = !show ? null : S.aiOpen ? $('#aiMenu') : S.menuOpen ? $('#attachMenu') : null;
+  const menu = open && !open.hidden ? open : null;
   const h = menu ? Math.max(0, Math.min(r.height, menu.getBoundingClientRect().top - r.y - 8)) : r.height;
   const key = [show, show ? S.d.doc_url : '', Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(h)].join('|');
   if (key === S.placed && !reload) return;
@@ -277,13 +278,12 @@ function renderSide() {
   const keepFocus = document.activeElement && document.activeElement.id === 'q';
   const scrolled = side.querySelector('.sidelist') ? side.querySelector('.sidelist').scrollTop : 0;
   side.innerHTML = `<div class="sidelist">
-    <div class="sidehead"><h1>${esc(t('list_title'))}</h1>
+    <div class="sidehead"><h1>${esc(t('list_title'))} <span class="n">(${list.length})</span></h1>
       <button class="pickbtn" id="pickBtn" aria-pressed="${S.picking}">${esc(t(S.picking ? 'pick_done' : 'pick'))}</button></div>
     <div class="search">${ICON.search}<input id="q" aria-label="${esc(t('search_aria'))}" placeholder="${esc(t('search_ph'))}" value="${esc(S.q)}"></div>
     <div class="proj"><label for="proj">${esc(t('project'))}</label><select id="proj">${opts.map((p) => `<option value="${esc(p)}"${p === S.proj ? ' selected' : ''}>${esc(projName(p))}</option>`).join('')}</select></div>
     ${tags.length ? `<div class="proj"><label for="tagSel">${esc(t('tag'))}</label><select id="tagSel">${[ALL, ...tags].map((g) => `<option value="${esc(g)}"${g === S.tag ? ' selected' : ''}>${esc(g === ALL ? t('proj_all') : g)}</option>`).join('')}</select></div>` : ''}
-    ${S.picking ? `<button class="pickall" id="pickAll" aria-pressed="${allPicked}"><span class="cbox${allPicked ? ' on' : ''}">${ICON.tick}</span>${esc(t('pick_all', choosable.length))}</button>`
-      : `<div class="count">${esc(t('count', list.length))}</div>`}
+    ${S.picking ? `<button class="pickall" id="pickAll" aria-pressed="${allPicked}"><span class="cbox${allPicked ? ' on' : ''}">${ICON.tick}</span>${esc(t('pick_all', choosable.length))}</button>` : ''}
     ${groups.map((g) => `
       <div class="day"><span>${esc(g.day)}</span><i></i></div>
       ${g.items.map((j) => `
@@ -295,7 +295,7 @@ function renderSide() {
             ${(j.tags || []).length ? `<span class="tgs">${j.tags.map((g) => `<span class="tg" data-tag="${esc(g)}">${esc(g)}</span>`).join('')}</span>` : ''}</span>
           <span class="tools">${j.has_transcript ? `<button class="tb" data-act="read" title="${esc(t('read_transcript'))}" aria-label="${esc(t('read_transcript'))}">${ICON.lines}</button>` : ''}${j.has_audio ? playButton(playingRow(j.id)) : ''}</span>
         </div>`).join('')}`).join('')}
-    ${list.length ? '' : `<div class="empty">${esc(t('no_match'))}</div>`}</div>
+    ${list.length ? '' : `<div class="empty">${esc(t(S.jobs.length ? 'no_match' : 'no_meetings'))}</div>`}</div>
     ${S.picking ? `<div class="pickbar"><span>${esc(t('picked', S.picked.size))}</span>
       <button class="btn ghost" id="pickArchive"${S.picked.size ? '' : ' disabled'}>${esc(t(S.proj === ARCHIVED ? 'unarchive' : 'archive'))}</button>
       <button class="btn ghost danger" id="pickDelete"${S.picked.size ? '' : ' disabled'}>${esc(t('delete'))}</button></div>`
@@ -621,9 +621,29 @@ function renderMain() {
   placeDoc();
 }
 
+// nothing recorded yet: how to record the first meeting, and what happens after
+function drawFirst(main) {
+  main.innerHTML = `<div class="first"><h2>${esc(t('first_title'))}</h2><p>${esc(t('first_text'))}<br>${esc(t('first_notify'))}</p>
+    <button class="btn primary rec" id="firstRec"${S.recording ? ' disabled' : ''}><span class="dot" aria-hidden="true"></span>${esc(t(S.recording ? 'first_recording' : 'start_rec'))}</button>
+    <div class="key">${esc(t('first_key'))}</div></div>`;
+  $('#firstRec').addEventListener('click', async () => {
+    try { await call('record'); } catch (e) { return showAlert(e.message); }
+    await openFirst();
+  });
+}
+
+// the list was empty and now has the first recording: it opens at once (never another meeting after a delete)
+async function openFirst() {
+  const empty = !S.jobs.length;
+  await loadList();
+  if (empty && !S.sel && S.jobs.length) select(S.jobs[0].id);
+  return empty;
+}
+
 function drawMain() {
   const main = $('#main');
   const job = S.jobs.find((j) => j.id === S.sel);
+  if (!S.sel && !S.jobs.length) return drawFirst(main);
   if (!S.sel) { main.innerHTML = `<div class="state"><div class="sub">${esc(t('no_recording'))}</div></div>`; return; }
   if (S.loadError) {
     main.innerHTML = `<div class="state"><h2>${esc(job ? titleOf(job) : '')}</h2><div class="banner err"><span>${esc(S.loadError)}</span></div>
@@ -669,6 +689,11 @@ function drawMain() {
 
 function renderWorking(main, d) {
   const step = d.step;
+  if (!step && S.recording && S.jobs[0] && S.jobs[0].id === d.id) {   // still recording: nothing to write up yet
+    main.innerHTML = `<div class="state"><h2>${esc(t('first_recording'))}</h2>
+      <div class="sub">${esc(t('rec_now'))}</div></div>`;
+    return;
+  }
   const st = (n) => {
     const order = { transcribing: 0, writing: 1 }[step] ?? 0;
     if (n < order) return ['', ICON.done];
@@ -710,7 +735,10 @@ function renderHead() {
     <button class="sib${d.prev ? '' : ' off'}" id="prev" title="${esc(d.prev ? d.prev_title : t('no_prev'))}">${ICON.chevL}<span>${esc(t('prev_meeting'))}</span></button>
     <button class="sib${d.next ? '' : ' off'}" id="next" title="${esc(d.next ? d.next_title : planned)}"><span>${esc(t('next_meeting'))}</span>${ICON.chevR}</button>
     ${docsMode() ? '' : `<span class="savetext${S.saveErr ? ' err' : ''}" id="savetext">${esc(say(S.saveText))}</span>`}
-    ${d.doc_url ? `<span class="iconlink" id="openDoc" title="${esc(t('open_doc_tip'))}">${ICON.open}</span>` : ''}`;
+    ${d.doc_url ? `<span class="iconlink" id="openDoc" title="${esc(t('open_doc_tip'))}">${ICON.open}</span>` : ''}
+    ${d.sent ? `<span class="sentmark" title="${esc(t('sent_line', d.sent.at, d.sent.count, d.sent.format))}">${ICON.done}<span>${esc(t('sent_short', d.sent.count))}</span></span>`
+      : d.mail ? `<button class="btn primary sendbtn" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}`;
+  if ($('#mailBtn')) $('#mailBtn').addEventListener('click', openMail);
   $('#toProj').addEventListener('click', () => { S.proj = d.project || LOOSE; S.tag = ALL; S.q = ''; renderSide(); });
   $('#projSet').addEventListener('click', openProject);
   $('#toDate').addEventListener('click', () => { S.q = shortDay(d); S.proj = ALL; S.tag = ALL; renderSide(); });
@@ -1214,7 +1242,6 @@ function renderAsk() {
     // files, links and pictures need the Google Doc: they go to Drive and into its 「八、補充資訊」
     const canAttach = !!(S.d && S.d.doc_url && !S.d.readonly);
     el.innerHTML = `<div id="askTop"></div>
-      <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>
       <div id="attachBox"></div>
       <div class="prompt with-tools">
         <div class="mwrap"><button class="model" id="aiPick" title="${esc(t('ai_pick'))}" aria-label="${esc(t('ai_pick'))}"
@@ -1225,7 +1252,8 @@ function renderAsk() {
             <button role="menuitem" data-a="link">${ICON.link}<span>${esc(t('paste_link'))}</span></button></div></div>
         <button class="ib" id="attachImage" title="${esc(t('insert_image'))}" aria-label="${esc(t('insert_image'))}">${ICON.image}</button>` : ''}
         <input id="promptInput" aria-label="${esc(t('ask_aria', aiName()))}" placeholder="${esc(t('ask_ph', aiName()))}">
-        <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>`;
+        <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>
+      <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>`;
     const input = $('#promptInput');
     const go = () => (S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
@@ -1234,6 +1262,7 @@ function renderAsk() {
     $('#aiPick').addEventListener('click', (e) => {
       e.stopPropagation();
       S.aiOpen = !S.aiOpen;
+      if (S.menuOpen) { S.menuOpen = false; renderAttachMenu(); }
       renderAiMenu();
       if (S.aiOpen) loadAiStates();
     });
@@ -1243,7 +1272,11 @@ function renderAsk() {
       if (b && !b.disabled) switchAi(b.dataset.ai);
     });
     if (canAttach) {
-      $('#attachPlus').addEventListener('click', (e) => { e.stopPropagation(); S.menuOpen = !S.menuOpen; renderAttachMenu(); });
+      $('#attachPlus').addEventListener('click', (e) => {
+        e.stopPropagation(); S.menuOpen = !S.menuOpen;
+        if (S.aiOpen) { S.aiOpen = false; renderAiMenu(); }
+        renderAttachMenu();
+      });
       $('#attachImage').addEventListener('click', () => pickAttach('image'));
       el.querySelectorAll('#attachMenu button').forEach((b) => b.addEventListener('click', () => {
         if (b.dataset.a === 'file') return pickAttach('file');
@@ -1337,6 +1370,7 @@ function renderAttachMenu() {
   if (!menu) return;
   menu.hidden = !S.menuOpen;
   $('#attachPlus').classList.toggle('on', S.menuOpen);
+  placeDoc();
 }
 document.addEventListener('click', (e) => {
   if (S.menuOpen && !e.target.closest('#attachMenu')) { S.menuOpen = false; renderAttachMenu(); }
@@ -1529,16 +1563,14 @@ function renderFoot() {
         <button class="speed" id="pspeed" aria-label="${esc(t('speed_aria'))}">${p.speed}x</button>
         <button class="iconbtn" id="pclose" aria-label="${esc(t('close_rec'))}">${ICON.x}</button></div>` : ''}
     <div class="buttons">
-      ${d.sent ? `<div class="sentline">${ICON.done}<span>${t('sent_line', esc(d.sent.at), d.sent.count, esc(d.sent.format))}</span></div>` : ''}
       <span style="flex:1"></span>
       ${d.doc_url && !docs ? `<button class="btn ghost" id="openGdoc">${ICON.open}<span>${esc(t('open_in_docs'))}</span></button>` : ''}
-      ${d.mail && !d.sent ? `<button class="btn primary" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}
     </div>`;
+  el.hidden = !el.querySelector('button, .row');      // 發送信件 is at the top: nothing left here, no empty row
   el.querySelectorAll('.chip.red').forEach((b) => b.addEventListener('click', () => jumpTo(todo[Number(b.dataset.t)])));
   el.querySelectorAll('.okbtn').forEach((b) => b.addEventListener('click', () => confirmCheck(check[Number(b.dataset.c)])));
   const on = (sel, fn) => { const x = $(sel); if (x) x.addEventListener('click', fn); };
   on('#openGdoc', () => call('link', { url: d.doc_url }).catch(() => {}));
-  on('#mailBtn', openMail);
   on('#pp', () => audio(S.player.playing ? 'pause' : 'play', { at: S.player.pos }));
   on('#pspeed', () => audio('rate', { rate: S.player.speed === 1 ? 1.5 : S.player.speed === 1.5 ? 2 : 1 }));
   on('#pclose', () => audio('stop'));
@@ -1572,8 +1604,10 @@ window.onEvent = (name, data) => {
     S.recording = !!data.recording;
     renderVersion();
   }
-  if (name === 'jobs') { loadList().then(() => {
+  if (name === 'jobs') { openFirst().then((empty) => {
+    if (empty) return;
     const job = S.jobs.find((j) => j.id === S.sel);
+    if (S.d && job && S.d.status === 'working' && job.step !== S.d.step) return select(S.sel);   // recording → 轉成逐字稿 → …
     if (S.d && job && job.status !== S.d.status && !(S.d.status === 'ready' && job.status === 'sent')) select(S.sel);
   }); }
   if (name === 'select' && (data.id !== S.sel || !S.d)) select(data.id);
@@ -1813,7 +1847,7 @@ async function sendMail() {
     if (S.sel !== id) return;
     S.d.sent = r.sent;
     closeSheet();
-    renderFoot();
+    renderHead();
     loadList();
     refreshLog();
   } catch (e) {

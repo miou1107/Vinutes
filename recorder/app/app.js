@@ -71,6 +71,7 @@ const ICON = {
   collapse: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></svg>',
   expand: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-6 6 6 6M11 6l-6 6 6 6"/></svg>',
   bubble: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
+  people: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>',
   clock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   book: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h6"/></svg>',
@@ -170,13 +171,14 @@ function refreshDoc(id = S.sel, again = false) {
   const seq = S.editSeq;
   const p = call('refresh', { id }).then((r) => {
     if (r.busy || S.sel !== id || !S.d || !docsMode()) return;
-    const before = JSON.stringify([S.d.todo, S.d.check, S.d.log]);
+    const before = JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees]);
     if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = r.check || []; }   // not over a confirm made meanwhile
+    if (r.attendees) S.d.attendees = r.attendees;
     S.d.log = r.log || [];
     if ('can_undo' in r && !S.busy) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
-    if (JSON.stringify([S.d.todo, S.d.check, S.d.log]) !== before) renderRail();
+    if (JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees]) !== before) renderRail();
   }).catch(() => {}).finally(() => { if (S.refreshing && S.refreshing.p === p) S.refreshing = null; });
   S.refreshing = { id, p };
   return p;
@@ -990,6 +992,7 @@ function afterEdit(r) {
   if (!S.d) return;                                 // the meeting is loading again: what it loads already has this
   if (r.unsaved) setSave(['not_saved_edit'], true);
   else setSave([r.held ? 'held' : 'saved', r.saved_at || hhmm()]);
+  if (r.attendees) S.d.attendees = r.attendees;       // 與會人員 under 人員, after the names went into the minutes
   if (r.todo) { S.d.todo = r.todo; renderFoot(); renderRail(); }
   if ('can_undo' in r) S.canUndo = !!r.can_undo;
   if (r.reload_doc) placeDoc(true);                 // the whole Doc was uploaded again: the one shown loads again
@@ -1094,8 +1097,12 @@ function renderRail() {
 function renderDocsRail(el) {
   const d = S.d;
   const todo = d.todo || [];
-  const check = d.check || [];
-  const tab = ['fill', 'check', 'log'].includes(S.tab) ? S.tab : (todo.length ? 'fill' : check.length ? 'check' : 'log');
+  const all = d.check || [];
+  // guesses about who a voice is go under 人員, beside that voice; the rest (words heard) stay under 待確認
+  const people = all.filter((c) => c.speaker);
+  const check = all.filter((c) => !c.speaker);
+  const tabs = ['fill', 'check', 'people', 'log'];
+  const tab = tabs.includes(S.tab) ? S.tab : (todo.length ? 'fill' : check.length ? 'check' : people.length ? 'people' : 'log');
   const pick = (t) => () => { S.railOpen = true; S.tab = t; renderRail(); };
   if (!S.railOpen) {
     el.className = 'rail closed';
@@ -1103,10 +1110,12 @@ function renderDocsRail(el) {
       <button class="iconbtn" id="expand" title="${esc(t('expand'))}" aria-label="${esc(t('expand'))}">${ICON.expand}</button>
       <button class="iconbtn" id="railF" title="${esc(t('to_fill'))}" aria-label="${esc(t('to_fill'))}">${ICON.lines}${todo.length ? `<span class="badge red">${todo.length}</span>` : ''}</button>
       <button class="iconbtn" id="railK" title="${esc(t('to_confirm'))}" aria-label="${esc(t('to_confirm'))}">${ICON.check}${check.length ? `<span class="badge">${check.length}</span>` : ''}</button>
+      <button class="iconbtn" id="railP" title="${esc(t('people'))}" aria-label="${esc(t('people'))}">${ICON.people}${people.length ? `<span class="badge">${people.length}</span>` : ''}</button>
       <button class="iconbtn" id="railL" title="${esc(t('activity'))}" aria-label="${esc(t('activity'))}">${ICON.clock}</button>`;
     $('#expand').addEventListener('click', () => { S.railOpen = true; renderRail(); });
     $('#railF').addEventListener('click', pick('fill'));
     $('#railK').addEventListener('click', pick('check'));
+    $('#railP').addEventListener('click', pick('people'));
     $('#railL').addEventListener('click', pick('log'));
     return;
   }
@@ -1118,12 +1127,13 @@ function renderDocsRail(el) {
       ? (check.length ? check.map((c, i) => `<div class="card guess"><div class="text">${esc(c.label)}</div>
           <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`).join('')
                       : `<div class="empty">${esc(t('all_confirmed'))}</div>`)
-      : logHTML(d.log || []);
+      : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
         <button class="tab${tab === 'fill' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_fill'))}${todo.length ? ` <b class="n red">${todo.length}</b>` : ''}</button>
         <button class="tab${tab === 'check' ? ' on' : ''}" role="tab" id="tabK">${esc(t('to_confirm'))}${check.length ? ` <b class="n yellow">${check.length}</b>` : ''}</button>
+        <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${people.length ? ` <b class="n yellow">${people.length}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>
@@ -1132,6 +1142,7 @@ function renderDocsRail(el) {
     <div class="railbody" id="railbody">${body}</div>`;
   $('#tabF').addEventListener('click', pick('fill'));
   $('#tabK').addEventListener('click', pick('check'));
+  $('#tabP').addEventListener('click', pick('people'));
   $('#tabL').addEventListener('click', pick('log'));
   $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); });
   el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
@@ -1139,8 +1150,81 @@ function renderDocsRail(el) {
     showInDoc(item.find, true);
     askAbout(item);
   }));
-  el.querySelectorAll('.card.guess .text').forEach((t, i) => t.addEventListener('click', () => showInDoc(check[i].find)));
-  el.querySelectorAll('.okc2').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
+  if (tab === 'check') {
+    el.querySelectorAll('.card.guess .text').forEach((t, i) => t.addEventListener('click', () => showInDoc(check[i].find)));
+    el.querySelectorAll('.okc2[data-c]').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
+  }
+  if (tab === 'people') wirePeople(el, people);
+}
+
+// 人員: each voice in the recording, with what Claude guessed about it (confirm it, or name the voice yourself),
+// guesses about voices the recording does not tell apart, and the names on the minutes' 與會人員 line
+function peopleHTML(people) {
+  const d = S.d;
+  const voices = d.voices || [];
+  const guessOf = (g) => people.find((c) => c.speaker === g);
+  const loose = people.filter((c) => !voices.some((v) => v.group === c.speaker));
+  const guess = (c) => esc(t('people_guess', c.who, c.role || ''));
+  const rows = voices.map((v) => {
+    const c = guessOf(v.group);
+    const playing = S.player.playing && S.peoplePlay === v.group;
+    // a voice already named (by hand, or known from an earlier meeting) keeps the guess only to be settled
+    const yes = !c ? '' : v.name
+      ? `<button class="okc2 ploose" data-l="${esc(c.label)}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button>`
+      : `<button class="okc2 pyes" data-g="${esc(v.group)}"${S.peopleBusy ? ' disabled' : ''}>${ICON.checkSmall}<span>${esc(t('people_yes', c.who))}</span></button>`;
+    return `<div class="card person${c ? ' guess' : ''}" data-g="${esc(v.group)}">
+      <div class="prow"><span class="pchip" style="${voiceStyle(v.group, v.name)}">${esc(v.label)}</span>
+        <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
+        <button class="plink phear" data-g="${esc(v.group)}">${esc(t(playing ? 'stop_play' : 'hear'))}</button></div>
+      ${c ? `<div class="text">${guess(c)}</div>` : ''}
+      <div class="prow">${yes}<button class="plink pname" data-g="${esc(v.group)}">${esc(t(v.name ? 'people_rename' : 'people_set'))}</button></div></div>`;
+  });
+  const others = loose.map((c) => `<div class="card guess"><div class="text">${esc(c.label)}</div>
+      <button class="okc2 ploose" data-l="${esc(c.label)}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`);
+  const named = voices.filter((v) => v.name);
+  const names = d.attendees || [];
+  if (!rows.length && !others.length && !names.length) return `<div class="empty">${esc(t('people_none'))}</div>`;
+  return `${rows.length ? `<div class="phead">${esc(t('people_voices'))}</div>${rows.join('')}` : ''}${others.join('')}
+    ${named.length && d.doc_url && !d.readonly ? `<button class="btn ghost papply" id="pApply"${S.busy ? ' disabled' : ''}>${esc(t('people_apply'))}</button>` : ''}
+    ${names.length ? `<div class="phead">${esc(t('people_attendees'))}</div><div class="pnames">${names.map((n) => `<span class="pname-chip">${esc(n)}</span>`).join('')}</div>` : ''}`;
+}
+
+function wirePeople(el, people) {
+  const d = S.d;
+  const voices = d.voices || [];
+  el.querySelectorAll('.phear').forEach((b) => b.addEventListener('click', () => {
+    const v = voices.find((x) => x.group === b.dataset.g);
+    if (!v) return;
+    if (S.player.playing && S.peoplePlay === v.group) audio('pause', { at: S.player.pos });
+    else { S.peoplePlay = v.group; audio('play', { at: v.sample[0] }); }
+    setTimeout(renderRail, 600);
+  }));
+  el.querySelectorAll('.pname').forEach((b) => b.addEventListener('click', () => openTranscript({ ask: { group: b.dataset.g, line: null } })));
+  el.querySelectorAll('.pyes').forEach((b) => b.addEventListener('click', async () => {
+    const c = people.find((x) => x.speaker === b.dataset.g);
+    if (!c || S.peopleBusy) return;
+    const id = S.sel;
+    S.peopleBusy = true; S.editSeq++;                  // a refresh meanwhile does not draw the button again
+    b.disabled = true;
+    try {
+      const r = await call('speaker', { id, group: c.speaker, name: c.who });   // the voice is remembered too
+      if (S.sel !== id || !S.d) return;
+      S.d.transcript = r.transcript || S.d.transcript;
+      S.d.voices = r.voices || S.d.voices;
+      S.d.voice_names = r.voice_names || S.d.voice_names;
+      await confirmCheck(c);
+    } catch (e) { showAlert(e.message); } finally { S.peopleBusy = false; if (S.sel === id) renderRail(); }
+  }));
+  el.querySelectorAll('.ploose').forEach((b) => b.addEventListener('click', () => {
+    const c = people.find((x) => x.label === b.dataset.l);
+    if (c) { b.disabled = true; confirmCheck(c); }
+  }));
+  const apply = $('#pApply');
+  if (apply) apply.addEventListener('click', () => {
+    const w = mailWords();                            // 講者 A in Chinese minutes, Speaker A in English ones
+    const pairs = voices.filter((v) => v.name).map((v) => w.people_pair(v.group, v.name)).join(w.list_sep);
+    ask(w.people_apply_ask(pairs));
+  });
 }
 
 // a blank to fill: the question goes into the box under the Doc, ready for the answer
@@ -1763,7 +1847,10 @@ function openTranscript(keep = {}) {
       d.transcript = r.transcript || d.transcript;
       d.voices = r.voices || d.voices;
       d.voice_names = r.voice_names || d.voice_names;
+      const guess = oneLine ? null : (d.check || []).find((c) => c.speaker === ask.group);
       openTranscript({ toast: oneLine ? '' : t('voice_saved', name) });
+      if (guess) await confirmCheck(guess);          // named by hand: the guess about this voice is settled
+      else renderRail();
       refreshLog();
     } catch (e) { showAlert(e.message); }
   };

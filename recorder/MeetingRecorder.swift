@@ -120,6 +120,12 @@ let STRINGS: [String: [String: String]] = [
         "bar.pause": "Pause (⌃⌥P)",
         "bar.resume": "Resume (⌃⌥P)",
         "bar.stop": "Stop recording (⌃⌥R)",
+        "bar.captions": "Live captions on your screen only; not saved in the transcript",
+        "bar.captionLanguage": "Caption language",
+        "caption.downloading": "Downloading %@ captions, the first time only…",
+        "caption.unsupported": "No live captions for this language",
+        "caption.failed": "Captions stopped. Press CC twice to try again.",
+        "caption.listening": "Listening…",
         "quit.title": "You're still recording",
         "btn.keepRecording": "Keep Recording",
         "btn.stopAndWrite": "Stop and Write Up",
@@ -215,6 +221,12 @@ let STRINGS: [String: [String: String]] = [
         "bar.pause": "暫停（⌃⌥P）",
         "bar.resume": "繼續（⌃⌥P）",
         "bar.stop": "結束錄音（⌃⌥R）",
+        "bar.captions": "即時字幕：只顯示在你的螢幕上，不會寫進逐字稿",
+        "bar.captionLanguage": "字幕語言",
+        "caption.downloading": "正在下載%@字幕資料，只有第一次要等…",
+        "caption.unsupported": "這個語言沒有即時字幕",
+        "caption.failed": "字幕停了，按兩下 CC 可以重試",
+        "caption.listening": "正在聽…",
         "quit.title": "還在錄音",
         "btn.keepRecording": "繼續錄音",
         "btn.stopAndWrite": "結束錄音並整理",
@@ -684,6 +696,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                                            AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
                                            AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
             let rec = try AVAudioRecorder(url: dir.appendingPathComponent("錄音.caf"), settings: settings)
+            rec.isMeteringEnabled = true         // the floating bar's bars follow how loud the room is
             guard rec.record() else { throw NSError(domain: "rec", code: 1) }
             writeJSON(["audio": "錄音.caf", "started": isoString(now), "ended": NSNull()], dir.appendingPathComponent("job.json"))
             recorder = rec
@@ -952,19 +965,276 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 }
 
 
+// MARK: live captions
+// Shown under the floating bar, never written anywhere: the minutes still come from the transcript made after the
+// recording. A helper (Captions.swift) reads the recording file as it grows and runs Apple's transcriber on this Mac
+// (macOS 26 and later), so the recording itself is untouched.
+
+/// The languages the caption menu offers: (Apple's locale, its name in that language)
+let CAPTION_LANGUAGES: [(id: String, name: String)] = [("zh-TW", "中文"), ("en-US", "English"), ("ja-JP", "日本語"),
+                                                       ("ko-KR", "한국어"), ("es-ES", "Español"), ("fr-FR", "Français")]
+
+/// What captions start in: the meeting language from Settings, or the app's language when that is automatic
+func defaultCaptionLanguage() -> String {
+    switch meetingLanguage() {
+    case "en": return "en-US"
+    case "zh": return "zh-TW"
+    default: return uiLanguage() == "en" ? "en-US" : "zh-TW"
+    }
+}
+
+/// What Vinutes did with the captions, in the same file as the caption helper's own steps:
+/// ~/Library/Logs/Vinutes/captions.log
+func captionLog(_ line: String) {
+    let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Vinutes")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent("captions.log")
+    let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
+    let text = "[\(stamp)] app \(line)\n"
+    let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)      // whole lines, also beside the helper's
+    guard fd >= 0 else { return }
+    _ = text.withCString { write(fd, $0, strlen($0)) }
+    close(fd)
+}
+
+/// Runs the caption helper (Contents/MacOS/VinutesCaptions, built from Captions.swift) on the recording file and passes
+/// what it hears to the panel. In a process of its own: Apple's transcriber can fail or crash there without touching
+/// the recording or this app.
+final class CaptionFeed {
+    private var process: Process?
+    private var wanted = false
+    var onText: ((String, String, String) -> Void)?
+    var onNote: ((String) -> Void)?
+
+    func start(file: URL, language: String) {
+        stop()
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/VinutesCaptions")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            captionLog("no caption helper at \(helper.path)")
+            onNote?(tr("caption.failed"))
+            return
+        }
+        let p = Process()
+        p.executableURL = helper
+        p.arguments = [file.path, language]
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out
+        p.standardError = err
+        var pending = Data()
+        out.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            pending.append(chunk)
+            while let end = pending.firstIndex(of: 10) {
+                let line = pending.subdata(in: pending.startIndex..<end)
+                pending.removeSubrange(pending.startIndex...end)
+                guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: String] else { continue }
+                DispatchQueue.main.async { if self?.process === p { self?.handle(obj, language) } }   // not an old helper's
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            captionLog("helper said: " + String(decoding: chunk, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        p.terminationHandler = { [weak self] done in
+            let how = done.terminationReason == .uncaughtSignal ? "signal \(done.terminationStatus)" : "exit \(done.terminationStatus)"
+            captionLog("helper \(done.processIdentifier) ended: \(how)")
+            DispatchQueue.main.async {
+                guard let self, self.wanted, self.process === done else { return }
+                self.process = nil
+                if !(done.terminationReason == .exit && done.terminationStatus == 0) { self.onNote?(tr("caption.failed")) }
+            }
+        }
+        do {
+            try p.run()
+            process = p
+            wanted = true
+            captionLog("helper \(p.processIdentifier) started: \(language) \(file.lastPathComponent)")
+        } catch {
+            captionLog("helper did not start: \(error.localizedDescription)")
+            onNote?(tr("caption.failed"))
+        }
+    }
+
+    private func handle(_ obj: [String: String], _ language: String) {
+        guard wanted else { return }
+        if let note = obj["note"] {
+            let name = CAPTION_LANGUAGES.first { $0.id == language }?.name ?? language
+            switch note {
+            case "downloading": onNote?(tr("caption.downloading", name))
+            case "unsupported": onNote?(tr("caption.unsupported"))
+            case "failed": onNote?(tr("caption.failed"))
+            default: onNote?(tr("caption.listening"))
+            }
+        } else {
+            onText?(obj["prev"] ?? "", obj["done"] ?? "", obj["hearing"] ?? "")
+        }
+    }
+
+    func stop() {
+        wanted = false
+        if let p = process, p.isRunning {
+            captionLog("stopping helper \(p.processIdentifier)")
+            p.terminate()
+        }
+        process = nil
+    }
+}
+
+/// The captions: one line, no background, purple words with a white outline, the newest words on the right and the
+/// older ones fading out on the left (Vin 2026-10-17). A panel of its own under the floating bar that follows it and
+/// lets clicks through.
+final class CaptionPanel {
+    let panel: NSPanel
+    private let back = NSTextField(labelWithString: ""), front = NSTextField(labelWithString: "")
+    private let width: CGFloat = 320, height: CGFloat = 30, fade: CGFloat = 0.28   // the left 28% fades out
+    private let font = NSFont.systemFont(ofSize: 18, weight: .bold)
+    static let done = NSColor(srgbRed: 0x7C / 255, green: 0x4D / 255, blue: 1, alpha: 1)
+    static let hearing = NSColor(srgbRed: 0xA3 / 255, green: 0xA3 / 255, blue: 0xA9 / 255, alpha: 1)
+
+    init() {
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                        styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.canHide = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        view.wantsLayer = true
+        let mask = CAGradientLayer()                       // transparent on the left edge, fully shown from `fade` on
+        mask.frame = view.bounds
+        mask.startPoint = CGPoint(x: 0, y: 0.5)
+        mask.endPoint = CGPoint(x: 1, y: 0.5)
+        mask.colors = [NSColor.clear.cgColor, NSColor.black.cgColor]
+        mask.locations = [0, NSNumber(value: Double(fade))]
+        view.layer?.mask = mask
+        panel.contentView = view
+        for f in [back, front] {
+            f.frame = NSRect(x: 0, y: 2, width: width, height: height - 4)
+            f.autoresizingMask = [.width]
+            f.drawsBackground = false
+            f.lineBreakMode = .byClipping
+            f.maximumNumberOfLines = 1
+            view.addSubview(f)
+        }
+    }
+
+    private func words(_ parts: [(String, NSColor)], outline: Bool) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.alignment = .right
+        style.lineBreakMode = .byClipping
+        let out = NSMutableAttributedString()
+        for (text, color) in parts {
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: style]
+            if outline {                           // the white edge behind the words: an outline only, drawn wide
+                attrs[.strokeColor] = NSColor.white
+                attrs[.strokeWidth] = 26
+                attrs[.foregroundColor] = NSColor.white
+            } else {
+                attrs[.foregroundColor] = color
+            }
+            out.append(NSAttributedString(string: text, attributes: attrs))
+        }
+        return out
+    }
+
+    /// the end of the line that fits the panel; what is cut off the front is what the fade would hide anyway
+    private func fitting(_ done: String, _ hearing: String) -> (String, String) {
+        var d = done, h = hearing
+        let room = width - 8
+        while !(d + h).isEmpty, words([(d + h, .clear)], outline: false).size().width > room {
+            if !d.isEmpty { d.removeFirst() } else { h.removeFirst() }
+        }
+        return (d, h)
+    }
+
+    func show(prev: String, done: String, hearing: String, align: NSTextAlignment) {
+        let (d, h) = fitting(done.replacingOccurrences(of: "…", with: ""), hearing)
+        back.attributedStringValue = words([(d + h, .clear)], outline: true)
+        front.attributedStringValue = words([(d, Self.done), (h, Self.hearing)], outline: false)
+    }
+
+    func note(_ text: String, align: NSTextAlignment) { show(prev: "", done: "", hearing: text, align: align) }
+
+    /// under the bar, lined up with its right edge (or its left edge when the bar sits on the left of the screen)
+    func place(under bar: NSRect) -> NSTextAlignment {
+        let screen = (NSScreen.screens.first { $0.frame.intersects(bar) } ?? NSScreen.main)?.visibleFrame ?? bar
+        let left = bar.midX < screen.midX
+        var x = left ? bar.minX : bar.maxX - width
+        x = max(screen.minX + 4, min(x, screen.maxX - width - 4))
+        var y = bar.minY - height - 4
+        if y < screen.minY { y = bar.maxY + 4 }                 // the bar sits low on the screen: captions above it
+        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: false)
+        return left ? .left : .right
+    }
+}
+
+/// Five small bars that jump with the microphone's level while recording, so a glance shows the recording is
+/// running and the microphone hears the room; they lie flat and turn orange while paused.
+final class LevelBars: NSView {
+    private var bars: [CALayer] = []
+    private let count = 5, barWidth: CGFloat = 3, gap: CGFloat = 2, low: CGFloat = 3
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        for i in 0..<count {
+            let bar = CALayer()
+            bar.cornerRadius = barWidth / 2
+            bar.frame = CGRect(x: CGFloat(i) * (barWidth + gap), y: 0, width: barWidth, height: low)
+            layer?.addSublayer(bar)
+            bars.append(bar)
+        }
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: CGFloat(count) * barWidth + CGFloat(count - 1) * gap).isActive = true
+        heightAnchor.constraint(equalToConstant: 18).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// level: 0 (silence) ... 1 (loud); paused: flat and orange
+    func show(level: CGFloat, paused: Bool) {
+        let color = (paused ? NSColor.systemOrange : NSColor.systemRed).cgColor
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.12)
+        for bar in bars {
+            let h = paused ? low : low + (bounds.height - low) * min(1, level * CGFloat.random(in: 0.45...1.2))
+            bar.backgroundColor = color
+            bar.frame = CGRect(x: bar.frame.minX, y: (bounds.height - h) / 2, width: barWidth, height: h)
+        }
+        CATransaction.commit()
+    }
+}
+
 /// The small floating bar while recording: time, pause / resume, stop. Stays above other windows,
 /// on every desktop, and never takes the keyboard away from the meeting notes.
 final class RecordingBar: NSObject {
     weak var owner: AppDelegate?
     let panel: NSPanel
-    let dot = NSImageView()
+    let dot = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))
+    var meter: Timer?
+    var ccButton: NSButton?
+    var langButton: NSButton?
+    let captions = CaptionPanel()
+    let feed = CaptionFeed()
+    var captionLanguage = defaultCaptionLanguage()
+    var align: NSTextAlignment = .right
+    var captionsOn: Bool {
+        get { UserDefaults.standard.bool(forKey: "captionsOn") }
+        set { UserDefaults.standard.set(newValue, forKey: "captionsOn") }
+    }
     let time = NSTextField(labelWithString: "00:00")
     var pauseButton: NSButton!
     var stopButton: NSButton!
 
     init(owner: AppDelegate) {
         self.owner = owner
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 150, height: 38),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 164, height: 38),
                         styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
         super.init()
         panel.level = .floating
@@ -989,10 +1259,25 @@ final class RecordingBar: NSObject {
         time.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
         pauseButton = button("pause.fill", #selector(AppDelegate.togglePause), tr("bar.pause"))
         stopButton = button("stop.fill", #selector(AppDelegate.stopRecording), tr("bar.stop"))
-        let row = NSStackView(views: [dot, time, pauseButton, stopButton])
+        var views: [NSView] = [dot, time]
+        if #available(macOS 26.0, *) {
+            let cc = NSButton(image: symbol("captions.bubble", 14, .semibold) ?? NSImage(), target: self, action: #selector(toggleCaptions))
+            cc.isBordered = false
+            cc.toolTip = tr("bar.captions")
+            let lang = NSButton(image: symbol("chevron.down", 9, .bold) ?? NSImage(), target: self, action: #selector(pickLanguage(_:)))
+            lang.isBordered = false
+            lang.toolTip = tr("bar.captionLanguage")
+            lang.contentTintColor = .secondaryLabelColor
+            ccButton = cc
+            langButton = lang
+            views += [cc, lang]
+        }
+        views += [pauseButton, stopButton]
+        let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.spacing = 10
         row.setCustomSpacing(6, after: dot)
+        if let cc = ccButton { row.setCustomSpacing(1, after: cc) }
         row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 12)
         row.translatesAutoresizingMaskIntoConstraints = false
         fx.addSubview(row)
@@ -1000,6 +1285,11 @@ final class RecordingBar: NSObject {
                                      row.trailingAnchor.constraint(equalTo: fx.trailingAnchor),
                                      row.centerYAnchor.constraint(equalTo: fx.centerYAnchor)])
         panel.setFrameAutosaveName("RecordingBar")
+        if ccButton != nil { panel.setContentSize(NSSize(width: 204, height: 38)) }
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.align = self.captions.place(under: self.panel.frame)
+        }
     }
 
     func button(_ image: String, _ action: Selector, _ tip: String) -> NSButton {
@@ -1014,16 +1304,94 @@ final class RecordingBar: NSObject {
         if !panel.setFrameUsingName("RecordingBar"), let screen = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: screen.maxX - panel.frame.width - 24, y: screen.maxY - panel.frame.height - 14))
         }
+        // a place saved when the bar was narrower can leave its right end off the screen
+        if let screen = (NSScreen.screens.first { $0.frame.intersects(panel.frame) } ?? NSScreen.main)?.visibleFrame {
+            let f = panel.frame
+            panel.setFrameOrigin(NSPoint(x: max(screen.minX, min(f.minX, screen.maxX - f.width)),
+                                         y: max(screen.minY, min(f.minY, screen.maxY - f.height))))
+        }
         update()
         panel.orderFrontRegardless()
+        meter?.invalidate()
+        meter = Timer.scheduledTimer(withTimeInterval: 0.13, repeats: true) { [weak self] _ in self?.listen() }
+        captionLanguage = defaultCaptionLanguage()     // each recording starts in the meeting language
+        if captionsOn { startCaptions() }
+        refreshCaptionButton()
     }
 
-    func hide() { panel.orderOut(nil) }
+    func hide() {
+        meter?.invalidate()
+        meter = nil
+        stopCaptions()
+        panel.orderOut(nil)
+    }
+
+    // captions
+
+    @objc func toggleCaptions() {
+        captionsOn.toggle()
+        if captionsOn { startCaptions() } else { stopCaptions() }
+        refreshCaptionButton()
+    }
+
+    @objc func pickLanguage(_ sender: NSButton) {
+        let menu = NSMenu()
+        for lang in CAPTION_LANGUAGES {
+            let it = NSMenuItem(title: lang.name, action: #selector(chooseLanguage(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = lang.id
+            it.state = lang.id == captionLanguage ? .on : .off
+            menu.addItem(it)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc func chooseLanguage(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? String, id != captionLanguage else { return }
+        captionLanguage = id
+        if !captionsOn { captionsOn = true; refreshCaptionButton() }
+        startCaptions()
+    }
+
+    func refreshCaptionButton() {
+        ccButton?.image = symbol(captionsOn ? "captions.bubble.fill" : "captions.bubble", 14, .semibold)
+        ccButton?.contentTintColor = captionsOn ? CaptionPanel.done : .labelColor
+    }
+
+    func startCaptions() {
+        guard #available(macOS 26.0, *), let owner, owner.recording, let job = owner.currentJob else { return }
+        align = captions.place(under: panel.frame)
+        feed.onText = { [weak self] prev, done, hearing in
+            guard let self else { return }
+            self.captions.show(prev: prev, done: done, hearing: hearing, align: self.align)
+        }
+        feed.onNote = { [weak self] text in
+            guard let self else { return }
+            self.captions.note(text, align: self.align)
+        }
+        captions.note(tr("caption.listening"), align: align)
+        feed.start(file: job.appendingPathComponent("錄音.caf"), language: captionLanguage)
+        captions.panel.orderFrontRegardless()
+    }
+
+    func stopCaptions() {
+        feed.stop()
+        captions.note("", align: align)
+        captions.panel.orderOut(nil)
+    }
+
+    /// about -50 dB and below counts as a quiet room, 0 dB as loud
+    func listen() {
+        guard let owner, owner.recording, let rec = owner.recorder else { return }
+        rec.updateMeters()
+        let level = CGFloat(max(0, min(1, (rec.averagePower(forChannel: 0) + 50) / 50)))
+        dot.show(level: level, paused: owner.paused)
+    }
 
     func update() {
         guard let owner, owner.recording else { return }
-        dot.image = symbol(owner.paused ? "pause.circle.fill" : "circle.fill", owner.paused ? 13 : 10)
-        dot.contentTintColor = owner.paused ? .systemOrange : .systemRed
+        if owner.paused { dot.show(level: 0, paused: true) }
+
         time.stringValue = clock(owner.elapsed)
         time.textColor = owner.paused ? .secondaryLabelColor : .labelColor
         pauseButton.image = symbol(owner.paused ? "play.fill" : "pause.fill", 14, .semibold)
@@ -1150,6 +1518,12 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let id = (body["id"] as? NSNumber)?.intValue,
               let cmd = body["cmd"] as? String else { return }
+        if cmd == "closed" && id == -1 {                 // finish(): the page has saved what was typed
+            let waiting = closing_
+            closing_ = []
+            waiting.forEach { $0() }
+            return
+        }
         handle(cmd, body["args"] as? [String: Any] ?? [:]) { [weak self] ok, data in self?.reply(id, ok, data) }
     }
 
@@ -1765,10 +2139,18 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     // MARK: closing
 
     /// Calls back once the page has saved what was typed and handed the user's edits to `learn`.
+    /// what waits for the page to save before the window closes or the app quits
+    var closing_: [() -> Void] = []
+
     func finish(_ done: @escaping () -> Void) {
         var called = false
         let once = { if !called { called = true; done() } }
-        web.callAsyncJavaScript("return await window.beforeClose()", arguments: [:], in: nil, in: .page) { _ in once() }
+        closing_.append(once)
+        // the page says it is done through the "app" handler; no completion block here, since WebKit's Swift wrapper
+        // for one crashed the app while it was quitting (2026-10-17)
+        web.evaluateJavaScript("Promise.resolve(window.beforeClose && window.beforeClose()).catch(() => {})"
+                               + ".then(() => window.webkit.messageHandlers.app.postMessage({id: -1, cmd: 'closed'}))",
+                               completionHandler: nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { once() }       // a stuck save must not keep the app open
     }
 

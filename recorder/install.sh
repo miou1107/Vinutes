@@ -91,7 +91,7 @@ make_icon() {
   iconutil -c icns "$BUILD/AppIcon.iconset" -o "$NEW/Contents/Resources/AppIcon.icns"
 }
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || true)"
-SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Info.plist" \
+SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Captions.swift" "$ROOT/recorder/Info.plist" \
               "$ROOT/recorder/make_icon.swift" "$ROOT"/recorder/app/* \
               "$ROOT"/recorder/l10n/*.lproj/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}"
 if [[ -x "$APP/Contents/MacOS/MeetingRecorder" && "$(cat "$APP/Contents/Resources/source.sum" 2>/dev/null)" == "$SOURCE_SUM" ]]; then
@@ -101,9 +101,13 @@ else
   trap 'rm -rf "$BUILD"' EXIT
   # build first, so a failed build leaves the running app alone
   swiftc -O -swift-version 5 -o "$BUILD/MeetingRecorder" "$ROOT/recorder/MeetingRecorder.swift"
+  # live captions run in a helper of their own; it needs macOS 26, so on an older Mac the app is built without it
+  swiftc -O -swift-version 5 -parse-as-library -o "$BUILD/VinutesCaptions" "$ROOT/recorder/Captions.swift" 2>/dev/null \
+    || echo "(no live captions: they need macOS 26 or later)"
   NEW="$BUILD/Vinutes.app"
   mkdir -p "$NEW/Contents/MacOS" "$NEW/Contents/Resources" "$BUILD/AppIcon.iconset"
   cp "$BUILD/MeetingRecorder" "$NEW/Contents/MacOS/MeetingRecorder"
+  [[ -x "$BUILD/VinutesCaptions" ]] && cp "$BUILD/VinutesCaptions" "$NEW/Contents/MacOS/VinutesCaptions"
   cp -R "$ROOT/recorder/app" "$NEW/Contents/Resources/app"
   # the microphone question in English or Chinese, whichever the Mac uses (en.lproj, zh-Hant.lproj)
   cp -R "$ROOT"/recorder/l10n/*.lproj "$NEW/Contents/Resources/"

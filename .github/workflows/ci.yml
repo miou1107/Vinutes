@@ -1,0 +1,47 @@
+# Every push and pull request: the Python tests, the meeting window's scripts and the Mac app must all build and pass
+# on a clean Mac before anything reaches main (main only takes changes whose check passed). Colleagues' update
+# button follows main, so a version that fails here never reaches them.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # the packages install.sh puts in Vinutes' own Python, without the speech models the tests don't use
+      - name: Python packages
+        run: python -m pip install --quiet opencc-python-reimplemented python-docx markdown-it-py google-auth-oauthlib numpy soundfile
+
+      - name: Python tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Meeting window scripts and installer parse
+        run: |
+          node --check recorder/app/app.js
+          node --check recorder/app/strings.js
+          # these two run inside the Google Doc as the body of an async function, so they are parsed that way
+          for f in recorder/app/docblink.js recorder/app/docfind.js; do
+            node -e 'const AF = (async () => {}).constructor; new AF(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
+          done
+          bash -n recorder/install.sh
+          plutil -lint recorder/Info.plist recorder/l10n/*.lproj/*.strings
+
+      # the same two builds install.sh makes; the captions helper needs the macOS 26 SDK, so it is tried only
+      - name: Build the app
+        run: |
+          BUILD="$(mktemp -d)"
+          cp recorder/MeetingRecorder.swift "$BUILD/main.swift"
+          swiftc -O -swift-version 5 -o "$BUILD/MeetingRecorder" "$BUILD/main.swift" recorder/Capture.swift
+          swiftc -O -swift-version 5 -parse-as-library -o "$BUILD/VinutesCaptions" recorder/Captions.swift \
+            || echo "::notice::live captions not built: this runner has no macOS 26 SDK"

@@ -1419,7 +1419,8 @@ function renderAsk() {
     $('#aiMenu').addEventListener('click', (e) => {
       e.stopPropagation();
       const b = e.target.closest('.mi');
-      if (b && !b.disabled) switchAi(b.dataset.ai);
+      if (b && b.classList.contains('off')) { S.aiOpen = false; renderAiMenu(); setupAi(b.dataset.ai); }
+      else if (b) switchAi(b.dataset.ai);
     });
     if (canAttach) {
       $('#attachPlus').addEventListener('click', (e) => {
@@ -1464,7 +1465,7 @@ function renderAiMenu() {
   menu.innerHTML = `<div class="mhead">${esc(t('ai_menu_head'))}</div>` + AIS.map(([k]) => {
     const why = !have.includes(k) || states[k] === 'install' ? 'install' : states[k] === 'login' ? 'login' : '';
     const off = why && k !== key;
-    return `<button class="mi${off ? ' off' : ''}" role="menuitemradio" aria-checked="${k === key}" data-ai="${k}"${off ? ' disabled' : ''}>
+    return `<button class="mi${off ? ' off' : ''}" role="menuitemradio" aria-checked="${k === key}" data-ai="${k}">
       <i class="dot ${k}"></i><span class="mn">${AI_SHORT[k]}</span>${k === key ? `<span class="ck">${ICON.check}</span>` : ''}
       ${why ? `<span class="ms">${esc(t(why === 'install' ? 'not_installed' : 'not_signed_in'))}</span>` : ''}</button>`;
   }).join('');
@@ -2086,43 +2087,60 @@ const GOOGLE_STEPS = [
 ];
 
 function openSetup() {
-  S.sheet = 'setup'; S.setupGuide = false;
+  S.sheet = 'setup'; S.setupGuide = false; S.aiTest = null; S.aiLoginWait = 0; S.aiBusy = false;
   placeDoc();
   renderSetup();
   refreshSetup();
 }
 
+// the jobs that run in the background, and the state each item shows while its job runs
+const SETUP_JOBS = { speech: 'loading', voice: 'loading', login: 'loading', ai: 'installing' };
+
 // one check at a time; a click meanwhile asks for one more, and an answer from before the click is not shown.
-// While something downloads (or the Google login waits), only that is asked again every few seconds.
+// While something downloads (or the Google login waits, or the AI installs), only that is asked again every few
+// seconds; while the AI's sign-in waits in the browser, everything is asked again every few seconds.
 async function refreshSetup(progress = false) {
   if (S.sheet !== 'setup') return;
   if (S.setupAsking) { S.setupAgain = true; return; }
   S.setupAsking = true;
   const seq = S.setupSeq;
-  const was = Object.fromEntries(['speech', 'voice', 'login'].map((k) => [k, ((S.setup || {})[k] || {}).state]));
+  const was = Object.fromEntries(Object.keys(SETUP_JOBS).map((k) => [k, ((S.setup || {})[k] || {}).state]));
   let got = null, err = '';
   try { got = await call('setupState', { progress }); } catch (e) { err = e.message; }
   S.setupAsking = false;
   const stale = seq !== S.setupSeq;
   if (!stale) {
     const running = got && progress ? Object.fromEntries(Object.entries(got).filter(([, v]) => v.state !== 'ended')) : got;
-    if (got) S.setup = progress && S.setup ? { ...S.setup, ...running } : got;
+    if (got && progress && S.setup) {
+      const before = S.setup.ai;                  // the AI item keeps its other fields while only its job is asked
+      S.setup = { ...S.setup, ...running };
+      if (running.ai) S.setup.ai = { ...before, ...running.ai };
+    } else if (got) S.setup = got;
     S.setupErr = err;
   }
   if (S.sheet !== 'setup') return;
+  const st = S.setup || {};
+  if (S.aiLoginWait && st.ai) {
+    // the wait is over when the sign-in window's command has ended, when an AI that was signed out is signed in,
+    // or after ten minutes (the window was closed): then the step shows its button again and the test runs anew
+    const ended = st.ai.login_at && st.ai.login_at >= S.aiLoginWait - 2000;
+    const signedNow = !S.aiLoginWasDone && st.ai.state === 'done';
+    if (ended || signedNow || Date.now() - S.aiLoginWait > 10 * 60 * 1000) { S.aiLoginWait = 0; S.aiTest = null; }
+  }
   renderSetup();
   clearTimeout(S.setupTimer);
-  const st = S.setup || {};
   // a job that was running and is not any more: everything is checked once again
-  const ended = progress && got && ['speech', 'voice', 'login'].some((k) => was[k] === 'loading' && got[k] && got[k].state === 'ended');
+  const ended = progress && got && Object.entries(SETUP_JOBS).some(([k, v]) => was[k] === v && got[k] && got[k].state === 'ended');
   if (S.setupAgain || stale || ended) { S.setupAgain = false; return refreshSetup(); }
-  const waiting = ['speech', 'voice', 'login'].some((k) => st[k] && st[k].state === 'loading');
+  const waiting = Object.entries(SETUP_JOBS).some(([k, v]) => st[k] && st[k].state === v);
   if (waiting) S.setupTimer = setTimeout(() => refreshSetup(true), 2500);   // a download or the login is on its way
+  else if (S.aiLoginWait) S.setupTimer = setTimeout(() => refreshSetup(), 4000);
 }
 window.addEventListener('focus', () => { if (S.sheet === 'setup') refreshSetup(); });   // back from the browser
 
 function setupSide(key, label) {
   const st = (S.setup || {})[key] || {};
+  if (key === 'ai') return aiSide(st);
   const btn = (text, act, extra = '') => `<button class="btn primary sbtn" data-k="${key}" data-act="${act}"${extra}>${esc(text)}</button>`;
   switch (st.state) {
     case 'done': return `<span class="sok">${esc(t('s_done'))}</span>`;
@@ -2131,8 +2149,6 @@ function setupSide(key, label) {
     case 'loading':
       if (key === 'login') return `<span class="swait">${esc(t('browser_login'))}</span>`;
       return `<span class="swait">${esc(t('downloading', st.pct || 0))}</span><div class="sbar"><i style="width:${st.pct || 0}%"></i></div>`;
-    case 'install': return btn(t('install_guide'), 'install');
-    case 'login': return btn(t('sign_in'), 'ailogin');
     case 'unknown': return btn(t('recheck'), 'recheck');
     case 'off': return btn(t('turn_on'), 'open');
     case 'scope': return btn(t('sign_in_again'), 'glogin');
@@ -2147,9 +2163,9 @@ function renderSetup() {
   const el = $('#sheet');
   if (!el || S.sheet !== 'setup') return;
   const st = S.setup;
+  if (S.setupGuide === 'ai') return renderAiGuide(el);
   if (S.setupGuide) return renderGoogleGuide(el);
   const done = st ? SETUP.filter(([k]) => (st[k] || {}).state === 'done').length : 0;
-  const chosen = st && st.ai ? st.ai.ai : 'claude';
   const desc = (k) => t(`setup_${k}_desc`);
   el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="${esc(t('setup_aria'))}">
     <div class="shead lang"><h3>${esc(t('setup_title'))}</h3>
@@ -2159,15 +2175,14 @@ function renderSetup() {
     <div class="slist">${SETUP.map(([k, icon, bg, req], i) => `<div class="srow">
       <div class="sico" style="background:${bg}">${icon}</div>
       <div class="stxt"><div class="stt">${i + 1}. ${esc(t(`setup_${k}`))}${req ? `<span class="sreq">${esc(t('required'))}</span>` : ''}</div>
-        ${desc(k) && st && st[k] && st[k].state !== 'done' ? `<div class="sds">${esc(desc(k))}</div>` : ''}
-        ${k === 'ai' ? `<div class="spills">${AIS.map(([a, n]) => `<button class="spill${a === chosen ? ' on' : ''}" data-ai="${a}">${n}</button>`).join('')}</div>` : ''}
+        ${k === 'ai' && st && st.ai ? aiDesc(st.ai)
+          : desc(k) && st && st[k] && st[k].state !== 'done' ? `<div class="sds">${esc(desc(k))}</div>` : ''}
         ${k === 'login' && st && st.login && st.login.email ? `<div class="sds">${esc(st.login.email)}</div>` : ''}</div>
       <div class="sside">${st ? setupSide(k, t(`setup_${k}_btn`)) : `<span class="slock">${esc(t('checking'))}</span>`}</div></div>`).join('')}</div>
     <div class="sfoot"><span class="scount">${esc(t('done_count', done, SETUP.length))}</span><button class="btn ghost" id="closeS">${esc(t('close'))}</button></div>
   </div></div>`;
   $('#closeS').addEventListener('click', () => { clearTimeout(S.setupTimer); closeSheet(); });
   el.querySelectorAll('.sbtn, .slink').forEach((b) => b.addEventListener('click', () => setupAct(b.dataset.k, b.dataset.act)));
-  el.querySelectorAll('.spill').forEach((b) => b.addEventListener('click', () => chooseAi(b.dataset.ai)));
   el.querySelectorAll('.langseg button').forEach((b) => b.addEventListener('click', () => pickLang(b.dataset.lang)));
 }
 
@@ -2185,12 +2200,12 @@ async function setupAct(key, act) {
   S.setupSeq++;
   try {
     if (key === 'mic' || key === 'notify') await call(key === 'mic' ? 'setupMic' : 'setupNotify');
-    else if (act === 'install') await call('setupOpen', { url: st.install_url });
-    else if (act === 'ailogin') await call('setupAILogin', { ai: st.ai });
+    else if (act === 'aiguide') { S.setupGuide = 'ai'; return renderSetup(); }
+    else if (act === 'ailogin') { await call('setupAILogin', { ai: st.ai }); aiWaitLogin(st); }
     else if (act === 'open') await call('setupOpen', { url: st.url });
     else if (act === 'glogin' || key === 'login') await call('setupRun', { what: 'login' });
     else if (key === 'speech' || key === 'voice') await call('setupRun', { what: key });
-    else if (key === 'client') { S.setupGuide = true; return renderSetup(); }
+    else if (key === 'client') { S.setupGuide = 'google'; return renderSetup(); }
   } catch (e) { showAlert(e.message); }
   refreshSetup();
 }
@@ -2199,7 +2214,8 @@ async function chooseAi(key) {
   if (!S.setup || (S.setup.ai && S.setup.ai.ai === key)) return;
   const before = S.setup.ai;
   S.setupSeq++;
-  S.setup.ai = { state: '', ai: key };
+  S.aiTest = null; S.aiLoginWait = 0;
+  S.setup.ai = { ...before, state: '', ai: key, tested: false };
   renderSetup();
   try {
     const r = await call('setupAI', { ai: key });
@@ -2207,6 +2223,143 @@ async function chooseAi(key) {
     showAi(key);
   } catch (e) { S.setup.ai = before; showAlert(e.message); }
   renderSetup();
+}
+
+// --- item 5, step by step (the prototype Vin approved on 2026-10-19): choose the AI, Vinutes installs it, the
+// user signs in, and one short answer shows the account can write the minutes. Each row is a name, a state and
+// at most one button.
+
+const AI_WHO = { claude: 'Claude', codex: 'ChatGPT', antigravity: 'Google' };   // the account each one signs in to
+const aiFullName = (key) => (AIS.find(([k]) => k === key) || [key, key])[1];   // Claude Code, Codex…
+
+// the checklist's row: what it says under its name, and its button
+function aiDesc(ai) {
+  if (ai.state === 'done') return `<div class="sds">${esc(aiFullName(ai.ai))}</div>`;
+  if (ai.state === 'login' && ai.was_signed) return `<div class="sds bad">${esc(t('ai_signed_out', aiFullName(ai.ai)))}</div>`;
+  return `<div class="sds">${esc(t('setup_ai_desc'))}</div>`;
+}
+
+function aiSide(ai) {
+  const btn = (text, act) => `<button class="btn primary sbtn" data-k="ai" data-act="${act}">${esc(text)}</button>`;
+  if (ai.state === 'done') return `<span class="sok">${esc(t('s_done'))}</span>`;
+  if (ai.state === 'unknown') return btn(t('recheck'), 'recheck');
+  if (ai.state === 'login' && ai.was_signed) {
+    return S.aiLoginWait ? `<span class="swait">${esc(t('browser_login'))}</span>` : btn(t('sign_in_again'), 'ailogin');
+  }
+  if (!ai.state) return `<span class="slock">${esc(t('checking'))}</span>`;
+  return btn(t('setup_ai_btn'), 'aiguide');
+}
+
+// the four steps' states: 'done', 'todo', 'locked', 'loading', or what went wrong
+function aiSteps(ai) {
+  const test = S.aiTest && S.aiTest.ai === ai.ai ? S.aiTest.state : ai.tested ? 'done' : '';
+  const installed = !!ai.state && ai.state !== 'install' && ai.state !== 'installing';
+  const plan = test === 'plan' || (ai.state === 'plan' && !(S.aiTest && S.aiTest.ai === ai.ai));
+  const signed = (ai.state === 'done' || ai.state === 'plan') && test !== 'login';
+  return {
+    test,
+    install: ai.state === 'installing' ? 'loading' : installed ? 'done' : ai.failed ? 'failed' : ai.state ? 'todo' : 'locked',
+    login: !installed ? 'locked' : S.aiLoginWait ? 'loading' : plan ? 'plan' : signed ? 'done' : 'todo',
+    check: S.aiLoginWait || !signed || plan ? 'locked' : test === 'running' ? 'loading' : test || 'todo',
+  };
+}
+
+// the sign-in window is open: the steps wait for it (see refreshSetup for when the wait ends)
+function aiWaitLogin(ai) {
+  S.aiLoginWait = Date.now();
+  S.aiLoginWasDone = ai.state === 'done' || ai.state === 'plan';
+  S.aiTest = null;
+}
+
+// from the prompt box's menu: the steps of an AI that is not installed or not signed in yet
+async function setupAi(key) {
+  try {
+    await call('setupAI', { ai: key });
+    showAi(key);
+  } catch (e) { return showAlert(e.message); }
+  openSetup();
+  S.setupGuide = 'ai';
+  renderSetup();
+}
+
+function renderAiGuide(el) {
+  const ai = (S.setup || {}).ai || { ai: 'claude' };
+  const key = ai.ai;
+  const steps = aiSteps(ai);
+  const btn = (text, act) => `<button class="btn primary" data-aiact="${act}">${esc(text)}</button>`;
+  const ok = (text) => `<span class="sok">${esc(text)}</span>`;
+  const bad = (text) => `<span class="sbad">${esc(text)}</span>`;
+  const wait = (text, bar) => `<span class="swait">${esc(text)}</span>${bar ? '<div class="sbar sbusy"><i></i></div>' : ''}`;
+  const lock = (text) => `<span class="slock">${esc(text)}</span>`;
+  const side = {
+    install: { todo: btn(t('ai_install'), 'install'), loading: wait(t('ai_installing'), true), done: ok(t('ai_installed')),
+               failed: bad(t('ai_install_failed')) + btn(t('ai_reinstall'), 'install'), locked: lock(t('checking')) },
+    login: { locked: lock(t('lock_install')), todo: btn(t('sign_in'), 'login'), loading: wait(t('browser_login')),
+             done: ok(t('ai_signed_in')), plan: bad(t(`ai_plan_${key}`)) + btn(t('sign_in_again'), 'login') },
+    check: { locked: lock(t('lock_sign_in')), todo: lock(t('ai_testing')), loading: wait(t('ai_testing'), true),
+             done: ok(t('ai_test_ok')), quota: bad(t('ai_quota')) + btn(t('ai_retest'), 'test'),
+             error: bad(t('ai_test_failed')) + btn(t('ai_retest'), 'test'), login: lock(t('lock_sign_in')) },
+  };
+  const num = (i, done) => `<div class="sico snum${done ? ' ok' : ''}">${done ? '✓' : i}</div>`;
+  const row = (i, title, step, extra = '') => `<div class="srow">${num(i, steps[step] === 'done')}
+    <div class="stxt"><div class="stt">${esc(title)}</div>${extra}</div>
+    <div class="sside">${side[step][steps[step]] || ''}</div></div>`;
+  const done = 1 + ['install', 'login', 'check'].filter((k) => steps[k] === 'done').length;
+  const installed = ai.installed || [];
+  el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="${esc(t('setup_ai'))}">
+    <div class="shead"><h3>${esc(t('setup_ai'))}</h3></div>
+    <div class="slist">
+      <div class="srow">${num(1, true)}<div class="stxt"><div class="stt">${esc(t('ai_choose'))}</div>
+        <div class="aicards">${AIS.map(([k, n]) => `<button class="aicard${k === key ? ' on' : ''}" data-ai="${k}">
+          <b>${esc(n)}</b><span>${esc(t(`ai_acct_${k}`))}</span>${installed.includes(k) ? `<em>${esc(t('ai_installed'))}</em>` : ''}</button>`).join('')}</div></div></div>
+      ${row(2, t('ai_install_step', aiFullName(key)), 'install')}
+      ${row(3, t('ai_login_step', AI_WHO[key] || aiFullName(key)), 'login', steps.login === 'done' && ai.email ? `<div class="sds">${esc(ai.email)}</div>` : '')}
+      ${row(4, t('ai_test_step'), 'check')}
+    </div>
+    <div class="sfoot"><span class="scount">${esc(t('done_count', done, 4))}</span>
+      <button class="btn ${done === 4 ? 'primary' : 'ghost'}" id="backS">${esc(t('back_list'))}</button></div>
+  </div></div>`;
+  $('#backS').addEventListener('click', () => { S.setupGuide = false; renderSetup(); });
+  el.querySelectorAll('.aicard').forEach((b) => b.addEventListener('click', () => chooseAi(b.dataset.ai)));
+  el.querySelectorAll('[data-aiact]').forEach((b) => b.addEventListener('click', () => aiAct(b.dataset.aiact)));
+  // signed in and not tested yet: the test starts by itself
+  if (steps.check === 'todo' && !(S.aiTest && S.aiTest.ai === key)) aiTest();
+}
+
+async function aiAct(act) {
+  const ai = (S.setup || {}).ai || {};
+  if (S.aiBusy) return;                             // one click at a time: a second install would race the first
+  if (act === 'test') return aiTest();
+  S.aiBusy = true;
+  S.setupSeq++;
+  try {
+    if (act === 'install') {
+      const r = await call('setupAIInstall', { ai: ai.ai });
+      if (r && r.ai) S.setup.ai = r.ai;
+      S.aiTest = null;
+    } else if (act === 'login') {
+      await call('setupAILogin', { ai: ai.ai });
+      aiWaitLogin(ai);
+    }
+  } catch (e) { showAlert(e.message); }
+  S.aiBusy = false;
+  refreshSetup();
+}
+
+// step 4: the AI answers one word, the way it will write the minutes
+async function aiTest() {
+  const key = ((S.setup || {}).ai || {}).ai;
+  S.aiTest = { ai: key, state: 'running' };
+  renderSetup();
+  let r = null;
+  try { r = await call('setupAITest'); } catch (e) { r = null; }
+  const now = ((S.setup || {}).ai || {}).ai;
+  if (now !== key) {                               // another AI was picked meanwhile: this answer is not its
+    if (S.aiTest && S.aiTest.ai === key) S.aiTest = null;
+    return refreshSetup();
+  }
+  S.aiTest = { ai: key, state: (r && r.test) || 'error' };
+  refreshSetup();
 }
 
 // item 6, step by step: each step opens its Google Cloud page; the last one takes the downloaded file

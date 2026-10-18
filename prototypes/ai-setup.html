@@ -1,0 +1,281 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>內容生成模型設定原型</title>
+<style>
+/* Prototype for 2026-10-18: item 5 of the Setup Checklist walks the user through choosing, installing, signing in
+   to and testing the AI; recording still works when it is not set up, with one notice. Colours follow app.css. */
+:root {
+  --bg: #ffffff; --side: #ebebef; --panel: #f6f6f8; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field: #ffffff; --field-line: #cfcfd6;
+  --link: #2a6dd6; --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee;
+  --green: #1e7b34; --red: #b42318; --yellow-bg: #fff6dd; --yellow-ink: #6b4d00;
+  --proto-bg: #f1ede4; --proto-line: #b9ab8a; --proto-ink: #5b4a26;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--proto-bg); color: var(--text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
+button { font: inherit; color: inherit; }
+
+/* the prototype's own controls: dashed, beige, never part of Vinutes */
+.proto { max-width: 1240px; margin: 0 auto; padding: 18px 20px 30px; }
+.ptop { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; border: 1.5px dashed var(--proto-line); border-radius: 10px; color: var(--proto-ink); }
+.ptop h1 { margin: 0; font-size: 15px; }
+.ptabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.ptabs button { all: unset; cursor: pointer; padding: 5px 14px; border-radius: 16px; border: 1px solid var(--proto-line); font-size: 13px; }
+.ptabs button.on { background: var(--proto-ink); color: #fff; border-color: var(--proto-ink); }
+.pcap { width: 100%; font-size: 13px; }
+.stage { display: flex; gap: 20px; align-items: flex-start; margin-top: 16px; }
+.pside { width: 220px; flex: none; padding: 12px 14px; border: 1.5px dashed var(--proto-line); border-radius: 10px; color: var(--proto-ink); display: flex; flex-direction: column; gap: 8px; }
+.pside h2 { margin: 0 0 2px; font-size: 13px; }
+.pside button { all: unset; cursor: pointer; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--proto-line); background: #fffaf0; font-size: 12px; }
+.pside button:hover { background: #fff; }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 4px; background: var(--proto-ink); color: #fff; font-size: 11px; font-weight: 600; }
+
+/* a Mac window with the meeting window's sheet on top */
+.win { flex: 1; min-width: 0; height: 680px; background: var(--bg); border: 1px solid var(--line2); border-radius: 12px; overflow: hidden; position: relative;
+       box-shadow: 0 10px 30px rgba(0,0,0,0.12); }
+.wbar { height: 30px; background: var(--side); border-bottom: 1px solid var(--line2); display: flex; align-items: center; gap: 7px; padding: 0 12px; }
+.wbar i { width: 11px; height: 11px; border-radius: 50%; background: #d9d9de; }
+.wbody { position: absolute; inset: 30px 0 0; display: flex; }
+.wside { width: 230px; background: var(--side); border-right: 1px solid var(--line2); }
+.veil { position: absolute; inset: 30px 0 0; background: rgba(0,0,0,0.22); display: flex; justify-content: center; align-items: flex-start; }
+.sheet { width: 680px; max-height: 100%; overflow: auto; padding: 18px 0 14px; background: var(--panel); border: 1px solid var(--field-line); border-top: none;
+         border-radius: 0 0 12px 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.3); display: flex; flex-direction: column; gap: 0; }
+.shead { padding: 0 22px 12px; text-align: center; position: relative; }
+.shead h3 { margin: 0; font-size: 17px; }
+.ssub { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.langseg { position: absolute; right: 22px; top: 0; display: inline-flex; padding: 2px; border-radius: 8px; background: var(--line); }
+.langseg span { padding: 3px 12px; border-radius: 6px; font-size: 12px; color: var(--text2); }
+.langseg span.on { background: var(--field); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.slist { margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.srow { display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+.srow:last-child { border-bottom: none; }
+.srow.hl { background: #fffbea; }
+.sico { flex: none; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+.snum { background: var(--blue-bg); color: var(--blue-ink); font-weight: 700; font-size: 14px; }
+.snum.ok { background: #dff3e3; color: var(--green); }
+.stxt { flex: 1; min-width: 0; }
+.stt { font-size: 13px; font-weight: 700; }
+.sreq { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
+.sds { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.sds.bad { color: var(--red); }
+.sside { flex: none; min-width: 170px; max-width: 230px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.btn { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; height: 28px; min-width: 84px; padding: 0 14px;
+       border-radius: 6px; font-size: 12px; cursor: pointer; }
+.btn.primary { background: var(--blue); color: #fff; }
+.btn.ghost { background: var(--field); border: 1px solid var(--field-line); color: var(--text); }
+.sok { font-size: 12px; font-weight: 600; color: var(--green); }
+.sbad { font-size: 12px; font-weight: 600; color: var(--red); }
+.slock { font-size: 12px; color: var(--faint); text-align: right; }
+.swait { font-size: 12px; color: var(--blue-ink); }
+.sbar { width: 120px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; position: relative; }
+.sbar i { position: absolute; top: 0; bottom: 0; width: 40%; background: var(--blue); border-radius: 3px; animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { left: -40%; } to { left: 100%; } }
+.sfoot { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px 0; }
+.scount { font-size: 13px; font-weight: 600; }
+/* step 1: one card per AI */
+.cards { display: flex; gap: 8px; margin-top: 8px; }
+.card { all: unset; box-sizing: border-box; cursor: pointer; flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--field-line); background: var(--field); }
+.card b { display: block; font-size: 13px; }
+.card span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; white-space: nowrap; }
+.card em { display: inline-block; margin-top: 5px; font-style: normal; font-size: 11px; color: var(--green); }
+.card.on { border: 2px solid var(--blue); padding: 7px 9px; background: var(--blue-bg); }
+
+/* the menu bar panel (dark, as on the Mac) */
+.mstage { flex: 1; min-width: 0; height: 680px; display: flex; justify-content: center; align-items: flex-start; padding-top: 10px; border-radius: 12px;
+          background: linear-gradient(#c9d3e0, #e9edf2); position: relative; }
+.mbar { position: absolute; top: 0; left: 0; right: 0; height: 26px; background: rgba(255,255,255,0.65); border-radius: 12px 12px 0 0; display: flex; justify-content: flex-end; align-items: center; padding: 0 16px; font-size: 13px; }
+.panel { margin-top: 30px; width: 300px; background: #5a5b5f; color: #f2f2f4; border: 1px solid #77787c; border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.35); overflow: hidden; }
+.ptopx { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 16px 14px; }
+.rec { all: unset; cursor: pointer; width: 64px; height: 64px; border-radius: 50%; background: #d8473f; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 18px rgba(216,71,63,0.5); }
+.rec i { width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+.rec.on { background: #fff; border: 4px solid #d8473f; box-sizing: border-box; box-shadow: none; }
+.rec.on i { border-radius: 3px; background: #d8473f; width: 22px; height: 22px; }
+.ptitle { font-size: 15px; font-weight: 700; }
+.pkey { font-size: 13px; color: #d4d4d8; }
+.ptime { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+.bars { display: inline-flex; gap: 2px; align-items: center; }
+.bars i { width: 3px; height: 12px; background: #e0544a; border-radius: 2px; }
+.phint { font-size: 12px; color: #d4d4d8; }
+.ppause { all: unset; cursor: pointer; padding: 4px 16px; border-radius: 14px; background: #707176; font-size: 13px; }
+.pnote { margin: 10px 14px 4px; padding: 10px 12px; border-radius: 8px; background: var(--yellow-bg); color: var(--yellow-ink); font-size: 12px; line-height: 1.55; }
+.pnote b { display: block; font-size: 12.5px; }
+.pnote .btn { margin-top: 8px; height: 26px; min-width: 0; background: var(--yellow-ink); color: #fff; }
+.psec { border-top: 1px solid #707176; padding: 10px 16px; }
+.psec h4 { margin: 0 0 6px; font-size: 12px; color: #d4d4d8; font-weight: 600; }
+.mrow { display: flex; gap: 10px; font-size: 13px; padding: 3px 0; }
+.mrow span:first-child { width: 14px; text-align: center; color: #c9c9cd; }
+.mrow .d { color: #e6e6ea; }
+.pfoot { display: flex; justify-content: space-around; border-top: 1px solid #707176; padding: 8px 0 4px; font-size: 12px; color: #e6e6ea; text-align: center; }
+.pver { text-align: center; font-size: 11px; color: #c9c9cd; padding-bottom: 8px; }
+.hidden { display: none !important; }
+</style></head><body>
+<div class="proto">
+  <div class="ptop">
+    <span class="tag">原型</span><h1>內容生成模型設定</h1>
+    <div class="ptabs" id="tabs">
+      <button data-s="first" class="on">第一次設定</button>
+      <button data-s="expired">登入失效</button>
+      <button data-s="record">沒設定就錄音</button>
+    </div>
+  </div>
+  <div class="stage">
+    <div id="app" style="flex:1;min-width:0"></div>
+    <div class="pside" id="sim">
+      <h2>其他狀況</h2>
+      <button data-sim="installFail">安裝失敗</button>
+      <button data-sim="free">免費方案</button>
+      <button data-sim="quota">額度用完</button>
+      <button data-sim="reset">重新開始</button>
+    </div>
+  </div>
+</div>
+<script>
+const AI = {
+  claude: { name: 'Claude Code', acct: 'Claude Pro 以上', who: 'Claude', plan: 'Pro 以上方案', email: 'wang@company.com' },
+  codex: { name: 'Codex', acct: 'ChatGPT Plus 以上', who: 'ChatGPT', plan: 'Plus 以上方案', email: 'wang@company.com', installed: true },
+  antigravity: { name: 'Antigravity', acct: 'Google 帳號', who: 'Google', plan: '', email: 'wang@company.com' },
+};
+const ROWS = [
+  ['🎙', '#fde8e7', '麥克風', true], ['🔔', '#fdf3d7', '通知', false], ['📝', '#e3ecfd', '語音轉文字模型', true],
+  ['👥', '#ece3fb', '聲紋識別模型', false], ['🤖', '#fde8d7', '內容生成模型', true], ['🔑', '#eef0f2', 'Google 連線設定', false],
+  ['👤', '#eef0f2', 'Google 帳號登入', false], ['📄', '#e3ecfd', 'Google 文件與雲端硬碟', false], ['✉', '#fde8e7', 'Gmail', false],
+  ['📅', '#dff3e3', 'Google 行事曆', false],
+];
+let S, timers = [];
+function fresh(scene) {
+  timers.forEach(clearTimeout); timers = [];
+  S = { scene, view: 'list', ai: 'claude', install: 'todo', login: 'locked', test: 'locked', item5: scene === 'expired' ? 'expired' : 'todo', rec: false, secs: 0 };
+}
+const later = (ms, fn) => timers.push(setTimeout(() => { fn(); render(); }, ms));
+const $ = (q) => document.querySelector(q);
+
+function pickAi(key) {
+  S.ai = key;
+  S.install = AI[key].installed ? 'done' : 'todo';
+  S.login = S.install === 'done' ? 'todo' : 'locked';
+  S.test = 'locked';
+  render();
+}
+function doInstall() { S.install = 'loading'; render(); later(2500, () => { S.install = 'done'; S.login = 'todo'; }); }
+function doLogin() { S.login = 'loading'; render(); later(2200, () => { S.login = 'done'; doTest(false); }); }
+function doTest(draw = true) { S.test = 'loading'; if (draw) render(); later(1600, () => { S.test = 'done'; }); }
+
+function side(kind, st) {
+  const a = AI[S.ai];
+  const map = {
+    install: { todo: `<button class="btn primary" data-do="install">安裝</button>`,
+               loading: `<span class="swait">安裝中⋯</span><div class="sbar"><i></i></div>`,
+               done: `<span class="sok">✓ 已安裝</span>`,
+               fail: `<span class="sbad">安裝失敗</span><button class="btn primary" data-do="install">重新安裝</button>` },
+    login: { locked: `<span class="slock">先完成安裝</span>`, todo: `<button class="btn primary" data-do="login">登入</button>`,
+             loading: `<span class="swait">請在瀏覽器完成登入⋯</span>`, done: `<span class="sok">✓ 已登入</span>`,
+             free: `<span class="sbad">需要 ${a.plan}</span><button class="btn primary" data-do="login">重新登入</button>` },
+    test: { locked: `<span class="slock">先完成登入</span>`, loading: `<span class="swait">測試中⋯</span><div class="sbar"><i></i></div>`,
+            done: `<span class="sok">✓ 測試通過</span>`,
+            quota: `<span class="sbad">額度已用完</span><button class="btn primary" data-do="test">重新測試</button>` },
+  };
+  return map[kind][st];
+}
+
+function guide() {
+  const a = AI[S.ai];
+  const done = 1 + ['install', 'login', 'test'].filter((k) => S[k] === 'done').length;
+  const installDesc = '';
+  const loginDesc = S.login === 'done' ? `<div class="sds">${a.email}</div>` : '';
+  const testDesc = '';
+  const num = (i, ok) => `<div class="sico snum${ok ? ' ok' : ''}">${ok ? '✓' : i}</div>`;
+  return `<div class="sheet">
+    <div class="shead"><h3>內容生成模型</h3></div>
+    <div class="slist">
+      <div class="srow">${num(1, true)}<div class="stxt"><div class="stt">選擇 AI</div>
+        <div class="cards">${Object.entries(AI).map(([k, v]) => `<button class="card${k === S.ai ? ' on' : ''}" data-ai="${k}"><b>${v.name}</b><span>${v.acct}</span>${v.installed ? '<em>✓ 已安裝</em>' : ''}</button>`).join('')}</div></div></div>
+      <div class="srow">${num(2, S.install === 'done')}<div class="stxt"><div class="stt">安裝 ${a.name}</div>${installDesc}</div><div class="sside">${side('install', S.install)}</div></div>
+      <div class="srow">${num(3, S.login === 'done')}<div class="stxt"><div class="stt">登入 ${a.who} 帳號</div>${loginDesc}</div><div class="sside">${side('login', S.login)}</div></div>
+      <div class="srow">${num(4, S.test === 'done')}<div class="stxt"><div class="stt">連線測試</div>${testDesc}</div><div class="sside">${side('test', S.test)}</div></div>
+    </div>
+    <div class="sfoot"><span class="scount">已完成 ${done} / 4</span><button class="btn ${done === 4 ? 'primary' : 'ghost'}" data-do="back">回到清單</button></div>
+  </div>`;
+}
+
+function list() {
+  const a = AI[S.ai];
+  const five = {
+    todo: [`<div class="sds">選一個 AI，在這台電腦安裝並登入</div>`, `<button class="btn primary" data-do="open">開始設定</button>`],
+    expired: [`<div class="sds bad">Claude Code 登入失效</div>`, `<button class="btn primary" data-do="relogin">重新登入</button>`],
+    loading: [`<div class="sds">Claude Code</div>`, `<span class="swait">請在瀏覽器完成登入⋯</span>`],
+    done: [`<div class="sds">${a.name}</div>`, `<span class="sok">✓ 已完成</span>`],
+  }[S.item5];
+  const done = S.item5 === 'done' ? 10 : 9;
+  return `<div class="sheet">
+    <div class="shead"><h3>Vinutes 需要的設定</h3><div class="langseg"><span>English</span><span class="on">中文</span></div></div>
+    <div class="slist">${ROWS.map(([ic, bg, name, req], i) => `<div class="srow${i === 4 && S.item5 !== 'done' ? ' hl' : ''}">
+      <div class="sico" style="background:${bg}">${ic}</div>
+      <div class="stxt"><div class="stt">${i + 1}. ${name}${req ? '<span class="sreq">必要</span>' : ''}</div>${i === 4 ? five[0] : i === 6 ? '<div class="sds">wang@company.com</div>' : ''}</div>
+      <div class="sside">${i === 4 ? five[1] : '<span class="sok">✓ 已完成</span>'}</div></div>`).join('')}</div>
+    <div class="sfoot"><span class="scount">已完成 ${done} / 10</span><button class="btn ghost">關閉</button></div>
+  </div>`;
+}
+
+function panel() {
+  const t = `${String(Math.floor(S.secs / 60)).padStart(2, '0')}:${String(S.secs % 60).padStart(2, '0')}`;
+  const top = S.rec ? `<button class="rec on" data-do="rec"><i></i></button>
+      <div class="ptime"><span class="bars"><i></i><i></i><i></i><i></i><i></i></span>${t}</div>
+      <div class="phint">按一下結束錄音</div><button class="ppause">❙❙ 暫停</button>`
+    : `<button class="rec" data-do="rec"><i></i></button><div class="ptitle">開始錄音</div><div class="pkey">⌃⌥R</div>`;
+  const note = S.rec ? `<div class="pnote"><b>注意！ 內容生成模型尚未設定</b>需先完成 AI 設定，才能自動生成會議記錄
+      <br><button class="btn" data-do="gosetup">前往設定</button></div>` : '';
+  return `<div class="mstage"><div class="mbar">🎙</div><div class="panel">
+    <div class="ptopx">${top}</div>${note}
+    <div class="psec"><h4>最近會議</h4>
+      <div class="mrow"><span>✉</span><span class="d">10/16 14:00</span><span>春季活動啟動會議</span></div>
+      <div class="mrow"><span>✓</span><span class="d">10/15 10:30</span><span>官網改版週會</span></div>
+      <div class="mrow"><span>✓</span><span class="d">10/14 16:00</span><span>包材供應商會議</span></div></div>
+    <div class="pfoot"><div>☰<br>所有會議</div><div>⚙<br>設定</div><div>⏻<br>退出</div></div>
+    <div class="pver">Vinutes 0.4.3</div></div></div>`;
+}
+
+function render() {
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.s === S.scene));
+  $('#sim').classList.toggle('hidden', S.scene !== 'first');
+  if (S.scene === 'record') { $('#app').innerHTML = panel(); return; }
+  $('#app').innerHTML = `<div class="win"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><div class="wside"></div></div>
+    <div class="veil">${S.view === 'guide' ? guide() : list()}</div></div>`;
+}
+
+document.addEventListener('click', (e) => {
+  const tab = e.target.closest('#tabs button');
+  if (tab) { fresh(tab.dataset.s); return render(); }
+  const card = e.target.closest('[data-ai]');
+  if (card) return pickAi(card.dataset.ai);
+  const sim = e.target.closest('[data-sim]');
+  if (sim) {
+    const k = sim.dataset.sim;
+    fresh('first');
+    if (k !== 'reset') {
+      S.view = 'guide';
+      if (k === 'installFail') S.install = 'fail';
+      if (k === 'free') { S.install = 'done'; S.login = 'free'; }
+      if (k === 'quota') { S.install = 'done'; S.login = 'done'; S.test = 'quota'; }
+    }
+    return render();
+  }
+  const act = e.target.closest('[data-do]');
+  if (!act) return;
+  const d = act.dataset.do;
+  if (d === 'open') { S.view = 'guide'; render(); }
+  else if (d === 'install') doInstall();
+  else if (d === 'login') doLogin();
+  else if (d === 'test') doTest();
+  else if (d === 'back') { if (S.test === 'done') S.item5 = 'done'; S.view = 'list'; render(); }
+  else if (d === 'relogin') { S.item5 = 'loading'; render(); later(2200, () => { S.item5 = 'done'; }); }
+  else if (d === 'rec') {
+    S.rec = !S.rec; S.secs = 0; render();
+    const tick = () => { if (!S.rec || S.scene !== 'record') return; S.secs++; const el = document.querySelector('.ptime'); if (el) el.lastChild.textContent = `00:${String(S.secs).padStart(2, '0')}`; timers.push(setTimeout(tick, 1000)); };
+    if (S.rec) timers.push(setTimeout(tick, 1000));
+  } else if (d === 'gosetup') { fresh('first'); render(); }
+});
+
+fresh('first');
+render();
+</script>
+</body></html>

@@ -99,6 +99,9 @@ let STRINGS: [String: [String: String]] = [
         "panel.stopHint": "Click to stop recording",
         "panel.resume": "Resume",
         "panel.update": "Update to %@",
+        "panel.aiTitle": "Note: the AI isn't set up",
+        "panel.aiText": "Set up the AI first to have the minutes written automatically",
+        "panel.aiSetup": "Set Up",
         "update.failTitle": "Vinutes didn't update",
         "app.hide": "Hide %@",
         "app.quit": "Quit %@",
@@ -201,6 +204,9 @@ let STRINGS: [String: [String: String]] = [
         "panel.stopHint": "按一下結束錄音",
         "panel.resume": "繼續",
         "panel.update": "更新到 %@",
+        "panel.aiTitle": "注意！ 內容生成模型尚未設定",
+        "panel.aiText": "需先完成 AI 設定，才能自動生成會議記錄",
+        "panel.aiSetup": "前往設定",
         "update.failTitle": "更新沒有完成",
         "app.hide": "隱藏 %@",
         "app.quit": "結束 %@",
@@ -361,6 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var panel: MenuPanel!
     var recorder: MeetingCapture?
     var currentJob: URL?
+    var aiWarned = false                 // this recording started while the AI could not write its minutes
     var startedAt: Date?
     var pausedAt: Date?
     var pausedTotal: TimeInterval = 0
@@ -687,6 +694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             bar.show()
             refreshIcon()
             appLog("recording started: \(dir.lastPathComponent)")
+            checkAIForRecording()
         } catch {
             appLog("recording could not start: \(error.localizedDescription)")
             try? FileManager.default.removeItem(at: dir)
@@ -709,8 +717,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshIcon()
     }
 
+    /// A recording started while the AI is not installed or signed out: the panel opens once with a note and a way
+    /// to set it up. The recording goes on either way, and the minutes can be written later (Vin 2026-10-18).
+    func checkAIForRecording() {
+        runScript("setup_check.py", ["status", "--quick"]) { [weak self] code, out in
+            guard let self, self.recording, code == 0, let obj = lastObject(out, prefix: "JSON ") else { return }
+            let state = (obj["ai"] as? [String: Any])?["state"] as? String ?? ""
+            guard ["install", "installing", "login", "plan"].contains(state) else { return }   // not 'unknown'
+            appLog("recording without a ready AI: \(state)")
+            self.aiWarned = true
+            if self.panel.isShown { self.panel.refresh() }
+            else if let button = self.statusItem.button { self.panel.toggle(from: button) }
+        }
+    }
+
     func endRecording() -> URL? {
         guard let rec = recorder, let dir = currentJob else { return nil }
+        aiWarned = false
         if let since = pausedAt { pausedTotal += Date().timeIntervalSince(since) }
         rec.stop()                          // the file is complete once the recorder is let go, just below
         tick?.invalidate()
@@ -924,7 +947,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             guard code == 0, let obj = lastObject(out, prefix: "JSON ") else { return }
             let state = { (key: String) in (obj[key] as? [String: Any])?["state"] as? String ?? "" }
             let mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-            if !mic || state("speech") != "done" || state("ai") != "done" { self?.showManager(select: nil, setup: true) }
+            // an AI that did not answer the sign-in question in time ('unknown') is not counted as missing
+            let ai = state("ai")
+            if !mic || state("speech") != "done" || (ai != "done" && ai != "unknown") { self?.showManager(select: nil, setup: true) }
         }
     }
 
@@ -1678,12 +1703,19 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         case "setupAILogin":
             aiLogin(args["ai"] as? String ?? "")
             done(true, [:])
+        case "setupAIInstall":
+            // the maker's own install script, run in the background by setup_check.py (item 5, step 2)
+            let key = args["ai"] as? String ?? ""
+            guard ["claude", "codex", "antigravity"].contains(key) else { return done(false, ["message": tr("err.noAI")]) }
+            setupScript(["aiinstall", key], done)
+        case "setupAITest":
+            setupScript(["aitest"], done)          // one short answer from the AI (step 4), some seconds
         case "setupClient":
             pickClient(done)
         case "setupOpen":
-            // only the pages the checklist links to: Google Cloud, and where each AI is installed from
+            // only the pages the checklist links to: Google Cloud (the AIs are installed by setup_check.py)
             let text = args["url"] as? String ?? ""
-            let hosts = ["console.cloud.google.com", "docs.claude.com", "github.com", "antigravity.google"]
+            let hosts = ["console.cloud.google.com"]
             guard let url = URL(string: text), url.scheme == "https", hosts.contains(url.host ?? "") else {
                 return done(false, ["message": tr("err.badURL")])
             }
@@ -1962,6 +1994,9 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             DispatchQueue.main.async {
                 self.setupScript(["status"] + (progress ? ["--progress"] : [])) { ok, data in
                     guard ok, var all = data as? [String: Any] else { return done(ok, data) }
+                    if ((all["ai"] as? [String: Any])?["state"] as? String) == "done" {
+                        self.owner?.aiWarned = false             // set up while recording: the panel's note goes
+                    }
                     all["mic"] = ["state": mic]
                     all["notify"] = ["state": notify]
                     done(true, all)
@@ -1989,7 +2024,13 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                         "antigravity": ("Antigravity", "agy")]
         guard let (name, command) = commands[key] else { return }
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(tr("signin.title", name) + ".command")
-        let script = "#!/bin/zsh -l\necho \(shellQuoted(tr("signin.title", name)))\n\(command)\necho\necho \(shellQuoted(tr("signin.done")))\n"
+        // an AI the checklist just installed sits in ~/.local/bin, which a new Mac's shell does not search (the same
+        // folders ai_runner.py looks in); setup-ai-login-done tells the checklist the sign-in command has ended
+        let marker = configDir.appendingPathComponent("setup-ai-login-done")
+        try? FileManager.default.removeItem(at: marker)
+        let path = "export PATH=\"$HOME/.local/bin:$HOME/.claude/local:/opt/homebrew/bin:/usr/local/bin:$HOME/.npm-global/bin:$PATH\""
+        let script = "#!/bin/zsh -l\n\(path)\necho \(shellQuoted(tr("signin.title", name)))\n\(command)\n"
+            + "touch \(shellQuoted(marker.path))\necho\necho \(shellQuoted(tr("signin.done")))\n"
         do {
             try script.write(to: file, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)

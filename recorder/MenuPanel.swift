@@ -64,6 +64,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         pause.controlSize = .large
         pause.target = self
         pause.action = #selector(pauseClicked)
+        pause.refusesFirstResponder = true          // no blue focus ring around it when the panel opens
         controls.orientation = .horizontal
         controls.spacing = 8
         controls.addArrangedSubview(pause)
@@ -163,7 +164,10 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         }
         controls.isHidden = !rec
 
-        let jobs = owner.recentJobs(limit: 40).filter { $0.dir != owner.currentJob && !$0.archived }.prefix(3)
+        // the meeting being recorded is not a recent meeting yet (compared by folder name: the two URLs can differ
+        // by a trailing slash)
+        let current = owner.currentJob?.lastPathComponent
+        let jobs = owner.recentJobs(limit: 40).filter { $0.name != current && !$0.archived }.prefix(3)
         let key = jobs.map { "\($0.name) \($0.step) \($0.title) \($0.sent)" }.joined(separator: "|")
         if key != recentKey { recentKey = key; fillRecent(Array(jobs)) }
         refreshVersion(recording: rec)
@@ -345,6 +349,7 @@ final class MeetingRow: NSView, Hovering {
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 24).isActive = true
         icon.image = symbol(name, 12)
+        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true     // envelope and tick line up the times
         when.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

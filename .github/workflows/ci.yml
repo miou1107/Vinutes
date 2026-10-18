@@ -42,6 +42,6 @@ jobs:
         run: |
           BUILD="$(mktemp -d)"
           cp recorder/MeetingRecorder.swift "$BUILD/main.swift"
-          swiftc -O -swift-version 5 -o "$BUILD/MeetingRecorder" "$BUILD/main.swift" recorder/Capture.swift
+          swiftc -O -swift-version 5 -o "$BUILD/MeetingRecorder" "$BUILD/main.swift" recorder/Capture.swift recorder/MenuPanel.swift
           swiftc -O -swift-version 5 -parse-as-library -o "$BUILD/VinutesCaptions" recorder/Captions.swift \
             || echo "::notice::live captions not built: this runner has no macOS 26 SDK"

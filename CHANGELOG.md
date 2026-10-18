@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The menu-bar icon opens a panel instead of a menu. In the middle is a big round button: red with a white dot to start recording, white with a red ring and a red square to stop it (⌃⌥R still does both). While recording, the panel shows how long it has run with the level bars, and Pause.
+- Under it are the last three meetings, then All Meetings (opens the meeting list), Settings and Quit in three equal buttons. Settings has the setup checklist, open at login, the two languages and the recordings folder.
+- The bottom line shows the version. When GitHub has a newer one, Update to … sits beside it (not while recording).
+- The Vinutes line at the top of the old menu, which did nothing when clicked, is gone, and so are More… and Discard this recording; a wrong recording is deleted from the meeting list.
+
 ## v0.4.1 (2026-10-18)
 
 - Updating Vinutes no longer asks again for the microphone and the Mac's sound. The installer now signs the app with a certificate of its own, made once in the login keychain (Vinutes Local Signing), instead of a new ad hoc signature every time. The first update with this change asks one last time. The certificate's key can't be exported, but a program running as you could use it to sign itself as Vinutes and get the same permissions; remove the certificate in Keychain Access to go back to asking after every update.

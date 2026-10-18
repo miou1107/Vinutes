@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.4 (2026-10-19)
 
 - Item 5 of the setup checklist (the AI that writes the minutes) walks through four steps: pick Claude Code, Codex or Antigravity (each card names the account it needs), Vinutes installs it with its maker's own script, you sign in, and the AI answers one short test. Before, the checklist only opened each AI's install page, and the install was up to you in Terminal.
 - Vinutes now asks about the AI's sign-in when it starts too: an AI that is installed but signed out opens the checklist, with Sign in again on item 5. Before, that showed only after a meeting, when its minutes could not be written.

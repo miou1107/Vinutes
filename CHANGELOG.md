@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.3 (2026-10-18)
 
 - The README shows the menu-bar panel, the meeting window and the floating bar with live captions (English, made-up meetings; docs/screenshots/demo_home.py makes those meetings again for new pictures).
 - While recording, the meeting being recorded no longer shows up among the panel's recent meetings, and Pause has no blue ring around it when the panel opens.

@@ -71,6 +71,7 @@ const ICON = {
   collapse: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></svg>',
   expand: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6l-6 6 6 6M11 6l-6 6 6 6"/></svg>',
   bubble: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
+  people: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></svg>',
   clock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   book: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h6"/></svg>',
@@ -78,6 +79,8 @@ const ICON = {
   pause: '<svg width="12" height="12" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
   x: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   xs: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+ plusSm: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  gear: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   headset: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg>',
   lines: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 11h16M4 16h10"/></svg>',
   mail: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
@@ -100,6 +103,9 @@ const projName = (p) => (p === ALL ? t('proj_all') : p === LOOSE ? t('proj_loose
 
 const S = {
   jobs: [], sel: null, q: '', proj: ALL,
+  tag: ALL,                  // the list's 標籤 picker: ALL, or one tag
+  tagAdding: false,          // 加標籤 became a box to type the tag in
+  pset: null,                // 專案設定: {name, move, adding, busy, err}
   picking: false, picked: new Set(),   // 選取: the list shows a checkbox on each meeting; picked = the ones checked
   ctx: null,                 // the right-click menu: {ids, x, y}
   del: null,                 // the 刪除 sheet: {ids, busy, err}
@@ -114,7 +120,8 @@ const S = {
   setupSeq: 0,               // goes up with every click in 環境設定自檢: an older answer is not shown
   attach: [],                // files, links and pictures picked for 「八、補充資訊」, sent with the next sentence
   urlOpen: false, menuOpen: false,
-  learned: [], banner: null, bannerTimer: null, alert: null,
+  learned: [], learnOpen: false, learnShown: 0,   // learnOpen: the list of what Claude learned shows six rows instead of two
+  banner: null, bannerTimer: null, alert: null,
   player: { open: false, playing: false, pos: 0, dur: 0, speed: 1 },
   sheet: null, mail: null,
   placed: '',                // where the Google Doc was last put, so it moves only when that changes
@@ -142,8 +149,9 @@ function placeDoc(reload = false) {
   if (reload && !show) { S.reloadDoc = true; return; }          // loads again once the place shows
   if (show && S.reloadDoc) { reload = true; S.reloadDoc = false; }
   const r = show ? el.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 };
-  // the AI menu opens upward, into the Doc's place: the Doc ends above it while it is open
-  const menu = show && S.aiOpen ? $('#aiMenu') : null;
+  // the AI and ＋ menus open upward, into the Doc's place: the Doc ends above the open one
+  const open = !show ? null : S.aiOpen ? $('#aiMenu') : S.menuOpen ? $('#attachMenu') : null;
+  const menu = open && !open.hidden ? open : null;
   const h = menu ? Math.max(0, Math.min(r.height, menu.getBoundingClientRect().top - r.y - 8)) : r.height;
   const key = [show, show ? S.d.doc_url : '', Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(h)].join('|');
   if (key === S.placed && !reload) return;
@@ -163,13 +171,18 @@ function refreshDoc(id = S.sel, again = false) {
   const seq = S.editSeq;
   const p = call('refresh', { id }).then((r) => {
     if (r.busy || S.sel !== id || !S.d || !docsMode()) return;
-    const before = JSON.stringify([S.d.todo, S.d.check, S.d.log]);
+    const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent]);
+    const before = seen();
     if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = r.check || []; }   // not over a confirm made meanwhile
+    if (r.attendees) S.d.attendees = r.attendees;
+    if (r.people && !S.peopleBusy) S.d.people = r.people;
+    if (r.speakers && !S.peopleBusy) S.d.speakers = r.speakers;
+    if (r.silent && !S.peopleBusy) S.d.silent = r.silent;
     S.d.log = r.log || [];
     if ('can_undo' in r && !S.busy) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
-    if (JSON.stringify([S.d.todo, S.d.check, S.d.log]) !== before) renderRail();
+    if (seen() !== before && !S.pickOpen) renderRail();
   }).catch(() => {}).finally(() => { if (S.refreshing && S.refreshing.p === p) S.refreshing = null; });
   S.refreshing = { id, p };
   return p;
@@ -209,6 +222,25 @@ function projects() {
   return [ALL, ...names, ...(loose ? [LOOSE] : []), ...(archived ? [ARCHIVED] : [])];
 }
 
+// the meetings the list can show in the place picked: archived ones only under 已封存
+const inScope = (j) => (S.proj === ARCHIVED) === !!j.archived;
+
+function allTags() {
+  return [...new Set(S.jobs.filter(inScope).flatMap((j) => j.tags || []))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
+
+// a project shows as its first character on a colour of its own, the same colour every time
+const PROJECT_COLOURS = 7;
+function projectColour(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.codePointAt(0)) >>> 0;
+  return h % PROJECT_COLOURS;
+}
+function projectMark(name, big = false) {
+  const first = name ? [...name][0].toUpperCase() : '';
+  return `<span class="pav ${name ? 'p' + projectColour(name) : 'none'}${big ? ' big' : ''}" aria-hidden="true">${esc(first)}</span>`;
+}
+
 function shownJobs() {
   const q = S.q.trim();
   const digits = (t) => t.replace(/[^0-9]/g, '');
@@ -216,8 +248,9 @@ function shownJobs() {
     if ((S.proj === ARCHIVED) !== !!j.archived) return false;
     if (S.proj === LOOSE && j.project) return false;
     if (S.proj !== ALL && S.proj !== LOOSE && S.proj !== ARCHIVED && j.project !== S.proj) return false;
+    if (S.tag !== ALL && !(j.tags || []).includes(S.tag)) return false;
     if (!q) return true;
-    const text = `${j.title} ${j.project} ${j.day} ${j.date} ${j.time}`;
+    const text = `${j.title} ${j.project} ${(j.tags || []).join(' ')} ${j.day} ${j.date} ${j.time}`;
     return text.includes(q) || (digits(q) !== '' && (digits(j.day + j.time).includes(digits(q))
                                                      || digits(j.date + j.time).includes(digits(q))));
   });
@@ -236,6 +269,8 @@ function renderSide() {
   const side = $('#side');
   const opts = projects();
   if (!opts.includes(S.proj)) S.proj = ALL;
+  const tags = allTags();
+  if (!tags.includes(S.tag)) S.tag = ALL;
   const list = shownJobs();
   const choosable = list.filter(pickable);
   S.picked = new Set(choosable.filter((j) => S.picked.has(j.id)).map((j) => j.id));   // only what is on screen
@@ -249,22 +284,24 @@ function renderSide() {
   const keepFocus = document.activeElement && document.activeElement.id === 'q';
   const scrolled = side.querySelector('.sidelist') ? side.querySelector('.sidelist').scrollTop : 0;
   side.innerHTML = `<div class="sidelist">
-    <div class="sidehead"><h1>${esc(t('list_title'))}</h1>
+    <div class="sidehead"><h1>${esc(t('list_title'))} <span class="n">(${list.length})</span></h1>
       <button class="pickbtn" id="pickBtn" aria-pressed="${S.picking}">${esc(t(S.picking ? 'pick_done' : 'pick'))}</button></div>
     <div class="search">${ICON.search}<input id="q" aria-label="${esc(t('search_aria'))}" placeholder="${esc(t('search_ph'))}" value="${esc(S.q)}"></div>
     <div class="proj"><label for="proj">${esc(t('project'))}</label><select id="proj">${opts.map((p) => `<option value="${esc(p)}"${p === S.proj ? ' selected' : ''}>${esc(projName(p))}</option>`).join('')}</select></div>
-    ${S.picking ? `<button class="pickall" id="pickAll" aria-pressed="${allPicked}"><span class="cbox${allPicked ? ' on' : ''}">${ICON.tick}</span>${esc(t('pick_all', choosable.length))}</button>`
-      : `<div class="count">${esc(t('count', list.length))}</div>`}
+    ${tags.length ? `<div class="proj"><label for="tagSel">${esc(t('tag'))}</label><select id="tagSel">${[ALL, ...tags].map((g) => `<option value="${esc(g)}"${g === S.tag ? ' selected' : ''}>${esc(g === ALL ? t('proj_all') : g)}</option>`).join('')}</select></div>` : ''}
+    ${S.picking ? `<button class="pickall" id="pickAll" aria-pressed="${allPicked}"><span class="cbox${allPicked ? ' on' : ''}">${ICON.tick}</span>${esc(t('pick_all', choosable.length))}</button>` : ''}
     ${groups.map((g) => `
       <div class="day"><span>${esc(g.day)}</span><i></i></div>
       ${g.items.map((j) => `
         <div class="item${S.picking ? ' picking' : j.id === S.sel ? ' on' : ''}${S.picked.has(j.id) ? ' picked' : ''}${playingRow(j.id) ? ' playing' : ''}" role="button" tabindex="0" data-id="${esc(j.id)}"${S.picking && pickable(j) ? ` aria-pressed="${S.picked.has(j.id)}"` : ''}>
-          <span class="ico">${S.picking && pickable(j) ? `<span class="cbox${S.picked.has(j.id) ? ' on' : ''}">${ICON.tick}</span>` : ICON[j.status] || ICON.ready}</span>
+          <span class="ico">${S.picking && pickable(j) ? `<span class="cbox${S.picked.has(j.id) ? ' on' : ''}">${ICON.tick}</span>`
+            : j.status === 'working' || j.status === 'failed' ? ICON[j.status] : projectMark(j.project)}</span>
           <span class="txt"><span class="t">${esc(titleOf(j))}</span>
-            <span class="s">${esc(j.time)}　${esc(statusText(j.status))}${S.proj === ALL && j.project ? '　·　' + esc(j.project) : ''}</span></span>
+            <span class="s${j.status === 'failed' ? ' bad' : ''}">${esc(j.time)}　${esc(statusText(j.status))}${S.proj === ALL && j.project ? '　·　' + esc(j.project) : ''}</span>
+            ${(j.tags || []).length ? `<span class="tgs">${j.tags.map((g) => `<span class="tg" data-tag="${esc(g)}">${esc(g)}</span>`).join('')}</span>` : ''}</span>
           <span class="tools">${j.has_transcript ? `<button class="tb" data-act="read" title="${esc(t('read_transcript'))}" aria-label="${esc(t('read_transcript'))}">${ICON.lines}</button>` : ''}${j.has_audio ? playButton(playingRow(j.id)) : ''}</span>
         </div>`).join('')}`).join('')}
-    ${list.length ? '' : `<div class="empty">${esc(t('no_match'))}</div>`}</div>
+    ${list.length ? '' : `<div class="empty">${esc(t(S.jobs.length ? 'no_match' : 'no_meetings'))}</div>`}</div>
     ${S.picking ? `<div class="pickbar"><span>${esc(t('picked', S.picked.size))}</span>
       <button class="btn ghost" id="pickArchive"${S.picked.size ? '' : ' disabled'}>${esc(t(S.proj === ARCHIVED ? 'unarchive' : 'archive'))}</button>
       <button class="btn ghost danger" id="pickDelete"${S.picked.size ? '' : ' disabled'}>${esc(t('delete'))}</button></div>`
@@ -284,6 +321,7 @@ function renderSide() {
   q.addEventListener('input', () => { S.q = q.value; renderSide(); });
   if (keepFocus) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
   $('#proj').addEventListener('change', (e) => { S.proj = e.target.value; renderSide(); });
+  if ($('#tagSel')) $('#tagSel').addEventListener('change', (e) => { S.tag = e.target.value; renderSide(); });
   // the meeting already open stays as it is: opening it again would drop what Claude is about to answer
   side.querySelectorAll('.item').forEach((b) => {
     const go = () => {
@@ -296,7 +334,11 @@ function renderSide() {
       }
       if (id !== S.sel || !S.d) select(id);
     };
-    b.addEventListener('click', (e) => { if (!e.target.closest('.tb')) go(); });
+    b.addEventListener('click', (e) => {
+      const tag = !S.picking && e.target.closest('.tg');
+      if (tag) { S.tag = tag.dataset.tag; return renderSide(); }    // a tag on a row: the list keeps only that tag
+      if (!e.target.closest('.tb')) go();
+    });
     b.addEventListener('keydown', (e) => { if (e.target === b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); go(); } });
   });
 }
@@ -521,7 +563,9 @@ async function select(id) {
   }
   S.sel = id;
   S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null;
-  S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.alert = null;
+  S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
+  S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
+  S.tagAdding = false;
   S.attach = []; S.urlOpen = false; S.menuOpen = false;
   S.dirty = false; S.saveText = ''; S.saveErr = false;
   S.docFailed = false; S.docWarning = ''; S.reloadDoc = false;
@@ -584,9 +628,29 @@ function renderMain() {
   placeDoc();
 }
 
+// nothing recorded yet: how to record the first meeting, and what happens after
+function drawFirst(main) {
+  main.innerHTML = `<div class="first"><h2>${esc(t('first_title'))}</h2><p>${esc(t('first_text'))}<br>${esc(t('first_notify'))}</p>
+    <button class="btn primary rec" id="firstRec"${S.recording ? ' disabled' : ''}><span class="dot" aria-hidden="true"></span>${esc(t(S.recording ? 'first_recording' : 'start_rec'))}</button>
+    <div class="key">${esc(t('first_key'))}</div></div>`;
+  $('#firstRec').addEventListener('click', async () => {
+    try { await call('record'); } catch (e) { return showAlert(e.message); }
+    await openFirst();
+  });
+}
+
+// the list was empty and now has the first recording: it opens at once (never another meeting after a delete)
+async function openFirst() {
+  const empty = !S.jobs.length;
+  await loadList();
+  if (empty && !S.sel && S.jobs.length) select(S.jobs[0].id);
+  return empty;
+}
+
 function drawMain() {
   const main = $('#main');
   const job = S.jobs.find((j) => j.id === S.sel);
+  if (!S.sel && !S.jobs.length) return drawFirst(main);
   if (!S.sel) { main.innerHTML = `<div class="state"><div class="sub">${esc(t('no_recording'))}</div></div>`; return; }
   if (S.loadError) {
     main.innerHTML = `<div class="state"><h2>${esc(job ? titleOf(job) : '')}</h2><div class="banner err"><span>${esc(S.loadError)}</span></div>
@@ -604,6 +668,7 @@ function drawMain() {
   if (docsMode()) {
     main.innerHTML = `
       <div class="head" id="head"></div>
+      <div class="tagbar" id="tagbar"></div>
       <div class="body">
         <div class="paper docs"><div id="banners"></div>
           <div id="gdoc" class="gdoc"><div class="busy">${ICON.spin}<span>${esc(t('opening_doc'))}</span></div></div></div>
@@ -611,11 +676,12 @@ function drawMain() {
       </div>
       <div class="ask" id="ask"></div>
       <div class="foot" id="foot"></div>`;
-    renderHead(); renderBanners(); renderRail(); renderAsk(); renderFoot();
+    renderHead(); renderTags(); renderBanners(); renderRail(); renderAsk(); renderFoot();
     return;
   }
   main.innerHTML = `
     <div class="head" id="head"></div>
+    <div class="tagbar" id="tagbar"></div>
     <div class="body">
       <div class="paper"><div id="banners"></div><div id="doc" contenteditable="true" spellcheck="false"></div></div>
       <aside class="rail" id="rail" aria-label="${esc(t('rail_aria'))}"></aside>
@@ -625,11 +691,16 @@ function drawMain() {
   setDoc(d.html);
   if (d.readonly || S.busy) docEl().contentEditable = 'false';
   wireDoc();
-  renderHead(); renderBanners(); renderRail(); renderAsk(); renderFoot();
+  renderHead(); renderTags(); renderBanners(); renderRail(); renderAsk(); renderFoot();
 }
 
 function renderWorking(main, d) {
   const step = d.step;
+  if (!step && S.recording && S.jobs[0] && S.jobs[0].id === d.id) {   // still recording: nothing to write up yet
+    main.innerHTML = `<div class="state"><h2>${esc(t('first_recording'))}</h2>
+      <div class="sub">${esc(t('rec_now'))}</div></div>`;
+    return;
+  }
   const st = (n) => {
     const order = { transcribing: 0, writing: 1 }[step] ?? 0;
     if (n < order) return ['', ICON.done];
@@ -663,19 +734,154 @@ function renderHead() {
   const planned = d.planned ? t('planned', d.planned) : t('no_next');
   el.innerHTML = `
     <nav class="crumbs" aria-label="${esc(t('crumbs_aria'))}">
-      <button class="crumb" id="toProj">${esc(d.project || t('proj_loose'))}</button>${ICON.chevR}
+      <button class="crumb" id="toProj">${esc(d.project || t('proj_loose'))}</button>
+      <button class="iconbtn gear" id="projSet" title="${esc(t('proj_settings'))}" aria-label="${esc(t('proj_settings'))}">${ICON.gear}</button>${ICON.chevR}
       <button class="crumb" id="toDate">${esc(shortDay(d))}</button>
       <b>${t('crumb_title', esc(d.title || t('untitled')))}</b>
     </nav>
     <button class="sib${d.prev ? '' : ' off'}" id="prev" title="${esc(d.prev ? d.prev_title : t('no_prev'))}">${ICON.chevL}<span>${esc(t('prev_meeting'))}</span></button>
     <button class="sib${d.next ? '' : ' off'}" id="next" title="${esc(d.next ? d.next_title : planned)}"><span>${esc(t('next_meeting'))}</span>${ICON.chevR}</button>
     ${docsMode() ? '' : `<span class="savetext${S.saveErr ? ' err' : ''}" id="savetext">${esc(say(S.saveText))}</span>`}
-    ${d.doc_url ? `<span class="iconlink" id="openDoc" title="${esc(t('open_doc_tip'))}">${ICON.open}</span>` : ''}`;
-  $('#toProj').addEventListener('click', () => { S.proj = d.project || LOOSE; S.q = ''; renderSide(); });
-  $('#toDate').addEventListener('click', () => { S.q = shortDay(d); S.proj = ALL; renderSide(); });
+    ${d.doc_url ? `<span class="iconlink" id="openDoc" title="${esc(t('open_doc_tip'))}">${ICON.open}</span>` : ''}
+    ${d.sent ? `<span class="sentmark" title="${esc(t('sent_line', d.sent.at, d.sent.count, d.sent.format))}">${ICON.done}<span>${esc(t('sent_short', d.sent.count))}</span></span>`
+      : d.mail ? `<button class="btn primary sendbtn" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}`;
+  if ($('#mailBtn')) $('#mailBtn').addEventListener('click', openMail);
+  $('#toProj').addEventListener('click', () => { S.proj = d.project || LOOSE; S.tag = ALL; S.q = ''; renderSide(); });
+  $('#projSet').addEventListener('click', openProject);
+  $('#toDate').addEventListener('click', () => { S.q = shortDay(d); S.proj = ALL; S.tag = ALL; renderSide(); });
   $('#prev').addEventListener('click', () => d.prev && select(d.prev));
   $('#next').addEventListener('click', () => d.next && select(d.next));
   if (d.doc_url) $('#openDoc').addEventListener('click', () => call('link', { url: d.doc_url }).catch(() => {}));
+}
+
+// under the path: the meeting's tags, 加標籤, and the ones Claude suggested (dashed until the user adds one)
+const MAX_TAGS = 8;                                 // minutes_app.py keeps the same number
+
+function renderTags() {
+  const el = $('#tagbar');
+  if (!el || !S.d) return;
+  const tags = S.d.tags || [], offered = S.d.suggested || [];
+  el.innerHTML = `<span class="tl">${esc(t('tag'))}</span>
+    ${tags.map((g) => `<span class="tchip">${esc(g)}<button data-rm="${esc(g)}" title="${esc(t('remove_tag', g))}" aria-label="${esc(t('remove_tag', g))}">${ICON.xs}</button></span>`).join('')}
+    ${tags.length >= MAX_TAGS ? '' : S.tagAdding ? `<input id="tagIn" class="tagin" maxlength="20" aria-label="${esc(t('add_tag'))}" placeholder="${esc(t('tag_ph'))}">`
+      : `<button class="tadd" id="tagAdd">${ICON.plusSm}<span>${esc(t('add_tag'))}</span></button>`}
+    ${offered.length && tags.length < MAX_TAGS ? `<span class="tl ai">${esc(t('tag_ai', aiName()))}</span>${offered.map((g) => `<button class="tchip sug" data-add="${esc(g)}" title="${esc(t('add_this_tag', g))}">${ICON.plusSm}${esc(g)}</button>`).join('')}` : ''}`;
+  el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => changeTags((now) => now.filter((g) => g !== b.dataset.rm))));
+  el.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => changeTags((now) => [...now, b.dataset.add])));
+  if ($('#tagAdd')) $('#tagAdd').addEventListener('click', () => { S.tagAdding = true; renderTags(); $('#tagIn').focus(); });
+  const box = $('#tagIn');
+  if (!box) return;
+  let done = false;
+  const finish = (keep) => {
+    if (done) return;
+    done = true;
+    S.tagAdding = false;
+    const g = box.value.trim().replace(/\s+/g, ' ');
+    if (keep && g) changeTags((now) => [...now, g]); else renderTags();
+  };
+  box.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;                      // the 注音 candidate list takes Enter first
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
+  });
+  box.addEventListener('blur', () => finish(true));
+}
+
+// a click shows at once; the lists go out one after another, each from what the clicks before it left, so two
+// quick clicks never send the same old list twice
+let tagsSent = Promise.resolve();
+function changeTags(change) {
+  const id = S.sel, d = S.d;
+  if (!d) return;
+  const tags = [...new Set(change(d.tags || []))].slice(0, MAX_TAGS);
+  d.tags = tags;
+  d.suggested = (d.suggested || []).filter((g) => !tags.includes(g));
+  renderTags();
+  tagsSent = tagsSent.then(() => sendTags(id, tags));
+}
+
+async function sendTags(id, tags) {
+  const j = S.jobs.find((x) => x.id === id);
+  try {
+    const r = await call('tags', { id, tags });
+    if (j) { j.tags = r.tags; j.suggested = r.suggested; }
+  } catch (e) {
+    showAlert(e.message);
+    await loadList();                                // what was saved after all
+    const saved = S.jobs.find((x) => x.id === id);
+    if (saved && S.sel === id && S.d) { S.d.tags = saved.tags || []; S.d.suggested = saved.suggested || []; renderTags(); }
+  }
+  renderSide();
+}
+
+// 專案設定: rename the project (every meeting of it), or move this meeting to another project or a new one
+const NEW_PROJECT = '\u2060new';
+
+function openProject() {
+  const d = S.d;
+  if (!d) return;
+  S.pset = { name: d.project || '', move: d.project || '', adding: false, typed: '', busy: false, err: '' };
+  S.sheet = 'project';
+  placeDoc();
+  renderProject();
+}
+
+function renderProject() {
+  const m = S.pset, d = S.d;
+  if (!m || !d) return closeSheet();
+  const now = d.project || '';
+  const names = [...new Set(S.jobs.map((j) => j.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const count = S.jobs.filter((j) => j.project === now && now).length;
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm pset" role="dialog" aria-label="${esc(t('proj_settings'))}">
+    <h3>${esc(t('proj_settings'))}</h3>
+    <div class="phead">${projectMark(now, true)}<div><div class="pname">${esc(now || t('proj_loose'))}</div>
+      ${now ? `<div class="pcount">${esc(t('proj_count', count))}</div>` : ''}</div></div>
+    ${now ? `<label class="plbl" for="pName">${esc(t('proj_name'))}</label>
+      <input id="pName" class="pinput" maxlength="30" value="${esc(m.name)}">
+      <p class="dnote small">${esc(t('proj_rename_note', count))}</p>` : ''}
+    <label class="plbl" for="pMove">${esc(t('proj_of_meeting'))}</label>
+    <select id="pMove" class="pinput">${[...names, '', NEW_PROJECT].map((p) => `<option value="${esc(p)}"${(m.adding ? p === NEW_PROJECT : p === m.move) ? ' selected' : ''}>${esc(p === NEW_PROJECT ? t('proj_new') : p || t('proj_loose'))}</option>`).join('')}</select>
+    ${m.adding ? `<input id="pNew" class="pinput" maxlength="30" placeholder="${esc(t('proj_new_ph'))}" value="${esc(m.typed)}">` : ''}
+    ${m.err ? `<p class="dnote err">${esc(m.err)}</p>` : ''}
+    <div class="dfoot"><button class="btn ghost" id="pCancel"${m.busy ? ' disabled' : ''}>${esc(t('cancel'))}</button>
+      <button class="btn primary" id="pSave"${m.busy ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('save'))}</button></div>
+  </div></div>`;
+  if ($('#pName')) $('#pName').addEventListener('input', (e) => { m.name = e.target.value; });
+  $('#pMove').addEventListener('change', (e) => {
+    m.adding = e.target.value === NEW_PROJECT;
+    if (!m.adding) m.move = e.target.value;
+    renderProject();
+    if (m.adding) $('#pNew').focus();
+  });
+  if ($('#pNew')) $('#pNew').addEventListener('input', (e) => { m.typed = e.target.value; });
+  $('#pCancel').addEventListener('click', closeSheet);
+  $('#pSave').addEventListener('click', saveProject);
+}
+
+async function saveProject() {
+  const m = S.pset, d = S.d;
+  if (!m || !d || m.busy) return;
+  const now = d.project || '';
+  const name = m.name.trim().replace(/\s+/g, ' ');
+  const target = m.adding ? m.typed.trim().replace(/\s+/g, ' ') : m.move;
+  if (now && !name) { m.err = t('proj_name_empty'); return renderProject(); }
+  if (m.adding && !target) { m.err = t('proj_name_empty'); return renderProject(); }
+  m.busy = true; m.err = '';
+  renderProject();
+  const id = S.sel;
+  try {
+    let project = now;
+    if (now && name !== now) project = (await call('renameProject', { old: now, new: name })).project;
+    if (target !== now) project = (await call('move', { id, project: target })).project;
+    if (S.sel === id && S.d) S.d.project = project;
+    if (S.proj === now && now) S.proj = project || LOOSE;     // the list that showed the project follows the meeting
+    closeSheet();
+    await loadList();
+    if (S.sel === id && S.d) renderHead();
+  } catch (e) {
+    m.busy = false; m.err = e.message;
+    if (S.sheet === 'project') renderProject();
+  }
 }
 
 // text: words, or [key, ...args] so the line follows a language switch
@@ -791,6 +997,10 @@ function afterEdit(r) {
   if (!S.d) return;                                 // the meeting is loading again: what it loads already has this
   if (r.unsaved) setSave(['not_saved_edit'], true);
   else setSave([r.held ? 'held' : 'saved', r.saved_at || hhmm()]);
+  if (r.attendees) S.d.attendees = r.attendees;       // 與會人員 under 人員, after the names went into the minutes
+  if (r.people) S.d.people = r.people;
+  if (r.speakers) S.d.speakers = r.speakers;
+  if (r.check) S.d.check = r.check;
   if (r.todo) { S.d.todo = r.todo; renderFoot(); renderRail(); }
   if ('can_undo' in r) S.canUndo = !!r.can_undo;
   if (r.reload_doc) placeDoc(true);                 // the whole Doc was uploaded again: the one shown loads again
@@ -895,53 +1105,191 @@ function renderRail() {
 function renderDocsRail(el) {
   const d = S.d;
   const todo = d.todo || [];
-  const check = d.check || [];
-  const tab = ['fill', 'check', 'log'].includes(S.tab) ? S.tab : (todo.length ? 'fill' : check.length ? 'check' : 'log');
+  const all = d.check || [];
+  // guesses about who a voice is go under 人員, with that voice; 待處理 has the blanks and the words heard
+  const voiced = (c) => c.speaker && (d.voices || []).some((v) => v.group === c.speaker);
+  const people = all.filter(voiced);
+  const check = all.filter((c) => !voiced(c));
+  const waiting = todo.length + check.length;
+  const shown = d.speakers || {};
+  const unnamed = (d.voices || []).filter((v) => !(v.name || shown[v.group])).length;   // voices nobody is picked for
+  const tabs = ['todo', 'people', 'log'];
+  const tab = tabs.includes(S.tab) ? S.tab : (waiting ? 'todo' : unnamed ? 'people' : 'log');
   const pick = (t) => () => { S.railOpen = true; S.tab = t; renderRail(); };
   if (!S.railOpen) {
     el.className = 'rail closed';
     el.innerHTML = `
       <button class="iconbtn" id="expand" title="${esc(t('expand'))}" aria-label="${esc(t('expand'))}">${ICON.expand}</button>
-      <button class="iconbtn" id="railF" title="${esc(t('to_fill'))}" aria-label="${esc(t('to_fill'))}">${ICON.lines}${todo.length ? `<span class="badge red">${todo.length}</span>` : ''}</button>
-      <button class="iconbtn" id="railK" title="${esc(t('to_confirm'))}" aria-label="${esc(t('to_confirm'))}">${ICON.check}${check.length ? `<span class="badge">${check.length}</span>` : ''}</button>
+      <button class="iconbtn" id="railF" title="${esc(t('to_handle'))}" aria-label="${esc(t('to_handle'))}">${ICON.lines}${waiting ? `<span class="badge${todo.length ? ' red' : ''}">${waiting}</span>` : ''}</button>
+      <button class="iconbtn" id="railP" title="${esc(t('people'))}" aria-label="${esc(t('people'))}">${ICON.people}${unnamed ? `<span class="badge">${unnamed}</span>` : ''}</button>
       <button class="iconbtn" id="railL" title="${esc(t('activity'))}" aria-label="${esc(t('activity'))}">${ICON.clock}</button>`;
     $('#expand').addEventListener('click', () => { S.railOpen = true; renderRail(); });
-    $('#railF').addEventListener('click', pick('fill'));
-    $('#railK').addEventListener('click', pick('check'));
+    $('#railF').addEventListener('click', pick('todo'));
+    $('#railP').addEventListener('click', pick('people'));
     $('#railL').addEventListener('click', pick('log'));
     return;
   }
   el.className = 'rail';
-  const body = tab === 'fill'
-    ? (todo.length ? todo.map((t, i) => `<button class="todo" data-t="${i}"><b>${esc(t.label)}</b>${t.anchor && t.anchor !== t.label ? `<span>${esc(t.anchor)}</span>` : ''}</button>`).join('')
-                   : `<div class="empty">${esc(t('all_filled'))}</div>`)
-    : tab === 'check'
-      ? (check.length ? check.map((c, i) => `<div class="card guess"><div class="text">${esc(c.label)}</div>
+  const body = tab === 'todo'
+    ? (waiting ? todo.map((it, i) => `<button class="todo" data-t="${i}"><span class="kind red">${esc(t('to_fill'))}</span><b>${esc(it.label)}</b>${it.anchor && it.anchor !== it.label ? `<span>${esc(it.anchor)}</span>` : ''}</button>`).join('')
+        + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t('to_confirm'))}</span><div class="text">${esc(c.label)}</div>
           <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`).join('')
-                      : `<div class="empty">${esc(t('all_confirmed'))}</div>`)
-      : logHTML(d.log || []);
+      : `<div class="empty">${esc(t('nothing_to_handle'))}</div>`)
+    : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
-        <button class="tab${tab === 'fill' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_fill'))}${todo.length ? ` <b class="n red">${todo.length}</b>` : ''}</button>
-        <button class="tab${tab === 'check' ? ' on' : ''}" role="tab" id="tabK">${esc(t('to_confirm'))}${check.length ? ` <b class="n yellow">${check.length}</b>` : ''}</button>
+        <button class="tab${tab === 'todo' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_handle'))}${waiting ? ` <b class="n ${todo.length ? 'red' : 'yellow'}">${waiting}</b>` : ''}</button>
+        <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${unnamed ? ` <b class="n yellow">${unnamed}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>
       <button class="iconbtn" id="collapse" title="${esc(t('collapse'))}" aria-label="${esc(t('collapse'))}">${ICON.collapse}</button>
     </div>
     <div class="railbody" id="railbody">${body}</div>`;
-  $('#tabF').addEventListener('click', pick('fill'));
-  $('#tabK').addEventListener('click', pick('check'));
+  $('#tabF').addEventListener('click', pick('todo'));
+  $('#tabP').addEventListener('click', pick('people'));
   $('#tabL').addEventListener('click', pick('log'));
   $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); });
-  el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
-    const item = todo[Number(b.dataset.t)];
-    showInDoc(item.find, true);
-    askAbout(item);
+  if (tab === 'todo') {
+    el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
+      const item = todo[Number(b.dataset.t)];
+      showInDoc(item.find, true);
+      askAbout(item);
+    }));
+    el.querySelectorAll('.card.guess .text').forEach((x, i) => x.addEventListener('click', () => showInDoc(check[i].find)));
+    el.querySelectorAll('.okc2[data-c]').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
+  }
+  if (tab === 'people') wirePeople(el);
+}
+
+// 人員: one card per voice in the recording, with a menu to pick who it is. The menu starts on the name the minutes
+// use (the AI's guess, put in after the write-up); picking someone puts that name in the minutes at once and
+// remembers the voice. The people invited who did not speak are listed under it (Vin 2026-10-17).
+function peopleHTML(people) {
+  const d = S.d;
+  const voices = d.voices || [];
+  const shown = d.speakers || {};
+  const busy = S.peopleBusy || S.busy;
+  if (!voices.length) {
+    const names = d.people || [];
+    return `<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}`;
+  }
+  const cards = voices.map((v) => {
+    const name = v.name || shown[v.group] || '';
+    const playing = S.player.playing && S.peoplePlay === v.group;
+    const open = S.pickOpen === v.group;
+    const guess = (people.find((c) => c.speaker === v.group) || {}).who || '';
+    const choices = [...new Set([guess, ...(d.people || [])].filter(Boolean))];
+    const menu = !open ? '' : S.pickTyping === v.group
+      ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
+      : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
+          <div class="mi other" data-other="1">${esc(t('people_other'))}</div></div>`;
+    return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
+        <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
+        <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
+        <button class="plink phear" data-g="${esc(v.group)}">${esc(t(playing ? 'stop_play' : 'hear'))}</button></div>
+      <div class="pickwrap"><button class="pick${name ? ' done' : ''}" data-g="${esc(v.group)}" aria-haspopup="listbox" aria-expanded="${open}"${busy ? ' disabled' : ''}>
+        ${name ? `<b>${esc(name)}</b>` : `<span class="ph">${esc(t('people_pick'))}</span>`}<span class="caret">▾</span></button>${menu}</div></div>`;
+  });
+  const silent = d.silent || [];                   // the server tells names apart (陳怡君（Jessie） is Jessie)
+  return `<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
+    ${silent.length ? `<div class="pmin silent">${esc(t('people_silent_list', silent.join(t('list_sep'))))}</div>` : ''}`;
+}
+
+// what the server sends back after a change to the people: who each voice is, the voices, the minutes
+function peopleDone(r) {
+  if (!S.d) return;
+  for (const k of ['people', 'speakers', 'silent', 'voices', 'transcript', 'voice_names', 'log', 'check']) if (r[k]) S.d[k] = r[k];
+  afterEdit(r);
+}
+
+// true when the change went in
+async function peopleCall(cmd, args) {
+  if (S.peopleBusy || S.busy) return false;
+  const id = S.sel;
+  S.peopleBusy = true; S.editSeq++;                 // a refresh meanwhile does not draw the old names again
+  renderRail();
+  try {
+    const r = await call(cmd, { id, ...args });
+    if (S.sel !== id) return false;
+    peopleDone(r);
+    return true;
+  } catch (e) { showAlert(e.message); return false; } finally { S.peopleBusy = false; if (S.sel === id) renderRail(); }
+}
+
+function closePick() { S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; }
+
+function wirePeople(el) {
+  const d = S.d;
+  const voices = d.voices || [];
+  el.querySelectorAll('.phear').forEach((b) => b.addEventListener('click', () => {
+    const v = voices.find((x) => x.group === b.dataset.g);
+    if (!v) return;
+    clearTimeout(S.peopleStop);
+    if (S.player.playing && S.peoplePlay === v.group) { audio('pause', { at: S.player.pos }); setTimeout(renderRail, 300); return; }
+    audio('play', { at: v.sample[0] }, true);
+    S.peoplePlay = v.group;
+    // the stretch of this voice, then it stops: what follows may be someone else
+    const long = Math.max(3, (v.sample[1] || v.sample[0] + 8) - v.sample[0]) * 1000;
+    S.peopleStop = setTimeout(() => {
+      if (S.player.playing && S.peoplePlay === v.group) audio('pause', { at: S.player.pos }, true);
+      S.peoplePlay = null;
+      renderRail();
+    }, long);
+    setTimeout(renderRail, 600);
   }));
-  el.querySelectorAll('.card.guess .text').forEach((t, i) => t.addEventListener('click', () => showInDoc(check[i].find)));
-  el.querySelectorAll('.okc2').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
+  el.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const g = b.dataset.g;
+    if (S.pickOpen === g) closePick(); else { closePick(); S.pickOpen = g; }
+    renderRail();
+  }));
+  const choose = (g, name) => {
+    closePick();
+    name = (name || '').trim();
+    if (name) peopleCall('speaker', { group: g, name });   // into the minutes, and the voice is remembered
+    else renderRail();
+  };
+  el.querySelectorAll('.menu .mi').forEach((m) => m.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (m.dataset.other) { S.pickTyping = S.pickOpen; S.peopleTyped = ''; renderRail(); const i = $('#pIn'); if (i) i.focus(); return; }
+    choose(S.pickOpen, m.dataset.n);
+  }));
+  const input = $('#pIn');
+  if (!input) return;
+  const list = $('#pAc');
+  const group = S.pickTyping;
+  let offered = [], at = 0;
+  const offer = () => {                             // names from earlier meetings and every project's list
+    const q = input.value.trim().toLowerCase();
+    S.peopleTyped = input.value;
+    offered = q ? (d.people_known || []).filter((n) => n.toLowerCase().includes(q)).slice(0, 6) : [];
+    at = 0;
+    list.hidden = !offered.length;
+    list.innerHTML = offered.map((n, i) => `<div class="aci${i === at ? ' on' : ''}" data-i="${i}">${esc(n)}</div>`).join('');
+  };
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('input', offer);
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;   // the 注音 candidate list takes Enter first (WebKit: 229)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!offered.length) return;
+      e.preventDefault();
+      at = (at + (e.key === 'ArrowDown' ? 1 : offered.length - 1)) % offered.length;
+      list.querySelectorAll('.aci').forEach((x, i) => x.classList.toggle('on', i === at));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      choose(group, offered.length ? offered[at] : input.value);
+    } else if (e.key === 'Escape') {
+      closePick(); renderRail();
+    }
+  });
+  list.addEventListener('mousedown', (e) => {       // before the box loses focus
+    const x = e.target.closest('.aci');
+    if (x) { e.preventDefault(); choose(group, offered[Number(x.dataset.i)]); }
+  });
+  offer();
 }
 
 // a blank to fill: the question goes into the box under the Doc, ready for the answer
@@ -1043,7 +1391,6 @@ function renderAsk() {
     // files, links and pictures need the Google Doc: they go to Drive and into its 「八、補充資訊」
     const canAttach = !!(S.d && S.d.doc_url && !S.d.readonly);
     el.innerHTML = `<div id="askTop"></div>
-      <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>
       <div id="attachBox"></div>
       <div class="prompt with-tools">
         <div class="mwrap"><button class="model" id="aiPick" title="${esc(t('ai_pick'))}" aria-label="${esc(t('ai_pick'))}"
@@ -1054,15 +1401,18 @@ function renderAsk() {
             <button role="menuitem" data-a="link">${ICON.link}<span>${esc(t('paste_link'))}</span></button></div></div>
         <button class="ib" id="attachImage" title="${esc(t('insert_image'))}" aria-label="${esc(t('insert_image'))}">${ICON.image}</button>` : ''}
         <input id="promptInput" aria-label="${esc(t('ask_aria', aiName()))}" placeholder="${esc(t('ask_ph', aiName()))}">
-        <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>`;
+        <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>
+      <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>`;
     const input = $('#promptInput');
-    const go = () => (S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
+    const go = () => (S.pasting ? null : S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
+    if (canAttach) input.addEventListener('paste', pastePicture);
     $('#askGo').addEventListener('click', go);
     el.querySelectorAll('.qk').forEach((b) => b.addEventListener('click', () => ask('', b.dataset.k)));
     $('#aiPick').addEventListener('click', (e) => {
       e.stopPropagation();
       S.aiOpen = !S.aiOpen;
+      if (S.menuOpen) { S.menuOpen = false; renderAttachMenu(); }
       renderAiMenu();
       if (S.aiOpen) loadAiStates();
     });
@@ -1072,7 +1422,11 @@ function renderAsk() {
       if (b && !b.disabled) switchAi(b.dataset.ai);
     });
     if (canAttach) {
-      $('#attachPlus').addEventListener('click', (e) => { e.stopPropagation(); S.menuOpen = !S.menuOpen; renderAttachMenu(); });
+      $('#attachPlus').addEventListener('click', (e) => {
+        e.stopPropagation(); S.menuOpen = !S.menuOpen;
+        if (S.aiOpen) { S.aiOpen = false; renderAiMenu(); }
+        renderAttachMenu();
+      });
       $('#attachImage').addEventListener('click', () => pickAttach('image'));
       el.querySelectorAll('#attachMenu button').forEach((b) => b.addEventListener('click', () => {
         if (b.dataset.a === 'file') return pickAttach('file');
@@ -1166,9 +1520,11 @@ function renderAttachMenu() {
   if (!menu) return;
   menu.hidden = !S.menuOpen;
   $('#attachPlus').classList.toggle('on', S.menuOpen);
+  placeDoc();
 }
 document.addEventListener('click', (e) => {
   if (S.menuOpen && !e.target.closest('#attachMenu')) { S.menuOpen = false; renderAttachMenu(); }
+  if (S.pickOpen && !e.target.closest('.pickwrap')) { closePick(); renderRail(); }
   if (S.aiOpen && !e.target.closest('#aiMenu')) { S.aiOpen = false; renderAiMenu(); }
 });
 
@@ -1224,6 +1580,30 @@ async function pickAttach(kind) {
   } catch (e) { showAlert(e.message); }
 }
 
+// ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): added like one
+// chosen with the picture button. Text pastes as text.
+async function pastePicture(e) {
+  const clip = e.clipboardData;
+  if (!clip || S.busy) return;
+  const picture = [...clip.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!picture && ![...clip.types].includes('Files')) return;
+  e.preventDefault();
+  const input = e.target;
+  const text = clip.getData('text/plain');
+  const id = S.sel;
+  S.pasting = true;                                // Enter waits: the picture goes with this message
+  try {
+    const r = await call('pastePicture');
+    if (S.sel !== id || S.busy) return;            // another meeting, or the message already went
+    const files = r.files || [];
+    for (const f of files) {
+      if (!S.attach.some((a) => a.path === f.path)) S.attach.push({ kind: 'image', path: f.path, name: f.name });
+    }
+    if (files.length) renderAttach();
+    else if (text) input.setRangeText(text, input.selectionStart, input.selectionEnd, 'end');   // text, or a file that is no picture
+  } catch (err) { showAlert(err.message); } finally { S.pasting = false; }
+}
+
 // the picked items and the sentence about them: one line each in 「八、補充資訊」
 async function sendAttach(text) {
   if (S.busy || !S.attach.length) return;
@@ -1257,22 +1637,44 @@ function renderLearned() {
   const top = $('#askTop');
   if (!top) return;
   const learned = S.learned;
+  const fresh = learned.length > S.learnShown;        // something new: the box comes back for it
+  if (fresh) S.learnHidden = false;
+  const kept = top.querySelector('.lrows');
+  const scroll = kept ? kept.scrollTop : 0;        // turning one row off keeps the list where it was
   top.innerHTML = `
     ${S.busy ? `<div class="busy">${ICON.spin}<span>${esc(S.busyText ? t(S.busyText) : t('ai_working', aiName()))}</span></div>` : ''}
     ${!S.busy && S.said ? `<div class="replyline${S.saidErr ? ' err' : ''}">${S.saidErr ? '' : ICON.done}
         <span class="asked">${esc(t('quote', S.askedQuick ? t(`quick_${S.askedQuick}`) : S.asked))}</span><span class="said">${esc(S.said)}</span>
         ${S.canUndo && !S.saidErr ? `<button class="btn ghost" id="undo" style="height:24px;padding:0 10px;font-size:12px">${esc(t('undo'))}</button>` : ''}</div>` : ''}
-    ${learned.length ? `<div class="learn"><div class="lh">${ICON.book}<span>${esc(t('learned_head', aiName()))}</span></div>
-        ${learned.map((l, i) => {
+    ${learned.length && !S.learnHidden ? `<div class="learn${S.learnOpen ? ' open' : ''}"><div class="lh">${ICON.book}<span>${esc(t('learned_head', aiName()))}</span>
+        ${learned.length > 2 ? `<span style="flex:1"></span><button class="btn ghost" id="learnMore" style="height:22px;padding:0 8px;font-size:11px">${esc(t(S.learnOpen ? 'collapse' : 'expand'))}</button>` : ''}</div>
+        <div class="lrows">${learned.map((l, i) => {
           const keep = l.kind !== 'once';
           const where = t(keep && l.off ? 'learn_off' : { term: 'learn_term', pref: 'learn_pref', style: 'learn_pref', once: 'learn_once' }[l.kind]);
           return `<div class="lr${keep && l.off ? ' off' : ''}"><span class="lt">${esc(l.text)}</span>
             <span class="tag${keep && !l.off ? '' : ' gray'}">${where}</span><span style="flex:1"></span>
             ${keep ? `<button class="btn ghost" data-i="${i}" style="height:22px;padding:0 8px;font-size:11px">${esc(t(l.off ? 'learn_on_btn' : 'learn_off_btn'))}</button>` : ''}</div>`;
-        }).join('')}</div>` : ''}`.trim();
+        }).join('')}</div></div>` : ''}`.trim();
+  const rows = top.querySelector('.lrows');
+  if (rows) rows.scrollTop = fresh ? rows.scrollHeight : scroll;   // something new: show it
+  S.learnShown = learned.length;
+  // the box shows what was just learned for 5 seconds, then goes (Vin 2026-10-18); not while the pointer is on it
+  // or it is expanded. 操作紀錄 keeps every line.
+  const box = top.querySelector('.learn');
+  const hideLater = () => {
+    clearTimeout(S.learnTimer);
+    S.learnTimer = setTimeout(() => { if (!S.learnOpen && !S.learnHover) { S.learnHidden = true; renderLearned(); } }, 5000);
+  };
+  if (fresh) hideLater();
+  if (box) {
+    box.addEventListener('mouseenter', () => { S.learnHover = true; clearTimeout(S.learnTimer); });
+    box.addEventListener('mouseleave', () => { S.learnHover = false; hideLater(); });
+  }
+  const more = $('#learnMore');
+  if (more) more.addEventListener('click', () => { S.learnOpen = !S.learnOpen; if (!S.learnOpen) hideLater(); renderLearned(); });
   const undo = $('#undo');
   if (undo) undo.addEventListener('click', undoLast);
-  top.querySelectorAll('.learn button').forEach((b) => b.addEventListener('click', () => toggleLearned(Number(b.dataset.i))));
+  top.querySelectorAll('.learn .lr button').forEach((b) => b.addEventListener('click', () => toggleLearned(Number(b.dataset.i))));
 }
 
 async function ask(text, quick) {
@@ -1350,16 +1752,14 @@ function renderFoot() {
         <button class="speed" id="pspeed" aria-label="${esc(t('speed_aria'))}">${p.speed}x</button>
         <button class="iconbtn" id="pclose" aria-label="${esc(t('close_rec'))}">${ICON.x}</button></div>` : ''}
     <div class="buttons">
-      ${d.sent ? `<div class="sentline">${ICON.done}<span>${t('sent_line', esc(d.sent.at), d.sent.count, esc(d.sent.format))}</span></div>` : ''}
       <span style="flex:1"></span>
       ${d.doc_url && !docs ? `<button class="btn ghost" id="openGdoc">${ICON.open}<span>${esc(t('open_in_docs'))}</span></button>` : ''}
-      ${d.mail && !d.sent ? `<button class="btn primary" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}
     </div>`;
+  el.hidden = !el.querySelector('button, .row');      // 發送信件 is at the top: nothing left here, no empty row
   el.querySelectorAll('.chip.red').forEach((b) => b.addEventListener('click', () => jumpTo(todo[Number(b.dataset.t)])));
   el.querySelectorAll('.okbtn').forEach((b) => b.addEventListener('click', () => confirmCheck(check[Number(b.dataset.c)])));
   const on = (sel, fn) => { const x = $(sel); if (x) x.addEventListener('click', fn); };
   on('#openGdoc', () => call('link', { url: d.doc_url }).catch(() => {}));
-  on('#mailBtn', openMail);
   on('#pp', () => audio(S.player.playing ? 'pause' : 'play', { at: S.player.pos }));
   on('#pspeed', () => audio('rate', { rate: S.player.speed === 1 ? 1.5 : S.player.speed === 1.5 ? 2 : 1 }));
   on('#pclose', () => audio('stop'));
@@ -1380,7 +1780,8 @@ async function confirmCheck(item) {
   } catch (e) { showAlert(e.message); }
 }
 
-function audio(action, args = {}) {
+function audio(action, args = {}, fromPeople = false) {
+  if (!fromPeople && action !== 'rate') { clearTimeout(S.peopleStop); S.peoplePlay = null; }   // ▶ 聽錄音's stop is off
   if (action === 'stop') { S.player.open = false; S.player.playing = false; renderFoot(); markPlaying(); }
   if (action === 'play') { S.player.open = true; }
   if (action === 'rate') { S.player.speed = args.rate; renderFoot(); }
@@ -1393,8 +1794,10 @@ window.onEvent = (name, data) => {
     S.recording = !!data.recording;
     renderVersion();
   }
-  if (name === 'jobs') { loadList().then(() => {
+  if (name === 'jobs') { openFirst().then((empty) => {
+    if (empty) return;
     const job = S.jobs.find((j) => j.id === S.sel);
+    if (S.d && job && S.d.status === 'working' && job.step !== S.d.step) return select(S.sel);   // recording → 轉成逐字稿 → …
     if (S.d && job && job.status !== S.d.status && !(S.d.status === 'ready' && job.status === 'sent')) select(S.sel);
   }); }
   if (name === 'select' && (data.id !== S.sel || !S.d)) select(data.id);
@@ -1448,6 +1851,7 @@ function setLang(lang) {
   if (S.sheet === 'setup') renderSetup();
   else if (S.sheet === 'mail') renderMail();
   else if (S.sheet === 'delete') renderDelete();
+  else if (S.sheet === 'project') renderProject();
   else if (S.sheet === 'transcript') {
     const v = $('#vinput');
     openTranscript({ ask: S.tAsk, typed: v ? v.value : '' });
@@ -1524,7 +1928,11 @@ function openTranscript(keep = {}) {
       d.transcript = r.transcript || d.transcript;
       d.voices = r.voices || d.voices;
       d.voice_names = r.voice_names || d.voice_names;
+      if (!oneLine) { if (r.people) d.people = r.people; afterEdit(r); }   // the minutes say the name now
+      const guess = oneLine ? null : (d.check || []).find((c) => c.speaker === ask.group);
       openTranscript({ toast: oneLine ? '' : t('voice_saved', name) });
+      if (guess) await confirmCheck(guess);          // named by hand: the guess about this voice is settled
+      else renderRail();
       refreshLog();
     } catch (e) { showAlert(e.message); }
   };
@@ -1633,7 +2041,7 @@ async function sendMail() {
     if (S.sel !== id) return;
     S.d.sent = r.sent;
     closeSheet();
-    renderFoot();
+    renderHead();
     loadList();
     refreshLog();
   } catch (e) {
@@ -1646,6 +2054,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.ctx) { closeCtx(); return; }
   if (e.key === 'Escape' && S.aiOpen) { S.aiOpen = false; renderAiMenu(); return; }
   if (e.key === 'Escape' && S.sheet === 'delete' && S.del && S.del.busy) return;
+  if (e.key === 'Escape' && S.sheet === 'project' && S.pset && S.pset.busy) return;
   if (e.key === 'Escape' && S.sheet && !(S.mail && S.mail.sending)) { closeSheet(); return; }
   if (e.key === 'Escape' && S.picking) { endPicking(); renderSide(); }
 });

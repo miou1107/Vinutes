@@ -19,8 +19,15 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
                                                    learns the user's own edits; the side panel's lists again
   minutes_app.py locate <job> <words>              how far down the Doc those words are ({"at": 0.0–1.0})
+  minutes_app.py note <job> <text>                 a paragraph at the end of 「八、補充資訊」, written by someone else
+                                                   than the user (an agent through mcp_server.py)
+  minutes_app.py replace <job> <old> <new>         the words `old`, which the minutes have exactly once, become `new`
   minutes_app.py speaker <job> <group> <name> [line]  the user named a voice (講者 A -> Alex), or one line's
   minutes_app.py archive <job> | unarchive <job>   封存: the list hides the meeting (shown under 已封存) or shows it again
+  minutes_app.py move <job> <project>             the meeting belongs to this project ('' = 未分類)
+  minutes_app.py tags <job> <tags JSON>            the meeting's tags, as the user left them
+  minutes_app.py rename_project <old> <new>        every meeting of a project, archived ones too, gets the new name;
+                                                   a name already in use puts the two projects together
   minutes_app.py delete <job>                      刪除: the Doc and the meeting's Drive folder (only its own files
                                                    when another meeting shares the folder) go to Google's trash;
                                                    answers {"trash": [...]}, the files beside the minutes, which the
@@ -41,6 +48,8 @@ Files in the job folder, next to what auto_minutes.py writes:
                     each page it saved; a save is compared with that, not with what the minutes became meanwhile
   操作紀錄.jsonl    the activity log, one JSON object per line: {"at", "who", "text", "kind"}
   封存.json         there when the meeting is archived: {"at"}
+  分類.json         the project and tags as the user set them: {"project", "tags", "dropped"}; without "project"
+                    the one Claude named in result.json counts. Never in result.json: the mail step rewrites that.
 What is learned goes to $MINUTES_HOME/glossary.md (words) and notes.md (wording), which the next minutes read.
 """
 from __future__ import annotations
@@ -117,9 +126,15 @@ def now() -> datetime:
     return datetime.now().astimezone()
 
 
-def me() -> str:
+def user_name() -> str:
     """How the log names the user: the sender name from settings.json, else the part of the address before @."""
     return sender_name() or (owner() or t('you')).split('@')[0]
+
+
+def me() -> str:
+    """Who is making this change: the user, or an agent working through the MCP server (mcp_server.py), which
+    sets VINUTES_ACTOR=Claude Code."""
+    return one_line(os.environ.get('VINUTES_ACTOR'), 30) or user_name()
 
 
 # --- one job ---------------------------------------------------------------------------------
@@ -311,7 +326,8 @@ def summary(job: Job) -> dict:
     return {'id': job.id, 'day': day_words(started), 'date': f'{started:%Y-%m-%d}', 'time': f'{started:%H:%M}',
             'started': started.isoformat(),
             'ended_time': ended,
-            'title': job.result.get('title') or '', 'project': (job.result.get('project') or '').strip(),
+            'title': job.result.get('title') or '', 'project': project_of(job),
+            'tags': tags_of(job), 'suggested': suggested_tags(job),
             'status': job.status_word(), 'step': job.status.get('step', ''), 'message': job.status.get('message', ''),
             'sent_at': job.result.get('sent_at') or '', 'sent_count': len((job.result.get('mail') or {}).get('to', [])),
             'sent_format': job.result.get('sent_format') or '',
@@ -322,6 +338,95 @@ def summary(job: Job) -> dict:
 
 def cmd_list():
     out({'jobs': [summary(j) for j in all_jobs()]})
+
+
+# --- project and tags --------------------------------------------------------------------------
+# Claude names the project when it writes the minutes and suggests a few tags (result.json); what the user sets in
+# the window goes to 分類.json, which only these commands write.
+
+SORTING = '分類.json'
+MAX_TAGS = 8
+
+
+def one_line(text, most: int) -> str:
+    return ' '.join(str(text or '').split())[:most].strip()
+
+
+def clean_tags(value) -> list[str]:
+    found = []
+    for item in value if isinstance(value, list) else []:
+        tag = one_line(item, 20) if isinstance(item, str) else ''
+        if tag and tag not in found:
+            found.append(tag)
+    return found
+
+
+def sorting(job: Job) -> dict:
+    return read_json(job.dir / SORTING)
+
+
+def project_of(job: Job) -> str:
+    mine = sorting(job)
+    return one_line(mine['project'] if isinstance(mine.get('project'), str) else job.result.get('project'), 30)
+
+
+def tags_of(job: Job) -> list[str]:
+    return clean_tags(sorting(job).get('tags'))[:MAX_TAGS]
+
+
+def suggested_tags(job: Job) -> list[str]:
+    """Claude's suggestions the user has not added or taken off again; none once the minutes went out."""
+    if job.result.get('sent_at'):
+        return []
+    mine = sorting(job)
+    skip = set(clean_tags(mine.get('tags'))) | set(clean_tags(mine.get('dropped')))
+    return [tag for tag in clean_tags(job.result.get('tag_suggestions')) if tag not in skip]
+
+
+def save_sorting(job: Job, **change):
+    """Read, change and write 分類.json as one step: the window and an agent (mcp_server.py) may both set it."""
+    import fcntl
+    with open(job.dir / '.sorting.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        write_json(job.dir / SORTING, {**sorting(job), **change})
+
+
+def cmd_move(job: Job, project: str):
+    save_sorting(job, project=one_line(project, 30))
+    out({'project': project_of(job)})
+
+
+def cmd_tags(job: Job, raw: str):
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        value = None
+    if not isinstance(value, list):
+        sys.exit(t('bad_tags'))
+    tags = clean_tags(value)[:MAX_TAGS]
+    offered = set(clean_tags(job.result.get('tag_suggestions')))
+    taken_off = [tag for tag in tags_of(job) if tag in offered and tag not in tags]
+    dropped = [tag for tag in clean_tags(sorting(job).get('dropped')) + taken_off if tag not in tags]
+    save_sorting(job, tags=tags, dropped=list(dict.fromkeys(dropped)))
+    out({'tags': tags_of(job), 'suggested': suggested_tags(job)})
+
+
+def cmd_rename_project(old: str, new: str):
+    old, new = one_line(old, 30), one_line(new, 30)
+    if not old or not new:
+        sys.exit(t('bad_project'))
+    moved = [job for job in all_jobs() if project_of(job) == old]
+    for job in moved:
+        save_sorting(job, project=new)
+    names = project_people(new)                       # the people go with the name; two projects become one list
+    for n in project_people(old):
+        names = add_name(names, n)
+    data = read_json(PROJECT_PEOPLE)
+    if old in data:
+        data.pop(old)
+        data[new] = names
+        write_json(PROJECT_PEOPLE, data)
+    out({'project': new, 'count': len(moved)})
 
 
 # --- archive and delete ------------------------------------------------------------------------
@@ -482,8 +587,201 @@ GUESS_EN = re.compile(r'[“"](.+?)[”"]\s*(?:is probably|probably means|is lik
                       r'\s*[“"]?([^“”",.]+?)[”"]?\.?\s*$', re.I)
 
 
+# 「講者 B 負責文章，可能是 Nina」: a guess about who a voice is, shown with that voice under 人員
+SPEAKER_GUESS, NOT_A_NAME, NOT_A_ROLE = speakers.SPEAKER_GUESS, speakers.NOT_A_NAME, speakers.NOT_A_ROLE
+ATTENDEES = re.compile(r'^[ \t]*(?:[*+-][ \t]+)?(?:\*\*)?(?:與會人員|出席人員|Attendees)[ \t]*(?:\*\*)?[ \t]*[：:]'
+                       r'[ \t]*(?:\*\*)?[ \t]*(?P<names>[^\n]*)$', re.M | re.I)   # one line, and **與會人員：** kept
+
+
+def attendees(md: str) -> list[str]:
+    """The names on the minutes' 與會人員 line, blanks left out."""
+    found = ATTENDEES.search(md or '')
+    if not found:
+        return []
+    names = [n.strip(' *') for n in re.split(r'[、，,；;]', found.group('names'))]
+    return [n for n in names if n and not n.startswith('[') and len(n) <= 30][:30]
+
+
+# --- 人員: who was at a meeting --------------------------------------------------------------------
+# A meeting's list starts from the people invited to it (the calendar, where ERP room bookings put their invitees),
+# the project's own list (everyone confirmed or added in its earlier meetings) and the names on the minutes'
+# 與會人員 line; voices that were given a name join it. What the user adds, confirms or takes off is kept in the
+# meeting's 人員.json and in the project's list (people.json, one list per project, Vin 2026-10-17); nobody leaves a
+# project's list by themselves.
+PROJECT_PEOPLE = CONFIG / 'people.json'
+MEETING_PEOPLE = '人員.json'
+
+
+def name_keys(name: str) -> set[str]:
+    """陳怡君（Jessie） -> {陳怡君（jessie）, 陳怡君, jessie}: the ways the same person is written in minutes."""
+    whole = name.strip().casefold()
+    keys = {whole}
+    found = re.match(r'^(.*?)\s*[（(]\s*(.*?)\s*[）)]\s*$', whole)
+    if found:
+        keys |= {k for k in found.groups() if k}
+    return keys
+
+
+def same_name(a: str, b: str) -> bool:
+    return bool(name_keys(a) & name_keys(b))
+
+
+def add_name(names: list[str], name: str) -> list[str]:
+    name = one_line(name, 30)
+    return names if not name or any(same_name(n, name) for n in names) else names + [name]
+
+
+def project_people(project: str) -> list[str]:
+    data = read_json(PROJECT_PEOPLE)
+    return [n for n in data.get(project) or [] if isinstance(n, str)] if project else []
+
+
+def save_project_people(project: str, names: list[str]):
+    if not project:
+        return
+    data = read_json(PROJECT_PEOPLE)
+    data[project] = names
+    write_json(PROJECT_PEOPLE, data)
+
+
+def invited(job: Job) -> list[str]:
+    """The people the meeting's calendar event invited (not the ones who said no): the name, else the address's
+    first part (leo@… -> Leo); this Mac's own account by the user's name."""
+    names = []
+    for g in read_json(job.dir / '行事曆.json').get('guests') or []:
+        if not isinstance(g, dict):
+            continue
+        name = (sender_name() or '') if g.get('self') else ''
+        name = name or g.get('name') or ''
+        local = (g.get('email') or '').split('@')[0]
+        if not name and local and not re.search(r'[\d_-]|team|group|room|info|service|admin|noreply|calendar', local, re.I):
+            name = ' '.join(w[:1].upper() + w[1:] for w in local.split('.') if w)
+        names = add_name(names, name)
+    return names
+
+
+def meeting_people(job: Job) -> list[str]:
+    data = read_json(job.dir / MEETING_PEOPLE)
+    if isinstance(data.get('people'), list):
+        names = [n for n in data['people'] if isinstance(n, str)]
+    else:                                             # first time: from the invitation, the project and the minutes
+        names = []
+        guests = invited(job)                         # who was invited comes first (Vin: 以當場會議邀請的人為主);
+        first = guests or project_people(project_of(job))   # with no invitation, the project's own list
+        for n in first + attendees(job.md if not job.missing else ''):
+            names = add_name(names, n)
+    for n in speakers_shown(job).values():          # a voice with a name was there
+        if n:
+            names = add_name(names, n)
+    return names
+
+
+def save_meeting_people(job: Job, names: list[str]):
+    data = read_json(job.dir / MEETING_PEOPLE)
+    data['people'] = names
+    write_json(job.dir / MEETING_PEOPLE, data)
+
+
+def speaker_map(job: Job) -> dict:
+    """{voice letter: name} the minutes already use: the AI's guess put in after the write-up, or the user's pick."""
+    found = read_json(job.dir / MEETING_PEOPLE).get('speakers')
+    return {g: n for g, n in found.items() if isinstance(n, str)} if isinstance(found, dict) else {}
+
+
+def save_speaker(job: Job, group: str, name: str):
+    data = read_json(job.dir / MEETING_PEOPLE)
+    data['speakers'] = {**speaker_map(job), group: name}
+    write_json(job.dir / MEETING_PEOPLE, data)
+
+
+def speakers_shown(job: Job) -> dict:
+    """Who each voice is, as its menu shows it: the name it was given, else the one the minutes use, else the AI's
+    guess (older minutes, written before guesses went in by themselves)."""
+    used, guess = speaker_map(job), speakers.guessed(job.result.get('check'))
+    return {v['group']: v['name'] or used.get(v['group']) or guess.get(v['group'], '') for v in voices_view(job)}
+
+
+def known_people() -> list[str]:
+    """The names offered while typing under 人員: every project's list and every voice Vinutes knows."""
+    names = []
+    for group in read_json(PROJECT_PEOPLE).values():
+        for n in group if isinstance(group, list) else []:
+            names = add_name(names, n) if isinstance(n, str) else names
+    for n in speakers.known_names():
+        names = add_name(names, n)
+    return names
+
+
+def with_people(job: Job, md: str, names: list[str]) -> str:
+    """The minutes with the 與會人員 line showing the meeting's list."""
+    found = ATTENDEES.search(md)
+    if found and names:
+        sep = ', ' if job.lang == 'en' else '、'
+        end = re.search(r'(?:\*\*)?[。.；;]?(?:\*\*)?\s*$', found.group('names')).group(0)   # its full stop and bold stay
+        md = md[:found.start('names')] + sep.join(names) + end + md[found.end('names'):]
+    return md
+
+
+def silent_people(job: Job) -> list[str]:
+    """The meeting's people that no voice in the recording is."""
+    shown = [n for n in speakers_shown(job).values() if n]
+    return [n for n in meeting_people(job) if not any(same_name(n, s) for s in shown)]
+
+
+def people_change(job: Job, names: list[str], renames=()) -> dict:
+    """Keep the list, then put it, and each voice's new name (group, the name it had, the new one), into the
+    minutes and the Doc."""
+    save_meeting_people(job, names)
+    result = fresh()
+    if job.md_path and not job.missing:
+        new_md = with_people(job, job.md, names)
+        others = names + known_people()
+        for group, before, after in renames:
+            new_md = speakers.name_voice(job.dir, new_md, group, before, after, others)
+        if new_md != job.md:
+            result = push_edit(job, new_md)
+    for group, _, after in renames:                   # the mail says it the same way
+        body = job.dir / '信件內文.txt'
+        if body.is_file() and not job.state.get('sent'):
+            text = body.read_text(encoding='utf-8')
+            if (named := speakers.letter(group).sub(lambda _: after, text)) != text:
+                body.write_text(named, encoding='utf-8')
+    return result
+
+
+def cmd_people(job: Job, action: str, name: str, group: str = ''):
+    """+ 加人 (add), ✕ (remove), or a guess about a voice the recording could not tell (add with its letter)."""
+    name = one_line(name, 30)
+    if not name:
+        sys.exit(t('people_no_name'))
+    project = project_of(job)
+    names = meeting_people(job)
+    renames = []
+    if action == 'add':
+        names = add_name(names, name)
+        save_project_people(project, add_name(project_people(project), name))
+        job.log(me(), t('log_people_add', name=name), 'speaker')
+    elif action == 'remove':
+        names = [n for n in names if not same_name(n, name)]
+        save_project_people(project, [n for n in project_people(project) if not same_name(n, name)])
+        for group, shown in speakers_shown(job).items():   # the voice with this name is a 講者 X again, in the minutes too
+            if shown and same_name(shown, name):
+                speakers.clear_name(job.dir, group)
+                renames.append((group, shown, f"{'Speaker' if job.lang == 'en' else '講者'} {group}"))
+        job.log(me(), t('log_people_remove', name=name), 'speaker')
+    else:
+        sys.exit(__doc__)
+    if action == 'add' and group:
+        renames.append((group, '', name))
+    result = people_change(job, names, renames)
+    answer(job, result, html=bool(result.get('reload')), people=meeting_people(job), voices=voices_view(job),
+           speakers=speakers_shown(job), silent=silent_people(job),
+           transcript=transcript(job), log=job.log_entries()[:200])
+
+
 def check_items(job: Job) -> list[dict]:
-    """Claude's guesses the user has not confirmed yet. Word guesses carry what was heard and what is meant."""
+    """Claude's guesses the user has not confirmed yet. Word guesses carry what was heard and what is meant; a
+    guess about a voice carries the voice (speaker), the name and what it said the person does (role)."""
     done = set(job.state.get('confirmed', []))
     plains = [] if job.missing or not job.md_path else [b.plain for b in doc_sync.parse(job.md)[1]]
     items = []
@@ -496,7 +794,13 @@ def check_items(job: Job) -> list[dict]:
             if m and len(m.group(2).strip()) <= 20:
                 heard, meant = m.group(1).strip(), m.group(2).strip()
         if text and text not in done:
-            items.append({'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)})
+            item = {'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)}
+            who = SPEAKER_GUESS.match(text)
+            name = who.group(3).strip() if who else ''
+            if who and 0 < len(name) <= 30 and not NOT_A_NAME.search(name):
+                role = re.sub(r'[（）()]', '', who.group(2)).strip(' ，,、:：')
+                item.update(speaker=who.group(1), who=name, role='' if len(role) > 12 or NOT_A_ROLE.search(role) else role)
+            items.append(item)
     return items
 
 
@@ -1358,7 +1662,9 @@ def answer(job: Job, result: dict, html: bool = False, **extra):
     md = job.md
     skipped = list(extra.pop('skipped', [])) + list(result.get('skipped', []))
     data = {'saved_at': f'{now():%H:%M}', 'conflicts': result['conflicts'], 'held': result['held'],
-            'warning': result['warning'], 'todo': todo_items(job, md), 'skipped': skipped, **extra}
+            'warning': result['warning'], 'todo': todo_items(job, md), 'attendees': attendees(md), 'skipped': skipped,
+            'people': meeting_people(job), 'speakers': speakers_shown(job), 'silent': silent_people(job),
+            'check': check_items(job), **extra}
     if result['reload'] or skipped or html:
         data['html'] = preview(md, result['marks'], current_anchors(job, md))
         data['shown'] = page_token(job, data['html'])
@@ -1465,6 +1771,56 @@ def cmd_attach(job: Job, note: str, raw: str):
     job.log(me(), t('log_attached', names=names))
     job.save_state()
     answer(job, result, html=True, reply=t('reply_attached', names=names), changed=False)
+
+
+# --- an agent changes the minutes (mcp_server.py) ------------------------------------------------
+# Claude Code asked by the user: the change goes in like the window's own, Doc and all, and the log names the agent.
+
+def agent_edit(job: Job, change) -> str:
+    """The minutes after `change(md)`, from the Doc as it is now; the user's own typing is learned first and the
+    agent's change is never learned as theirs."""
+    actor = os.environ.pop('VINUTES_ACTOR', None)     # what the user typed is logged as theirs, not the agent's
+    try:
+        cmd_learn(job, quiet=True)
+    finally:
+        if actor is not None:
+            os.environ['VINUTES_ACTOR'] = actor
+    if job.doc_id and not connect():
+        sync_up(job, user_name())                    # anything not sent yet is what the user typed
+        try:
+            pull(job)
+        except SystemExit:
+            pass
+    md = job.md
+    new = change(md)
+    relearn(job, md, new)
+    result = push_edit(job, new, who=me())
+    job.save_state()
+    out({'changed': new != md, 'held': bool(result.get('held')), 'warning': result.get('warning') or '',
+         'sent': bool(job.result.get('sent_at')), 'doc_url': job.result.get('doc_url') or ''})
+    return new
+
+
+def cmd_note(job: Job, text: str):
+    import attachments
+    text = text.strip()
+    if not text:
+        sys.exit(t('note_empty'))
+    line = '- ' + doc_sync.escape_lead(' '.join(text.split()))
+    agent_edit(job, lambda md: attachments.add_lines(md, [line], job.lang))
+    job.log(me(), t('log_noted', text=cut_words(text, 30)), 'note')
+
+
+def cmd_replace(job: Job, old: str, new: str):
+    if '\n' in new or '\n' in old:
+        sys.exit(t('replace_lines'))
+    def change(md: str) -> str:
+        found = md.count(old) if old else 0
+        if found != 1:
+            sys.exit(t('replace_missing') if not found else t('replace_many', n=found))
+        return md.replace(old, new)
+    agent_edit(job, change)
+    job.log(me(), t('log_replaced', old=cut_words(old, 20), new=cut_words(new, 20)), 'edit')
 
 
 # --- Claude changes the minutes --------------------------------------------------------------
@@ -1697,14 +2053,32 @@ def voices_view(job: Job) -> list[dict]:
 
 def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     """The user named a voice in the transcript: every line of it, or one line."""
+    before = (next((v['name'] for v in voices_view(job) if v['group'] == group), '')
+              or speaker_map(job).get(group, ''))       # the name the minutes use for this voice now
     speakers.set_name(job.dir, group, name, int(line) if line.isdigit() else None)
     who = name.strip()[:30]
     lines = transcript(job)
     what = ((t('speaker_line_at', at=lines[int(line)]['at']) if int(line) < len(lines) else t('speaker_a_line'))
             if line.isdigit() else f'{t("speaker")} {group}')
     job.log(me(), t('log_speaker', what=what, who=who), 'speaker')
-    out({'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
-         'remembered': who})
+    extra = {'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
+             'remembered': who}
+    if line.isdigit():                                # one line: only the transcript
+        return out(extra)
+    project = project_of(job)                        # the whole voice: the person was there, the minutes say so
+    names = meeting_people(job)
+    if before and not same_name(before, who):         # the voice had another name: that one goes, in the minutes too
+        names = [n for n in names if not same_name(n, before)]
+    names = add_name(names, who)
+    save_speaker(job, group, who)
+    save_project_people(project, add_name(project_people(project), who))
+    settled = [c['label'] for c in check_items(job) if c.get('speaker') == group]   # the guess about it is answered
+    if settled:
+        job.state.setdefault('confirmed', []).extend(settled)
+        job.save_state()
+    result = people_change(job, names, [(group, before, who)])
+    answer(job, result, html=bool(result.get('reload')), people=meeting_people(job), speakers=speakers_shown(job),
+           silent=silent_people(job), **extra)
 
 
 def finished_body(body: str) -> str:
@@ -1732,9 +2106,9 @@ def mail_defaults(job: Job) -> dict | None:
 
 def neighbours(job: Job) -> dict:
     """The same meeting before and after: same title in the same project."""
-    title, project = job.result.get('title') or '', (job.result.get('project') or '').strip()
+    title, project = job.result.get('title') or '', project_of(job)
     series = [j for j in all_jobs() if j.status_word() in ('ready', 'sent') and (j.result.get('title') or '') == title
-              and (j.result.get('project') or '').strip() == project and (j.archived == job.archived or j.id == job.id)]
+              and project_of(j) == project and (j.archived == job.archived or j.id == job.id)]
     ids = [j.id for j in series]
     at = ids.index(job.id) if job.id in ids else -1
     prev = series[at + 1] if 0 <= at < len(series) - 1 else None
@@ -1756,6 +2130,8 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
                      'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
             'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
+            'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(),
+            'speakers': speakers_shown(job), 'silent': silent_people(job),
             'attach_files': len(linked_files(job, md)), **ai_choice(),
             'audio': str(audio) if audio.is_file() else '',
             'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file(), 'minutes_lang': job.lang,
@@ -1854,6 +2230,8 @@ def cmd_refresh(job: Job):
     job.save_state()
     md = '' if job.missing else job.md
     out({'todo': todo_items(job, md) if md else [], 'check': check_items(job), 'learned': learned,
+         'attendees': attendees(md), 'people': meeting_people(job), 'speakers': speakers_shown(job),
+         'silent': silent_people(job),
          'log': job.log_entries()[:200], 'warning': warning,
          'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()})
 
@@ -1880,8 +2258,9 @@ def cmd_locate(job: Job, words: str):
 
 
 TURN: list = []
-CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh'}
-NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo'}
+CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
+           'people', 'speaker', 'note', 'replace'}
+NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace'}
 
 
 def wait_for_turn(job: Job):
@@ -1889,7 +2268,7 @@ def wait_for_turn(job: Job):
     import fcntl
     import time
     lock = open(job.dir / '.app.lock', 'w')
-    deadline = time.time() + 15 * 60
+    deadline = time.time() + (0 if os.environ.get('VINUTES_NO_WAIT') else 15 * 60)   # an agent asks again later
     while True:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1923,6 +2302,8 @@ def main():
         return cmd_version(argv[1] if len(argv) > 1 else '')
     if cmd == 'update':
         return cmd_update()
+    if cmd == 'rename_project' and len(argv) == 3:  # every meeting of the project, not one job
+        return cmd_rename_project(argv[1], argv[2])
     if len(argv) < 2:
         sys.exit(__doc__)
     job = Job(Path(argv[1]))
@@ -1931,6 +2312,10 @@ def main():
         return cmd_locate(job, ' '.join(rest).strip())
     if cmd in ('archive', 'unarchive'):              # only a marker file: no turn to wait for either
         return cmd_archive(job, cmd == 'archive')
+    if cmd == 'move' and len(rest) == 1:              # only 分類.json, which nothing else writes
+        return cmd_move(job, rest[0])
+    if cmd == 'tags' and len(rest) == 1:
+        return cmd_tags(job, rest[0])
     if cmd == 'refresh':                             # asked every few seconds: never queue behind a Claude rewrite
         lock = try_turn(job)
         if not lock:
@@ -1970,6 +2355,12 @@ def main():
         cmd_confirm(job, ' '.join(rest))
     elif cmd == 'attach' and len(rest) >= 2:
         cmd_attach(job, rest[0], rest[1])
+    elif cmd == 'people' and len(rest) >= 2:
+        cmd_people(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
+    elif cmd == 'note' and rest:
+        cmd_note(job, ' '.join(rest))
+    elif cmd == 'replace' and len(rest) == 2:
+        cmd_replace(job, rest[0], rest[1])
     elif cmd == 'speaker' and len(rest) >= 2:
         cmd_speaker(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
     elif cmd == 'delete':
@@ -1979,8 +2370,9 @@ def main():
 
 
 if __name__ == '__main__':
+    import vlog
     try:
-        main()
+        vlog.run(main)
     except subprocess.TimeoutExpired:
         sys.exit(t('timeout'))
     except Exception as err:                         # the window shows the last line; a traceback means nothing there

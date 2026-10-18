@@ -21,6 +21,7 @@ from pathlib import Path
 os.environ['VINUTES_LANG'] = 'zh-TW'
 HOME = tempfile.mkdtemp(prefix='minutes-test-')
 os.environ['MINUTES_HOME'] = HOME                  # nothing here touches the real settings, glossary or notes
+os.environ['VINUTES_LOG_DIR'] = os.path.join(HOME, 'logs')   # nor the real logs
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
 import doc_sync as ds  # noqa: E402
 import minutes_app  # noqa: E402
@@ -1990,6 +1991,387 @@ class Languages(unittest.TestCase):
                                                 'Amy 的簡報', 'zh-TW')[0])
 
 
+class ProjectTags(Flows):
+    """The list groups meetings by project (Claude names it, the user can change it) and tags (Claude suggests some,
+    only the ones the user adds stay); what the user changes is kept in 分類.json, never in result.json."""
+
+    def setUp(self):
+        super().setUp()
+        self.others = []
+        self.saved_all = minutes_app.all_jobs
+        minutes_app.all_jobs = lambda: [self.job(), *[minutes_app.Job(d) for d in self.others]]
+
+    def tearDown(self):
+        minutes_app.all_jobs = self.saved_all
+        super().tearDown()
+
+    def result(self, **more):
+        result = json.loads((self.job_dir / 'result.json').read_text())
+        result.update(more)
+        (self.job_dir / 'result.json').write_text(json.dumps(result))
+
+    def meeting(self, stamp, project, archived=False):
+        folder = self.root / stamp
+        folder.mkdir()
+        (folder / 'job.json').write_text(json.dumps({'started': f'{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T10:30:00+08:00'}))
+        (folder / 'status.json').write_text(json.dumps({'step': 'done'}))
+        (folder / 'result.json').write_text(json.dumps({'title': '週會', 'project': project,
+                                                        'minutes_md': str(self.md_path)}))
+        if archived:
+            (folder / '封存.json').write_text('{}')
+        self.others.append(folder)
+        return folder
+
+    def test_the_project_claude_named_shows_until_the_user_moves_the_meeting(self):
+        self.result(project='新品上市')
+        self.assertEqual(minutes_app.summary(self.job())['project'], '新品上市')
+        before = (self.job_dir / 'result.json').read_text()
+        minutes_app.cmd_move(self.job(), '  悠遊卡 ')
+        self.assertEqual(minutes_app.summary(self.job())['project'], '悠遊卡')
+        self.assertEqual((self.job_dir / 'result.json').read_text(), before)    # the mail step may be rewriting it
+        minutes_app.cmd_move(self.job(), '')
+        self.assertEqual(minutes_app.summary(self.job())['project'], '')       # 未分類
+
+    def test_a_project_name_is_one_line_of_at_most_30_characters(self):
+        minutes_app.cmd_move(self.job(), '台北\n捷運   合作' + '案' * 40)
+        name = minutes_app.summary(self.job())['project']
+        self.assertTrue(name.startswith('台北 捷運 合作'))
+        self.assertEqual(len(name), 30)
+
+    def test_renaming_a_project_renames_it_on_every_meeting_archived_ones_too(self):
+        self.result(project='新品上市')
+        self.meeting('20261007-103000', '新品上市', archived=True)
+        self.meeting('20261008-103000', '悠遊卡')
+        minutes_app.cmd_rename_project('新品上市', '新品上市一期')
+        projects = {j.id: minutes_app.summary(j)['project'] for j in minutes_app.all_jobs()}
+        self.assertEqual(projects, {'20261014-103000': '新品上市一期', '20261007-103000': '新品上市一期',
+                                    '20261008-103000': '悠遊卡'})
+        self.assertEqual(self.outs[-1], {'project': '新品上市一期', 'count': 2})
+
+    def test_renaming_to_a_name_already_in_use_puts_the_two_projects_together(self):
+        self.result(project='新品上市專案')
+        self.meeting('20261008-103000', '新品上市')
+        minutes_app.cmd_rename_project('新品上市專案', '新品上市')
+        self.assertEqual({minutes_app.summary(j)['project'] for j in minutes_app.all_jobs()}, {'新品上市'})
+
+    def test_a_project_is_not_renamed_to_nothing(self):
+        self.result(project='新品上市')
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_rename_project('新品上市', '   ')
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_rename_project('', '悠遊卡')               # 未分類 is not a project
+        self.assertEqual(minutes_app.summary(self.job())['project'], '新品上市')
+
+    def test_previous_and_next_follow_the_project_the_user_set(self):
+        self.result(project='官網改版')
+        older = self.meeting('20261007-103000', '新品上市')
+        self.assertEqual(minutes_app.neighbours(self.job())['prev'], '')
+        minutes_app.cmd_move(self.job(), '新品上市')
+        self.assertEqual(minutes_app.neighbours(self.job())['prev'], older.name)
+
+    def test_tags_are_trimmed_one_each_and_at_most_eight(self):
+        minutes_app.cmd_tags(self.job(), json.dumps([' 對外 ', '對外', '', '月會', 'x' * 40, *map(str, range(10))]))
+        tags = minutes_app.summary(self.job())['tags']
+        self.assertEqual(tags[:3], ['對外', '月會', 'x' * 20])
+        self.assertEqual(len(tags), 8)
+        self.assertEqual(self.outs[-1]['tags'], tags)
+
+    def test_claude_s_suggestions_show_until_added_and_one_removed_later_does_not_come_back(self):
+        self.result(tag_suggestions=['對外', '月會'])
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], ['對外', '月會'])
+        minutes_app.cmd_tags(self.job(), json.dumps(['對外']))
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], ['月會'])
+        minutes_app.cmd_tags(self.job(), json.dumps([]))
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], ['月會'])
+
+    def test_suggestions_are_gone_once_the_minutes_are_sent(self):
+        self.result(tag_suggestions=['對外'], sent_at='2026-10-14T12:00:00')
+        self.assertEqual(minutes_app.summary(self.job())['suggested'], [])
+
+    def test_bad_tags_change_nothing(self):
+        minutes_app.cmd_tags(self.job(), json.dumps(['對外']))
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_tags(self.job(), '{"not": "a list"}')
+        self.assertEqual(minutes_app.summary(self.job())['tags'], ['對外'])
+
+    def test_claude_s_next_minutes_see_the_names_the_user_chose(self):
+        import auto_minutes
+        self.result(project='新品上市專案')
+        minutes_app.cmd_move(self.job(), '新品上市')
+        minutes_app.cmd_tags(self.job(), json.dumps(['對外']))
+        self.assertEqual(auto_minutes.sorted_as(self.job_dir, json.loads((self.job_dir / 'result.json').read_text())),
+                         ('新品上市', ['對外']))
+
+    def test_claude_s_result_keeps_up_to_three_short_tag_suggestions(self):
+        import auto_minutes
+        work = self.root / 'work'
+        work.mkdir()
+        (work / auto_minutes.DRAFT).write_text(MINUTES, encoding='utf-8')
+        (work / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'project': '新品上市',
+                                                      'tags': ['對外', ' 月會 ', '對外', 'y' * 30, '內部']}))
+        saved = auto_minutes.minutes_path
+        auto_minutes.minutes_path = lambda folder, meta, title, lang: self.md_path
+        try:
+            result = auto_minutes.check_result(work, {}, self.root)
+        finally:
+            auto_minutes.minutes_path = saved
+        self.assertEqual(result['tag_suggestions'], ['對外', '月會', 'y' * 20])
+
+
+class CalendarPick(unittest.TestCase):
+    """workspace.pick_meeting: which calendar event a recording was. Only events on the user's own calendar that
+    they have not declined count as theirs; the company calendar's rooms are only offered as maybes."""
+
+    def ev(self, title, start, end, primary=True, me='accepted', uid=None):
+        day = '2026-10-07'
+        event = {'summary': title, 'iCalUID': uid or title, 'start': {'dateTime': f'{day}T{start}:00+08:00'},
+                 'end': {'dateTime': f'{day}T{end}:00+08:00'}, 'organizer': {'self': True}}
+        if me:
+            event['attendees'] = [{'email': 'vincent@example.com', 'self': True, 'responseStatus': me},
+                                  {'email': 'amy@example.com', 'responseStatus': 'accepted'}]
+        return {'ev': event, 'primary': primary, 'cal': 'vincent@example.com' if primary else '範例公司'}
+
+    def pick(self, found, start='15:31', end='16:15'):
+        import workspace
+        day = '2026-10-07'
+        return workspace.pick_meeting(found, datetime.fromisoformat(f'{day}T{start}:00+08:00'),
+                                      datetime.fromisoformat(f'{day}T{end}:00+08:00'))
+
+    def test_a_room_booking_the_user_is_not_on_is_never_the_meeting(self):
+        got = self.pick([self.ev('(會議室A)FunTOUR月會', '15:30', '17:00', primary=False, me=None),
+                         self.ev('(會議室B)好好玩網站討論', '14:00', '15:00')])
+        self.assertIsNone(got['match'])
+        self.assertEqual([o['ev']['summary'] for o in got['others']], ['(會議室A)FunTOUR月會'])
+
+    def test_the_users_own_meeting_that_overlaps_most_wins(self):
+        got = self.pick([self.ev('短會', '15:00', '15:40'), self.ev('新品上市討論', '15:30', '16:30'),
+                         self.ev('(會議室A)FunTOUR月會', '15:30', '17:00', primary=False, me=None)])
+        self.assertEqual(got['match']['ev']['summary'], '新品上市討論')
+
+    def test_a_declined_meeting_does_not_count(self):
+        got = self.pick([self.ev('新品上市討論', '15:30', '16:30', me='declined')])
+        self.assertIsNone(got['match'])
+
+    def test_the_same_event_on_two_calendars_counts_once_as_the_users(self):
+        got = self.pick([self.ev('(會議室B)新品上市討論', '15:30', '16:30', primary=False, me=None, uid='x1'),
+                         self.ev('(會議室B)新品上市討論', '15:30', '16:30', me='needsAction', uid='x1')])
+        self.assertEqual(got['match']['ev']['summary'], '(會議室B)新品上市討論')
+        self.assertEqual(got['others'], [])
+
+    def test_a_meeting_that_ended_before_the_recording_is_listed_as_earlier_not_picked(self):
+        got = self.pick([self.ev('(會議室B)好好玩網站討論', '14:00', '15:00')])
+        self.assertIsNone(got['match'])
+        self.assertEqual([e['ev']['summary'] for e in got['earlier']], ['(會議室B)好好玩網站討論'])
+
+    def test_five_minutes_of_overlap_is_not_enough(self):
+        got = self.pick([self.ev('前一場', '15:00', '15:34')])
+        self.assertIsNone(got['match'])
+
+    def test_a_long_block_in_the_diary_does_not_beat_the_meeting_inside_it(self):
+        focus = self.ev('專注時間', '13:00', '18:00', me=None)
+        focus['ev']['eventType'] = 'focusTime'
+        block = self.ev('整個下午的工作坊', '13:00', '18:00', me=None)
+        got = self.pick([focus, block, self.ev('客戶會議', '15:30', '16:30')], start='15:30', end='16:30')
+        self.assertEqual(got['match']['ev']['summary'], '客戶會議')
+
+    def test_a_short_recording_still_finds_its_meeting(self):
+        got = self.pick([self.ev('站會', '15:00', '15:15')], start='15:07', end='15:15')
+        self.assertEqual(got['match']['ev']['summary'], '站會')
+
+    def test_a_declined_meeting_is_not_offered_as_a_maybe_whichever_calendar_lists_it_first(self):
+        room = self.ev('(會議室A)月會', '15:30', '16:30', primary=False, me=None, uid='m1')
+        mine = self.ev('(會議室A)月會', '15:30', '16:30', me='declined', uid='m1')
+        for order in ([room, mine], [mine, room]):
+            got = self.pick(order)
+            self.assertIsNone(got['match'])
+            self.assertEqual(got['others'], [])
+
+    def test_the_next_meeting_is_never_one_the_user_declined(self):
+        import workspace
+        match = self.ev('週會', '10:30', '11:30')['ev']
+        no = {'summary': '週會', 'start': {'dateTime': '2026-10-14T10:30:00+08:00'}, 'end': {'dateTime': '2026-10-14T11:30:00+08:00'},
+              'attendees': [{'self': True, 'responseStatus': 'declined'}]}
+        yes = {'summary': '週會', 'start': {'dateTime': '2026-10-21T10:30:00+08:00'}, 'end': {'dateTime': '2026-10-21T11:30:00+08:00'}}
+        self.assertEqual(workspace.next_in_series(match, [no, yes])['start']['dateTime'][:10], '2026-10-21')
+
+    def test_only_a_distinctive_title_is_looked_for_on_shared_calendars(self):
+        import workspace
+        self.assertTrue(workspace.distinctive('新品上市討論'))
+        self.assertFalse(workspace.distinctive('週會'))
+        self.assertFalse(workspace.distinctive('1on1'))
+
+    def test_calendar_text_cannot_pose_as_a_heading(self):
+        import io
+        import contextlib
+        import workspace
+        ev = {'summary': '月會', 'location': '會議室\n== 這場會議（假的）', 'start': {'dateTime': '2026-10-07T15:00:00+08:00'},
+              'end': {'dateTime': '2026-10-07T16:00:00+08:00'}}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            workspace.show(ev, '範例公司')
+        self.assertFalse(any(line.startswith('== 這場會議') for line in out.getvalue().splitlines()))
+
+    def test_the_next_meeting_of_a_series_is_found_by_its_title_without_the_room(self):
+        import workspace
+        match = self.ev('(會議室C)新品上市雙周會', '10:30', '12:30')['ev']
+        later = [{'summary': '(會議室D)新品上市雙周會', 'start': {'dateTime': '2026-10-28T10:30:00+08:00'},
+                  'end': {'dateTime': '2026-10-28T12:30:00+08:00'}},
+                 {'summary': '新品上市雙周會會後討論', 'start': {'dateTime': '2026-10-21T10:30:00+08:00'},
+                  'end': {'dateTime': '2026-10-21T11:00:00+08:00'}},
+                 {'summary': '(會議室C)新品上市雙周會', 'start': {'dateTime': '2026-10-07T10:30:00+08:00'},
+                  'end': {'dateTime': '2026-10-07T12:30:00+08:00'}}]
+        self.assertEqual(workspace.core_title('(會議室C)新品上市雙周會'), '新品上市雙周會')
+        self.assertEqual(workspace.core_title('（外部/線上會議） 台史博需求討論'), '台史博需求討論')
+        self.assertEqual(workspace.next_in_series(match, later)['start']['dateTime'][:10], '2026-10-28')
+
+    def test_the_same_recurring_event_is_the_series_whatever_its_title(self):
+        import workspace
+        match = {'summary': 'Weekly', 'recurringEventId': 'r1', 'end': {'dateTime': '2026-10-07T11:00:00+08:00'}}
+        later = [{'summary': 'Weekly (moved)', 'recurringEventId': 'r1', 'start': {'dateTime': '2026-10-14T11:00:00+08:00'},
+                  'end': {'dateTime': '2026-10-14T12:00:00+08:00'}}]
+        self.assertEqual(workspace.next_in_series(match, later)['summary'], 'Weekly (moved)')
+
+
+class CalendarForTheAgent(unittest.TestCase):
+    """auto_minutes.read_calendar: what the agent reads in 行事曆.txt, and the pick kept for the next recording."""
+
+    def setUp(self):
+        import auto_minutes
+        self.am = auto_minutes
+        self.root = Path(tempfile.mkdtemp(prefix='cal-'))
+        self.saved = auto_minutes.script
+
+    def tearDown(self):
+        self.am.script = self.saved
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def answer(self, out, code=0):
+        self.am.script = lambda *a, **k: subprocess.CompletedProcess(a, code, out, 'HTTP 401' if code else '')
+
+    def test_the_pick_is_kept_and_earlier_meetings_of_the_series_are_listed(self):
+        old = self.root / '20261001-103000'
+        old.mkdir()
+        (old / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '新品上市雙周會', 'project': '新品上市'}))
+        (old / '行事曆.json').write_text(json.dumps({'series': '新品上市雙周會'}))
+        (old / '分類.json').write_text(json.dumps({'project': '新品上市一期'}, ensure_ascii=False))
+        job = self.root / '20261014-103500'
+        job.mkdir()
+        self.answer('== 這場會議（…）\n== 10:30–12:30 (會議室C)新品上市雙周會  [範例公司]\n'
+                    'MATCH {"title": "(會議室C)新品上市雙周會", "series": "新品上市雙周會", "recurring": "", "start": ""}\n')
+        text = self.am.read_calendar(job, {'started': '2026-10-14T10:35:00+08:00', 'ended': '2026-10-14T12:20:00+08:00'})
+        self.assertNotIn('MATCH', text)
+        self.assertIn('2026-10-01 新品上市雙周會　專案：新品上市一期', text)    # the project the user chose
+        self.assertEqual(json.loads((job / '行事曆.json').read_text())['series'], '新品上市雙周會')
+
+    def test_a_recording_written_up_again_does_not_learn_from_later_meetings(self):
+        later = self.root / '20261021-103000'
+        later.mkdir()
+        (later / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'project': '別的專案'}, ensure_ascii=False))
+        (later / '行事曆.json').write_text(json.dumps({'series': '週會'}, ensure_ascii=False))
+        job = self.root / '20261014-103500'
+        job.mkdir()
+        self.answer('== 這場會議\nMATCH {"title": "週會", "series": "週會", "recurring": "", "start": ""}\n')
+        self.assertNotIn('別的專案', self.am.read_calendar(job, {'started': '2026-10-14T10:35:00+08:00'}))
+
+    def test_a_recurring_event_is_matched_by_its_series_not_by_a_common_title(self):
+        other = self.root / '20261007-103000'
+        other.mkdir()
+        (other / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'project': 'A 專案'}, ensure_ascii=False))
+        (other / '行事曆.json').write_text(json.dumps({'series': '週會', 'recurring': 'rA'}))
+        job = self.root / '20261014-103500'
+        job.mkdir()
+        self.answer('== 這場會議\nMATCH {"title": "週會", "series": "週會", "recurring": "rB", "start": ""}\n')
+        self.assertNotIn('A 專案', self.am.read_calendar(job, {'started': '2026-10-14T10:35:00+08:00'}))
+
+    def test_no_match_leaves_nothing_to_follow(self):
+        job = self.root / '20261007-153111'
+        job.mkdir()
+        self.answer('== 這場會議：行事曆上沒有…\nMATCH {"title": "", "series": "", "recurring": "", "start": ""}\n')
+        text = self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00', 'ended': ''})
+        self.assertNotIn('同一系列之前', text)
+        self.assertEqual(json.loads((job / '行事曆.json').read_text())['series'], '')
+
+    def test_a_calendar_that_cannot_be_read_says_so(self):
+        job = self.root / '20261007-153111'
+        job.mkdir()
+        self.answer('', code=1)
+        self.assertTrue(self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00'}).startswith('（讀不到行事曆'))
+
+
+class ScriptLog(unittest.TestCase):
+    """vlog: every script run is two lines in scripts.log, never the user's words, and the file stays bounded."""
+
+    def setUp(self):
+        import vlog
+        self.vlog = vlog
+        self.dir = Path(tempfile.mkdtemp(prefix='logs-'))
+        os.environ['VINUTES_LOG_DIR'] = str(self.dir)
+        self.argv = sys.argv
+        sys.argv = ['/x/minutes_app.py', 'ask', '/r/recordings/20261017-153005', 'make Alex Wang the chair']
+
+    def tearDown(self):
+        sys.argv = self.argv
+        os.environ['VINUTES_LOG_DIR'] = os.path.join(HOME, 'logs')
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def text(self):
+        return (self.dir / 'scripts.log').read_text(encoding='utf-8')
+
+    def test_a_run_logs_its_command_and_meeting_but_not_what_the_user_typed(self):
+        self.vlog.run(lambda: None)
+        self.assertIn('minutes_app[', self.text())
+        self.assertIn('start ask 20261017-153005', self.text())
+        self.assertIn('end ok', self.text())
+        self.assertNotIn('Alex Wang', self.text())
+
+    def test_a_failure_logs_its_message_and_a_crash_its_traceback(self):
+        with self.assertRaises(SystemExit):
+            self.vlog.run(lambda: sys.exit('Google did not answer. Please try again.'))
+        self.assertIn('end failed', self.text())
+        self.assertIn('Google did not answer', self.text())
+
+        def boom():
+            raise ValueError('bad page')
+        with self.assertRaises(ValueError):
+            self.vlog.run(boom)
+        self.assertIn('end crashed', self.text())
+        self.assertIn('ValueError: bad page', self.text())
+
+    def test_an_address_in_a_message_never_reaches_the_log(self):
+        with self.assertRaises(SystemExit):
+            self.vlog.run(lambda: sys.exit('STOP: give plain addresses only: Alex <alex.wang@example.com>'))
+        self.assertNotIn('alex.wang@example.com', self.text())
+        self.assertIn('<address>', self.text())
+
+    def test_an_empty_message_does_not_break_the_script(self):
+        with self.assertRaises(SystemExit) as stop:           # the script's own exit, not an IndexError from the log
+            self.vlog.run(lambda: sys.exit(''))
+        self.assertEqual(stop.exception.code, '')
+        self.assertIn('end failed', self.text())
+
+    def test_what_the_window_asks_every_few_seconds_is_logged_only_when_it_fails(self):
+        sys.argv = ['/x/minutes_app.py', 'refresh', '/r/recordings/20261017-153005']
+        self.vlog.run(lambda: None)
+        self.assertFalse((self.dir / 'scripts.log').exists())
+        with self.assertRaises(SystemExit):
+            self.vlog.run(lambda: sys.exit('Google did not answer.'))
+        self.assertIn('end failed', self.text())
+        self.assertIn('refresh 20261017-153005', self.text())
+
+    def test_the_log_turns_over_past_its_limit_and_keeps_one_older_file(self):
+        saved = self.vlog.LIMIT
+        self.vlog.LIMIT = 200
+        try:
+            for i in range(40):
+                self.vlog.log(f'line {i}')
+        finally:
+            self.vlog.LIMIT = saved
+        files = sorted(p.name for p in self.dir.iterdir())
+        self.assertEqual(files, ['scripts.log', 'scripts.log.1'])
+        self.assertLess((self.dir / 'scripts.log').stat().st_size, 400)
+        self.assertIn('line 39', self.text())
+
+
 class MeetingLanguage(unittest.TestCase):
     """transcribe.detect: which language the meeting was held in, by majority of three stretches."""
 
@@ -2007,3 +2389,433 @@ class MeetingLanguage(unittest.TestCase):
 
     def test_cantonese_counts_as_chinese(self):
         self.assertEqual(self.detect('yue', 'en', 'zh'), 'zh')
+
+
+class UsageLimit(unittest.TestCase):
+    """An AI that has used up its limit says when it is back, in the app's language (auto_minutes.limit_until)."""
+    NOW = datetime(2026, 10, 17, 22, 46)
+
+    def tearDown(self):
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+
+    def until(self, text, lang='zh-TW'):
+        import auto_minutes
+        os.environ['VINUTES_LANG'] = lang
+        return auto_minutes.limit_until(text, self.NOW)
+
+    def test_claude_weekly_limit_is_tomorrow_noon(self):
+        self.assertEqual(self.until("You've hit your weekly limit · resets 12pm (Asia/Taipei)"), '明天中午 12 點')
+        self.assertEqual(self.until("You've hit your weekly limit · resets 12pm (Asia/Taipei)", 'en'), 'tomorrow at 12 pm')
+
+    def test_a_later_hour_today_and_minutes(self):
+        self.assertEqual(self.until("You've hit your limit · resets 11:30pm"), '今天晚上 11 點 30 分')
+
+    def test_a_date_and_the_small_hours(self):
+        self.assertEqual(self.until("You've hit your weekly limit · resets Oct 20, 9am"), '10/20 上午 9 點')
+        self.assertEqual(self.until("You've hit your usage limit · resets 3am"), '明天凌晨 3 點')
+
+    def test_other_wordings(self):
+        self.assertEqual(self.until('5-hour limit reached ∙ resets 2am'), '明天凌晨 2 點')
+        self.assertEqual(self.until('Your limit will reset at 5pm'), '明天下午 5 點')
+        self.assertEqual(self.until("You've hit your weekly limit · resets Feb 29, 9am"), '')   # 2026 has no Feb 29
+
+    def test_no_time_no_words(self):
+        self.assertEqual(self.until('Claude AI usage limit reached'), '')
+        self.assertEqual(self.until('something else went wrong'), '')
+
+    def test_the_message_the_user_sees(self):
+        import auto_minutes
+        os.environ['VINUTES_LANG'] = 'zh-TW'
+        said = auto_minutes.friendly("You've hit your weekly limit · resets 12pm (Asia/Taipei)", 'DEFAULT')
+        self.assertIn('才會恢復，可以先換用其他 AI', said)
+        self.assertNotEqual(auto_minutes.friendly('Claude AI usage limit reached', 'DEFAULT'), 'DEFAULT')
+
+
+class People(unittest.TestCase):
+    """人員: a guess about who a voice is goes with that voice; the names on the 與會人員 line are listed."""
+
+    def test_a_guess_about_a_voice_keeps_the_voice_the_name_and_the_role(self):
+        g = minutes_app.SPEAKER_GUESS.match('講者 B 負責文章，可能是 Nina')
+        self.assertEqual((g.group(1), g.group(2).strip(' ，,、:：'), g.group(3)), ('B', '負責文章', 'Nina'))
+        self.assertEqual(minutes_app.SPEAKER_GUESS.match('講者 A 推測是 Vin').group(3), 'Vin')
+        self.assertEqual(minutes_app.SPEAKER_GUESS.match('Speaker C is probably Ming.').group(3), 'Ming')
+
+    def test_no_single_name_no_person(self):
+        for text in ('講者 B 與講者 C 可能是同一人', '講者 B 可能是 Nina 或 Mia', '講者 A 可能是主持人'):
+            g = minutes_app.SPEAKER_GUESS.match(text)
+            self.assertTrue(g is None or minutes_app.NOT_A_NAME.search(g.group(3)), text)
+        self.assertIsNone(minutes_app.SPEAKER_GUESS.match('Speakers A and B are probably Ming'))
+
+    def test_a_guess_about_a_word_is_no_person(self):
+        self.assertIsNone(minutes_app.SPEAKER_GUESS.match('「HOWAN PASS」推測是台灣 PASS'))
+        self.assertIsNone(minutes_app.SPEAKER_GUESS.match('第四項產品聽不出（方圖）'))
+
+    def test_the_attendees_line_without_blanks(self):
+        self.assertEqual(minutes_app.attendees('* 主持人：Vin\n* 與會人員：Vin、Mia、雅婷\n'), ['Vin', 'Mia', '雅婷'])
+        self.assertEqual(minutes_app.attendees('* 與會人員：Vin、[請補姓名]'), ['Vin'])
+        self.assertEqual(minutes_app.attendees('* Attendees: Jessie Chen, Ming Wang'), ['Jessie Chen', 'Ming Wang'])
+        self.assertEqual(minutes_app.attendees('沒有這一行'), [])
+
+
+class MeetingPeople(unittest.TestCase):
+    """人員: a meeting's list starts from the invitation, the project and the minutes; adding, naming a voice and
+    taking someone off go into the minutes' 與會人員 line and the project's list at once (Vin 2026-10-17)."""
+
+    job = Flows.job
+
+    def setUp(self):
+        Flows.setUp(self)
+        (self.job_dir / '逐字稿.txt').write_text('', encoding='utf-8')
+        self.md_path.write_text(MINUTES.replace('會中說明：', '講者 B 說明：'), encoding='utf-8')
+        for name in ('同步基準.md', '學習基準.md'):
+            (self.job_dir / name).write_text(self.md_path.read_text(encoding='utf-8'), encoding='utf-8')
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['project'] = '週會專案'
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [
+            {'name': '', 'email': 'leo@example.com', 'self': False},
+            {'name': 'Amy', 'email': 'amy@example.com', 'self': False}]}))
+        (self.job_dir / '講者.json').write_text(json.dumps({'groups': {
+            'A': {'name': '', 'seconds': 300, 'sample': [1, 5]}, 'B': {'name': '', 'seconds': 200, 'sample': [9, 12]}},
+            'lines': [], 'fixed': {}}, ensure_ascii=False))
+        minutes_app.PROJECT_PEOPLE.unlink(missing_ok=True)
+        ds.push = lambda doc_id, base, new: (ds.Plan([{'x': 1}], [], []), fake_doc(new), True)
+
+    def tearDown(self):
+        minutes_app.PROJECT_PEOPLE.unlink(missing_ok=True)
+        Flows.tearDown(self)
+
+    def test_the_list_starts_from_the_invitation_and_the_minutes(self):
+        minutes_app.save_project_people('週會專案', ['Lily', 'amy'])
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Leo', 'Amy', 'Ken'])   # 以當場會議邀請的人為主
+
+    def test_with_no_invitation_the_project_list_comes_in(self):
+        (self.job_dir / '行事曆.json').write_text('{}')
+        minutes_app.save_project_people('週會專案', ['Lily', 'amy'])
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Lily', 'amy', 'Ken'])
+
+    def test_group_addresses_are_no_people(self):
+        (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [{'email': 'rd-team@example.com'},
+                                                                          {'email': 'room3@example.com'}]}))
+        self.assertEqual(minutes_app.invited(self.job()), [])
+
+    def test_the_attendees_line_stays_on_its_line(self):
+        job = self.job()
+        self.assertEqual(minutes_app.with_people(job, '* 與會人員：\n* 會議資料：[x](u)\n', ['Amy']),
+                         '* 與會人員：Amy\n* 會議資料：[x](u)\n')
+        self.assertEqual(minutes_app.with_people(job, '* **與會人員：** Vin\n', ['Vin', 'Amy']), '* **與會人員：** Vin、Amy\n')
+        self.assertEqual(minutes_app.with_people(job, '**與會人員：Vin**\n', ['Vin', 'Amy']), '**與會人員：Vin、Amy**\n')
+        self.assertEqual(minutes_app.with_people(job, '與會人員：Vin。\n', ['Vin', 'Amy']), '與會人員：Vin、Amy。\n')
+        self.assertTrue(minutes_app.same_name('陳怡君（Jessie）', 'jessie'))
+
+    def test_renaming_a_named_voice_swaps_the_name_in_the_minutes(self):
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        minutes_app.cmd_speaker(self.job(), 'B', 'Nina')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('Nina 說明：', md)
+        self.assertIn('與會人員：Leo、Amy、Ken、Nina', md)
+
+    def test_adding_someone_writes_the_attendees_line_and_the_project_list(self):
+        minutes_app.cmd_people(self.job(), 'add', 'Sammi')
+        self.assertIn('與會人員：Leo、Amy、Ken、Sammi', self.md_path.read_text(encoding='utf-8'))
+        self.assertEqual(minutes_app.project_people('週會專案'), ['Sammi'])
+
+    def test_naming_a_voice_replaces_its_letter_and_joins_the_list(self):
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('Mia 說明：', md)
+        self.assertNotIn('講者 B', md)
+        self.assertIn('與會人員：Leo、Amy、Ken、Mia', md)
+        self.assertEqual(minutes_app.project_people('週會專案'), ['Mia'])
+
+    def test_taking_someone_off_leaves_the_project_list_and_frees_their_voice(self):
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        minutes_app.cmd_people(self.job(), 'remove', 'mia')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('與會人員：Leo、Amy、Ken\n', md)
+        self.assertEqual(minutes_app.project_people('週會專案'), [])
+        self.assertEqual([v['name'] for v in minutes_app.voices_view(self.job())], ['', ''])
+        self.assertNotIn('Mia', minutes_app.meeting_people(self.job()))   # she doesn't come back by herself
+        self.assertEqual(minutes_app.speakers_shown(self.job())['B'], '')
+
+    def test_someone_who_spoke_is_not_listed_as_silent_under_another_spelling(self):
+        minutes_app.save_meeting_people(self.job(), ['Jessie', 'Amy'])
+        minutes_app.cmd_speaker(self.job(), 'B', '陳怡君（Jessie）')
+        self.assertEqual(minutes_app.silent_people(self.job()), ['Amy'])
+
+    def test_a_renamed_project_keeps_its_people(self):
+        minutes_app.save_project_people('週會專案', ['Amy'])
+        minutes_app.save_project_people('新名字', ['Ken'])
+        minutes_app.cmd_rename_project('週會專案', '新名字')
+        self.assertEqual(minutes_app.project_people('新名字'), ['Ken', 'Amy'])
+        self.assertEqual(minutes_app.project_people('週會專案'), [])
+
+
+class SpeakerPick(unittest.TestCase):
+    """人員: each voice's menu starts on the AI's guess, which the minutes already use; picking someone else swaps
+    the name in the minutes, remembers the voice, and settles the guess (Vin 2026-10-17)."""
+    job = Flows.job
+
+    def setUp(self):
+        MeetingPeople.setUp(self)
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '講者 B 負責文章，可能是 Nina'}, {'text': '「HOWAN PASS」推測是台灣 PASS'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+
+    def tearDown(self):
+        MeetingPeople.tearDown(self)
+
+    def test_the_guess_goes_into_the_minutes_after_the_write_up(self):
+        import speakers
+        md = speakers.guesses_into(self.job_dir, self.md_path.read_text(encoding='utf-8'), self.job().result['check'])
+        self.assertIn('Nina 說明：', md)
+        self.assertEqual(minutes_app.speakers_shown(self.job()), {'A': '', 'B': 'Nina'})
+        self.assertEqual([v['name'] for v in minutes_app.voices_view(self.job())], ['', ''])   # not remembered
+
+    def test_picking_someone_else_swaps_the_name_and_settles_the_guess(self):
+        import speakers
+        self.md_path.write_text(speakers.guesses_into(self.job_dir, self.md_path.read_text(encoding='utf-8'),
+                                                      self.job().result['check']), encoding='utf-8')
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('Mia 說明：', md)
+        self.assertNotIn('Nina', md)
+        self.assertEqual(minutes_app.speakers_shown(self.job())['B'], 'Mia')
+        self.assertEqual([c['label'] for c in minutes_app.check_items(self.job())], ['「HOWAN PASS」推測是台灣 PASS'])
+
+    def written(self):
+        import speakers
+        self.md_path.write_text(speakers.guesses_into(self.job_dir, self.md_path.read_text(encoding='utf-8'),
+                                                      self.job().result['check']), encoding='utf-8')
+
+    def test_only_the_voices_own_places_change(self):
+        md = self.md_path.read_text(encoding='utf-8').replace('講者 B 說明：', '講者 B 說明：報價由 Nina 負責。')
+        self.md_path.write_text(md, encoding='utf-8')
+        self.written()
+        self.assertIn('Nina 說明：報價由 Nina 負責。', self.md_path.read_text(encoding='utf-8'))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        self.assertIn('Mia 說明：報價由 Nina 負責。', self.md_path.read_text(encoding='utf-8'))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Lily')        # and again, from the name given last
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        self.assertIn('Mia 說明：報價由 Nina 負責。', self.md_path.read_text(encoding='utf-8'))
+
+    def test_two_voices_guessed_as_the_same_person_keep_their_letters(self):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '講者 A 主持，可能是 Nina'}, {'text': '講者 B 負責文章，可能是 Nina'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        self.written()
+        self.assertIn('講者 B 說明：', self.md_path.read_text(encoding='utf-8'))
+
+    def test_a_name_inside_a_longer_name_stays(self):
+        import speakers
+        md = speakers.name_voice(self.job_dir, '陳怡君說明。怡君補充。', 'B', '怡君', 'Amy', ['陳怡君'])
+        self.assertEqual(md, '陳怡君說明。Amy補充。')
+        self.assertEqual(speakers.name_voice(self.job_dir, 'Vincent 與 Vin', 'C', 'Vin', 'Ken'), 'Vincent 與 Ken')
+
+    def test_the_mail_names_the_voice_too(self):
+        (self.job_dir / '信件內文.txt').write_text('講者 B 會再寄報價。', encoding='utf-8')
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        self.assertEqual((self.job_dir / '信件內文.txt').read_text(encoding='utf-8'), 'Mia 會再寄報價。')
+
+
+class McpServer(unittest.TestCase):
+    """Claude Code reads and changes meetings through mcp_server.py (issue #4): every meeting from any folder,
+    archived ones only by name; writing goes through minutes_app's own commands and is logged as Claude Code."""
+
+    job = Flows.job
+
+    def setUp(self):
+        Flows.setUp(self)
+        import mcp_server
+        self.mcp = mcp_server
+        self.saved_recordings = minutes_app.RECORDINGS
+        minutes_app.RECORDINGS = self.root
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r.pop('doc_url')                              # no Google here: the change stays in the file
+        r['project'] = '週會專案'
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        (self.job_dir / '逐字稿.txt').write_text('[00:05] 報價下週由 Ken 寄出\n[01:10] 好\n', encoding='utf-8')
+
+    def tearDown(self):
+        minutes_app.RECORDINGS = self.saved_recordings
+        Flows.tearDown(self)
+
+    def ask(self, tool, **args):
+        reply = self.mcp.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                                 'params': {'name': tool, 'arguments': args}})['result']
+        text = reply['content'][0]['text']
+        return (text, True) if reply.get('isError') else (json.loads(text), False)
+
+    def test_the_tools_and_which_ones_write(self):
+        tools = self.mcp.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'})['result']['tools']
+        writes = {t['name'] for t in tools if not t['annotations']['readOnlyHint']}
+        self.assertEqual(writes, {'name_speaker', 'add_note', 'replace_text', 'set_tags', 'set_project'})
+        self.assertFalse([t['name'] for t in tools if re.search(r'delete|send|mail', t['name'])])
+        init = self.mcp.handle({'jsonrpc': '2.0', 'id': 0, 'method': 'initialize',
+                                'params': {'protocolVersion': '2025-06-18'}})['result']
+        self.assertEqual(init['protocolVersion'], '2025-06-18')
+        self.assertIsNone(self.mcp.handle({'jsonrpc': '2.0', 'method': 'notifications/initialized'}))
+
+    def test_search_finds_the_minutes_and_what_was_said(self):
+        found, err = self.ask('search_meetings', query='預算 10')
+        self.assertFalse(err)
+        self.assertEqual(found['meetings'][0]['meeting'], '20261014-103000')
+        self.assertTrue(all('預算' in m['text'] for m in found['meetings'][0]['matches']))
+        said, _ = self.ask('search_meetings', query='報價 Ken')
+        self.assertEqual(said['meetings'][0]['matches'][0], {'source': 'transcript', 'at': '00:05',
+                                                              'text': '報價下週由 Ken 寄出'})
+        none, _ = self.ask('search_meetings', query='預算', project='別的專案')
+        self.assertEqual(none['meetings'], [])
+
+    def test_an_archived_meeting_only_when_asked_for(self):
+        (self.job_dir / '封存.json').write_text('{}')
+        self.assertEqual(self.ask('list_meetings')[0]['meetings'], [])
+        self.assertEqual(len(self.ask('list_meetings', include_archived=True)[0]['meetings']), 1)
+        self.assertIn('預算 10 萬元', self.ask('get_minutes', meeting='20261014-103000')[0]['minutes'])
+
+    def test_a_meeting_that_does_not_exist(self):
+        said, err = self.ask('get_minutes', meeting='../../etc')
+        self.assertTrue(err)
+        self.assertIn('list_meetings', said)
+
+    def test_replacing_words_changes_the_minutes_once_and_logs_claude_code(self):
+        done, err = self.ask('replace_text', meeting='20261014-103000', old='預算確定為 10 萬元', new='預算確定為 12 萬元')
+        self.assertFalse(err, done)
+        self.assertIn('預算確定為 12 萬元', self.md_path.read_text(encoding='utf-8'))
+        self.assertEqual(self.job().log_entries()[0]['who'], 'Claude Code')
+        again, err = self.ask('replace_text', meeting='20261014-103000', old='預算確定為 10 萬元', new='x')
+        self.assertTrue(err)
+        self.assertIn('紀錄裡沒有這段文字', again)
+        many, err = self.ask('replace_text', meeting='20261014-103000', old='Ken', new='Kenny')
+        self.assertTrue(err)
+        self.assertIn('出現 2 次', many)
+
+    def test_a_note_goes_into_section_eight(self):
+        done, err = self.ask('add_note', meeting='20261014-103000', text='報價確定為每人 1,200 元。')
+        self.assertFalse(err, done)
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertRegex(md, r'## 八、補充資訊\n\n- 報價確定為每人 1,200 元。\n$')
+
+    def test_minutes_already_mailed_say_so(self):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['sent_at'] = '2026-10-14T12:00:00+08:00'
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        done, _ = self.ask('add_note', meeting='20261014-103000', text='補一句。')
+        self.assertTrue(done['sent'])
+        self.assertTrue(any('without a new mail' in n for n in done['notes']))
+
+    def test_nothing_changes_while_the_minutes_are_being_written(self):
+        (self.job_dir / 'status.json').write_text(json.dumps({'step': 'transcribe'}))
+        said, err = self.ask('set_tags', meeting='20261014-103000', tags=['報價'])
+        self.assertTrue(err)
+        self.assertIn('written up', said)
+        self.assertEqual(minutes_app.tags_of(self.job()), [])
+
+    def test_tags_and_project(self):
+        self.ask('set_tags', meeting='20261014-103000', tags=['報價', '報價', 'KOL'])
+        self.assertEqual(minutes_app.tags_of(self.job()), ['報價', 'KOL'])
+        self.assertEqual(self.ask('set_project', meeting='20261014-103000', project='新專案')[0]['project'], '新專案')
+
+    def test_name_speaker_names_the_voice(self):
+        (self.job_dir / '講者.json').write_text(json.dumps({'groups': {
+            'A': {'name': '', 'seconds': 300, 'sample': [1, 5]}, 'B': {'name': '', 'seconds': 200, 'sample': [9, 12]}},
+            'lines': ['A', 'B'], 'fixed': {}}, ensure_ascii=False))
+        done, err = self.ask('name_speaker', meeting='20261014-103000', speaker='講者 B', name='Mia')
+        self.assertFalse(err, done)
+        self.assertEqual(self.ask('get_transcript', meeting='20261014-103000')[0]['lines'][1], '[01:10] Mia：好')
+        nobody, err = self.ask('name_speaker', meeting='20261014-103000', speaker='C', name='Ken')
+        self.assertTrue(err)
+
+    def test_a_meeting_busy_with_something_else_answers_at_once(self):
+        import fcntl
+        import time
+        with open(self.job_dir / '.app.lock', 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            began = time.time()
+            said, err = self.ask('add_note', meeting='20261014-103000', text='補一句。')
+        self.assertTrue(err)
+        self.assertIn('別的動作', said)
+        self.assertLess(time.time() - began, 10)
+
+    def test_the_server_only_writes_json_and_survives_a_bad_message(self):
+        lines = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}},
+                 {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': ['x']},
+                 {'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call', 'params': {'name': 'nope'}},
+                 {'jsonrpc': '2.0', 'id': 4, 'method': 'tools/list'}]
+        done = subprocess.run([sys.executable, str(Path(minutes_app.__file__).with_name('mcp_server.py'))],
+                              input='\n'.join(json.dumps(m) for m in lines) + '\nnot json\n', capture_output=True,
+                              text=True, timeout=60, env={**os.environ, 'MINUTES_HOME': HOME})
+        replies = [json.loads(line) for line in done.stdout.splitlines()]
+        self.assertEqual([r.get('id') for r in replies], [1, 2, 3, 4, None])
+        self.assertEqual(replies[2]['error']['code'], -32602)
+        self.assertEqual(replies[4]['error']['code'], -32700)
+        self.assertIn('tools', replies[3]['result'])
+
+
+class AgentEdit(Flows):
+    """An agent's change through minutes_app (note, replace) goes to the Google Doc too, and what the user typed
+    before it is still logged as the user's."""
+
+    def test_the_doc_gets_the_change_and_each_one_is_logged_by_who_made_it(self):
+        sent = []
+        ds.push = lambda doc_id, base, new: (sent.append(new), (ds.Plan([{'x': 1}], [], []), fake_doc(new), True))[1]
+        saved_connect = minutes_app.connect
+        minutes_app.connect = lambda: 'OFFLINE'      # nothing to pull: the push is what is checked
+        self.md_path.write_text(MINUTES.replace('主要來自三篇文章', '主要來自四篇文章'), encoding='utf-8')
+        os.environ['VINUTES_ACTOR'] = 'Claude Code'
+        try:
+            minutes_app.cmd_replace(self.job(), '預算確定為 10 萬元', '預算確定為 12 萬元')
+        finally:
+            os.environ.pop('VINUTES_ACTOR', None)
+            minutes_app.connect = saved_connect
+        self.assertIn('預算確定為 12 萬元', sent[-1])
+        who = {e['text']: e['who'] for e in self.job().log_entries()}
+        self.assertEqual(who[next(t for t in who if '12 萬元' in t)], 'Claude Code')
+        self.assertNotEqual(who[next(t for t in who if '四' in t)], 'Claude Code')     # the user's own typing
+
+    def test_a_replacement_over_two_lines_is_refused(self):
+        with self.assertRaises(SystemExit) as stop:
+            minutes_app.cmd_replace(self.job(), '預算確定為 10 萬元', '預算\n## 新章節')
+        self.assertIn('不能有換行', str(stop.exception.code))
+
+
+class ConnectAgents(unittest.TestCase):
+    """install.sh connects Vinutes to the AI tools that keep their servers in a JSON file without touching the rest."""
+
+    def setUp(self):
+        import connect_agents
+        self.ca = connect_agents
+        self.root = Path(tempfile.mkdtemp(prefix='agents-'))
+        self.file = self.root / 'mcp.json'
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_added_once_and_the_other_servers_kept(self):
+        self.file.write_text(json.dumps({'mcpServers': {'ownmind': {'command': 'node'}}, 'theme': 'dark'}))
+        self.assertIn('connected', self.ca.json_tool('Cursor', self.root, self.file, False))
+        self.assertEqual(self.ca.json_tool('Cursor', self.root, self.file, False), 'Cursor: already connected')
+        data = json.loads(self.file.read_text())
+        self.assertEqual(data['theme'], 'dark')
+        self.assertEqual(set(data['mcpServers']), {'ownmind', 'vinutes'})
+        self.assertTrue(data['mcpServers']['vinutes']['args'][0].endswith('mcp_server.py'))
+        self.ca.json_tool('Cursor', self.root, self.file, True)
+        self.assertEqual(set(json.loads(self.file.read_text())['mcpServers']), {'ownmind'})
+
+    def test_an_empty_file_or_none(self):
+        self.file.write_text('')
+        self.assertIn('connected', self.ca.json_tool('Antigravity', self.root, self.file, False))
+        self.assertIn('vinutes', json.loads(self.file.read_text())['mcpServers'])
+
+    def test_a_tool_not_installed_or_a_broken_file_is_left_alone(self):
+        self.assertEqual(self.ca.json_tool('Cursor', self.root / 'none', self.root / 'none' / 'mcp.json', False),
+                         'Cursor: not installed')
+        self.file.write_text('{ not json')
+        self.assertIn('left alone', self.ca.json_tool('Cursor', self.root, self.file, False))
+        self.assertEqual(self.file.read_text(), '{ not json')
+
+    def test_the_file_keeps_its_permissions(self):
+        self.file.write_text('{}')
+        os.chmod(self.file, 0o640)
+        self.ca.json_tool('Cursor', self.root, self.file, False)
+        self.assertEqual(os.stat(self.file).st_mode & 0o777, 0o640)

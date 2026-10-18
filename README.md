@@ -18,6 +18,22 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Files meetings by project and tag.** Each meeting belongs to a project and can carry tags. Pick a tag in the list to see only the meetings that have it.
 - **Keeps the list tidy.** Archive the meetings you no longer need to see, or delete them: the recording, transcript and minutes go to the Trash, and the Google Doc to Google Drive's trash. Select several at once, or right-click one.
 
+## What it looks like
+
+**The menu bar.** Click the microphone at the top of the screen to open this panel. The red button starts a recording; while it runs, the same button stops it. The last three meetings open from here too.
+
+![The panel under the menu-bar icon, before and while recording](docs/screenshots/menu-panel.png)
+
+**The meeting window.** Every meeting and its minutes are here. To change the minutes, tell Claude what to change in the box at the bottom.
+
+![The meeting window with a meeting's minutes](docs/screenshots/meeting-window.png)
+
+**The floating bar.** While recording, a small bar shows how long the recording has run, with Pause and Stop. Press CC to show live captions under it (macOS 26 and later).
+
+![The floating bar with live captions](docs/screenshots/floating-bar.png)
+
+The meetings in these pictures are made up.
+
 ## Languages
 
 **The app** follows your Mac's language: Traditional Chinese if Chinese comes first in System Settings > Language & Region, English otherwise. Pick English or Traditional Chinese under Settings > App Language in the menu bar, or at the top of the setup checklist; Same as Mac goes back to following the Mac.

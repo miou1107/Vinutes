@@ -19,15 +19,24 @@ The prompt gives you the job folder (written `job` below), the recording's start
    win over this guide, except that mails are never sent without the user and external minutes never keep internal
    discussion), `公司詞彙表.md` and `glossary.md` (known mis-hearings and correct names), `example-minutes-en.md`,
    and `使用者設定.json` (`owner` is the user's own address, `our_company` is the user's company name).
-2. Find the meeting: in `job/行事曆.txt`, pick the event whose time covers the recording's start (30 minutes either
-   side); if several, the one starting closest. Take its name, place, attendees and attachment names. When nothing
-   matches, name the meeting from the transcript and leave the attendees as `[__]`.
+2. Find the meeting: the program has already picked it in `job/行事曆.txt` (its headings are in Chinese).
+   - 「這場會議」: the event the user is invited to that overlaps the recording most. Take its name, place, attendees
+     and attachment names.
+   - 「同一系列的下一次會議」: the next meeting of the same series; fill `next_meeting` from its date and time, unless
+     the meeting clearly moved it (e.g. "next time on Nov 4"), then from the transcript.
+   - 「同一時段公司行事曆上的其他會議」: events the user is not invited to that only overlap in time (mostly rooms
+     booked by others). Use one only if the transcript is plainly about its subject; overlapping time is not enough.
+   - 「今天稍早你參加過的會議」: for a discussion that ran on after a meeting, its attendees can be reused.
+   - 「同一系列之前整理過的會議」: copy the meeting name and project from it.
+   When the calendar has no such meeting, name it from the transcript, leave the attendees as `[__]`, and fill
+   `next_meeting` only from what the transcript says clearly.
    Then read `job/參考/最近的會議.json` (earlier meetings' names and projects): the same meeting (e.g. a fortnightly
    review) keeps exactly the same name and project; the app finds "previous meeting" and "next meeting" by them.
 3. Write the minutes from `job/逐字稿.txt` following the sections below and save them as `job/紀錄.md`. For background
    use only `job/參考/舊紀錄/` (earlier minutes) and the calendar.
-4. Prepare the mail: recipients are the calendar's attendees on the user's own company domain, plus the user; when
-   the calendar lists nobody, only the user. Write the text in the tone of a short note to colleagues, with the line
+4. Prepare the mail: recipients are the attendees in the 「這場會議」 section on the user's own company domain, plus
+   the user; when no meeting matched or it lists nobody, only the user. People in the other sections are not
+   recipients. Write the text in the tone of a short note to colleagues, with the line
    `The minutes are ready:` and on the next line, alone, `{doc_url}`; the program puts the Doc's address there, and
    when the user sends a Word or PDF file instead it turns those two lines into "The minutes are ready; please see
    the attached file." Save it as `job/信件內文.txt`. Do not sign it unless `使用者設定.json` has a `sender_name`.
@@ -36,7 +45,7 @@ The prompt gives you the job folder (written `job` below), the recording's start
 
    ```json
    {"status": "ok", "title": "Website redesign kickoff", "when": "Wed, Oct 15, 14:00–15:00",
-    "place": "Room 3A, or [__] if unknown", "project": "Website", "next_meeting": "Wed, Oct 29, 14:00",
+    "place": "Room 3A, or [__] if unknown", "project": "Website", "tags": ["External"], "next_meeting": "Wed, Oct 29, 14:00",
     "mail": {"to": ["a@example.com", "the user's own address"], "subject": "Minutes: Website redesign kickoff (Oct 15)"},
     "todo": [{"label": "Chair", "line": "Chair:"}, {"label": "Budget", "line": "Campaign rollout"}],
     "check": [{"text": "Speaker B is probably Amy Chen", "heard": "", "meant": ""},
@@ -48,6 +57,10 @@ The prompt gives you the job folder (written `job` below), the recording's start
      name already in `最近的會議.json`; otherwise make one of 1–4 words from the meeting name, the calendar title or
      the case name that keeps coming up, without words like "weekly", "sync", "meeting", "review"
      (e.g. "Website redesign weekly" → "Website redesign"). Write "" only when no project can be told.
+   - `tags`: up to 3 tags to suggest for this meeting, 1–2 words each, or `[]`. Good ones are the kind of meeting
+     (External, Internal, Monthly) and other projects the meeting also covered besides its main one. Reuse tags
+     already in `最近的會議.json` rather than a new word for the same thing, and do not repeat `project`. They are
+     only suggestions: a tag is on the meeting once the user adds it in the window.
    - `next_meeting`: the next meeting's time if the minutes give one, else "".
    - `todo`: one item per `[__]` in the minutes. `label` is a field name of 1–3 words; `line` is a short piece of the
      original text on the same line (or table row) as that `[__]`, apart from the `[__]` itself; the app uses it to

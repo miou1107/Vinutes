@@ -1,2 +1,4 @@
 /* What macOS shows when Vinutes first asks for the microphone. */
 "NSMicrophoneUsageDescription" = "Vinutes records the meeting so it can write up the minutes.";
+/* What macOS shows when Vinutes first asks to record the sound the Mac plays. */
+"NSAudioCaptureUsageDescription" = "Vinutes also records what the other side says in an online meeting.";

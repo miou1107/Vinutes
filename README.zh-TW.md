@@ -6,7 +6,7 @@ Vinutes 是 Mac 選單列上的錄音程式。開會時按一下就開始錄音�
 
 ## 它能做什麼
 
-- **從選單列錄音**：按一下或按 ⌃⌥R 開始，開會途中可以暫停、繼續。
+- **從選單列錄音**：按一下或按 ⌃⌥R 開始，開會途中可以暫停、繼續。開線上會議時，戴著耳機也會錄到對方說的話（需要 macOS 14.2 以上）。
 - **在你的 Mac 上轉逐字稿**：語音辨識用 Whisper 在本機執行，錄音不會上傳。
 - **分辨講者**：依聲音分出不同的人，你取過的名字下次會記得。
 - **用你已經在用的 AI 寫紀錄**：Claude Code、Codex 或 Antigravity 都可以。AI 只能讀寫這場會議的資料夾。
@@ -48,6 +48,16 @@ git clone https://github.com/miou1107/Vinutes ~/Vinutes
 ```
 
 第一次安裝會下載語音模型（約 1.6 GB），需要等一段時間。裝好之後，選單列會出現麥克風圖示。打開會議視窗，照環境設定自檢清單完成一次設定。
+
+## 在 Claude Code 和其他 AI 工具裡查會議
+
+Vinutes 也可以當 MCP 伺服器用。安裝或更新 Vinutes 時，會自動接上你 Mac 上的 AI 工具：Claude Code、Codex、Gemini CLI、Claude 桌面版、Antigravity 和 Cursor。後面三個要重新開一次才看得到會議。之後才裝的 AI 工具，執行這一行就能接上：
+
+```bash
+~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/connect_agents.py
+```
+
+之後不管在哪個資料夾，問 Claude Code（或其他接上的工具）「上週的專案會議決定了什麼」，Claude 會自己去翻會議記錄和逐字稿，回答時附上是哪一天、哪一場會議。你請它改的時候，它也可以幫講者填名字、在「八、補充資訊」補一段、修改紀錄裡的文字、加標籤或換專案。Google 文件會一起更新，操作紀錄會寫是 Claude Code 改的。刪除會議和寄信，還是只能在 Vinutes 裡按。
 
 ## 怎麼更新
 

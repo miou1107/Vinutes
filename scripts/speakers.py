@@ -314,6 +314,148 @@ def set_name(job: Path, group_key: str, name: str, line: int | None = None) -> d
     return data
 
 
+# 「講者 B 負責文章，可能是 Nina」: what the minutes AI guessed about a voice (shown under 人員 in the window)
+SPEAKER_GUESS = re.compile(r'^\s*(?:講者|Speaker)\s*((?-i:[A-Z]))(?![A-Za-z])\s*(.*?)\s*(?:推測是|推測為|應該是|可能是|is probably|'
+                           r'is likely|probably|may be)\s*[「“"]?([^「」“”"，。,;；]+?)[」”"]?[。.]?\s*$', re.I)
+NOT_A_NAME = re.compile(r'或|與|和|同一|講者|主持|與會|\b(?:and|or|same|host|speaker)\b', re.I)
+NOT_A_ROLE = re.compile(r'從|根據|聽|看|依|\b(?:from|based|judging)\b', re.I)
+
+
+def guessed(check) -> dict:
+    """{voice letter: name} from the minutes AI's 待確認 lines; one name per voice, the first guess."""
+    found = {}
+    for raw in check or []:
+        text = raw.get('text', '') if isinstance(raw, dict) else str(raw)
+        m = SPEAKER_GUESS.match(text)
+        name = m.group(3).strip() if m else ''
+        if m and 0 < len(name) <= 30 and not NOT_A_NAME.search(name):
+            found.setdefault(m.group(1), name)
+    return found
+
+
+def letter(group_key: str) -> re.Pattern:
+    """講者 B / Speaker B in the minutes, not 講者 BC."""
+    return re.compile(rf'(?:講者\s*{group_key}|Speaker\s+{group_key})(?![A-Za-z0-9])')
+
+
+# Where each voice's name was written into the minutes, as the few characters around it (人員.json "spots"), so a
+# later name for that voice changes only those places: not the same name said about someone else, not 陳怡君 when
+# the voice was 怡君. Edits elsewhere in the minutes don't move them.
+SPOT = 10
+
+
+def _people_file(job: Path) -> dict:
+    try:
+        data = json.loads((job / '人員.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _spot(md: str, at: int, size: int) -> list:
+    return [md[max(0, at - SPOT):at], md[at + size:at + size + SPOT]]
+
+
+def _found(md: str, name: str, spots) -> list[int]:
+    """Where `name` stands at one of its spots now."""
+    at = set()
+    for pair in spots or []:
+        if not (isinstance(pair, list) and len(pair) == 2 and name):
+            continue
+        whole, start = pair[0] + name + pair[1], 0
+        while (i := md.find(whole, start)) >= 0:
+            at.add(i + len(pair[0]))
+            start = i + 1
+    return sorted(at)
+
+
+def _whole_name(md: str, name: str, others=()) -> list[int]:
+    """Every place `name` is written as a name of its own: a Latin name as a whole word (Vin, not Vincent), a
+    Chinese one not inside a longer name the meeting knows (怡君, not the one in 陳怡君)."""
+    if re.fullmatch(r"[A-Za-z][A-Za-z .'-]*", name):
+        return [m.start() for m in re.finditer(rf'(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])', md)]
+    longer = [o for o in others if o != name and name in o]
+    at = []
+    for m in re.finditer(re.escape(name), md):
+        inside = any(md[m.start() - k:m.start() - k + len(o)] == o
+                     for o in longer for k in range(len(o) - len(name) + 1) if o[k:k + len(name)] == name and m.start() >= k)
+        if not inside:
+            at.append(m.start())
+    return at
+
+
+def name_voice(job: Path, md: str, group_key: str, before: str, after: str, others=()) -> str:
+    """The minutes with a voice called `after` where it was 講者 X or `before`; remembered in 人員.json. Only the
+    voice's own places change: its letter, else the spots where its name was written. A name with no spots (older
+    minutes) is changed wherever it stands as a name of its own, unless another voice goes by it too."""
+    data = _people_file(job)
+    names = {g: n for g, n in (data.get('speakers') or {}).items() if isinstance(n, str)}
+    spots = data.get('spots') if isinstance(data.get('spots'), dict) else {}
+    others_at = {g: _found(md, n, spots.get(g)) for g, n in names.items() if g != group_key}
+    edits = [(m.start(), m.end()) for m in letter(group_key).finditer(md)]
+    if before and before != after:
+        own = _found(md, before, spots.get(group_key))
+        if not own and not spots.get(group_key) and before not in [n for g, n in names.items() if g != group_key]:
+            own = _whole_name(md, before, others)
+        edits += [(i, i + len(before)) for i in own]
+    edits = sorted(set(edits))
+    kept = [e for k, e in enumerate(edits) if k == 0 or e[0] >= edits[k - 1][1]]   # no two over each other
+    parts, last, mine, shift = [], 0, [], []
+    for start, end in kept:
+        parts += [md[last:start], after]
+        mine.append(start + sum(len(after) - (e - s) for s, e in kept if e <= start))
+        shift.append((end, len(after) - (end - start)))
+        last = end
+    new = ''.join(parts) + md[last:]
+    moved = lambda i: i + sum(d for end, d in shift if end <= i)   # noqa: E731
+    unnamed = bool(letter(group_key).fullmatch(after))
+    spots = {g: [_spot(new, moved(i), len(names[g])) for i in at] for g, at in others_at.items() if at}
+    if unnamed:                                       # back to 講者 X: nothing left to remember for this voice
+        names.pop(group_key, None)
+    elif after:
+        names[group_key] = after
+        spots[group_key] = [_spot(new, i, len(after)) for i in mine] or (data.get('spots') or {}).get(group_key) or []
+    data['speakers'], data['spots'] = names, spots
+    (job / '人員.json').write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    return new
+
+
+def named_letters(job: Path, text: str) -> str:
+    """Other text written with the minutes (the mail): 講者 X replaced by the name the minutes now use for it."""
+    for g, n in (_people_file(job).get('speakers') or {}).items():
+        if isinstance(n, str) and n:
+            text = letter(g).sub(lambda _, n=n: n, text)
+    return text
+
+
+def guesses_into(job: Path, md: str, check) -> str:
+    """Once the minutes are written: each voice nobody named gets the name the AI guessed (Vin 2026-10-17: the
+    guess is the default; the user changes it under 人員). The voice itself is not remembered as that person, so
+    a wrong guess does not label the next meeting. Two voices guessed as the same person keep their letters: one
+    of the guesses is wrong, and one name for both could not be told apart later."""
+    groups = load(job).get('groups') or {}
+    given = {g.get('name') for g in groups.values() if g.get('name')}
+    guesses = guessed(check)
+    picked = {g: n for g, n in guesses.items() if g in groups and not groups[g].get('name')
+              and list(guesses.values()).count(n) == 1 and n not in given}
+    for g, n in picked.items():
+        md = name_voice(job, md, g, '', n)
+    return md
+
+
+def clear_name(job: Path, group_key: str) -> dict:
+    """The user took a person off the meeting: the voice they were given is a 講者 X again, and forgotten as them."""
+    data = load(job)
+    g = (data.get('groups') or {}).get(group_key)
+    if not g:
+        return data
+    if g.get('name'):
+        forget(g['name'], job=job.name)
+    g['name'], g['known'] = '', False
+    (job / '講者.json').write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    return data
+
+
 def labelled_transcript(job: Path, word: str = ZH['speaker']) -> str:
     """The transcript with each line's speaker after the time: [mm:ss] Alex：..., for Claude. A voice without a
     name is `word` X (講者 A for Chinese minutes, Speaker A for English ones)."""
@@ -358,4 +500,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import vlog
+    vlog.run(main)

@@ -4,6 +4,9 @@ invites, look up colleagues, send the minutes, invite to the next meeting.
 Usage:
   workspace.py pull "<gmail search>" <out-dir>             list matching mails, save their attachments
   workspace.py events <YYYY-MM-DD> [keyword]                that day's meetings: time, room, attendees
+  workspace.py meeting <start ISO> <end ISO>                the meeting a recording was (pick_meeting), the next one
+                                                            of its series in the next four weeks, and a last line
+                                                            MATCH {...} for the program
   workspace.py who <name>                                   look up a colleague's address in the company directory
   workspace.py send <to,to,...> <subject> <body.txt> [--minutes <minutes.md>] [--attach <file>] [--share edit|comment|none]
                                                                                   preview a mail
@@ -173,25 +176,179 @@ def day_query(day: date, extra=None) -> str:
 
 def events(day: str, keyword: str = ''):
     query = day_query(date.fromisoformat(day))
-    # meetings may sit on a shared team calendar instead of the primary one; holiday calendars are skipped
-    cals = [c for c in call(f'{CALENDARS}/users/me/calendarList').get('items', [])
-            if '#holiday' not in c['id'] and c.get('accessRole') in ('owner', 'writer', 'reader')]
-    for cal in cals:
+    for cal in calendars():
         for ev in call(f'{CALENDARS}/calendars/{urllib.parse.quote(cal["id"])}/events?{query}').get('items', []):
             if keyword in ev.get('summary', ''):
                 show(ev, cal.get('summary', ''))
 
 
+# --- which meeting a recording was --------------------------------------------------------------
+# Every company room booking sits on a shared calendar the user owns, so "organizer is me" says nothing there. An
+# event is the user's own only when it is on their primary calendar and they have not declined it.
+
+MIN_OVERLAP = timedelta(minutes=10)                   # or half of a shorter recording
+SERIES_DAYS = 28
+
+
+def when(ev, key):
+    value = ev.get(key, {}).get('dateTime')
+    return datetime.fromisoformat(value.replace('Z', '+00:00')) if value else None
+
+
+def declined(ev) -> bool:
+    return any(a.get('self') and a.get('responseStatus') == 'declined' for a in ev.get('attendees', []))
+
+
+def a_meeting(ev) -> bool:
+    """Focus time, out of office, a working location or a slot marked free is a block in the diary, not a meeting."""
+    return ev.get('eventType', 'default') == 'default' and ev.get('transparency') != 'transparent'
+
+
+def core_title(title: str) -> str:
+    """(會議室C)新品上市雙周會 -> 新品上市雙周會, the series name: the room in brackets in front taken off."""
+    return re.sub(r'^\s*[(（][^)）]*[)）]\s*', '', title or '').strip()
+
+
+def pick_meeting(found: list[dict], start: datetime, end: datetime) -> dict:
+    """found: {'ev', 'primary', 'cal'} for every timed event of the day on every calendar.
+    match: the user's own event overlapping the recording most (at least MIN_OVERLAP), or None.
+    others: events on other calendars overlapping the recording, most overlap first: only maybes.
+    earlier: the user's own events that ended before the recording began, latest first."""
+    seen, mine = {}, set()
+    for f in sorted(found, key=lambda f: not f['primary']):     # the user's own copy of an event decides first
+        ev = f['ev']
+        if not (when(ev, 'start') and when(ev, 'end')) or not a_meeting(ev):
+            continue
+        uid = ev.get('iCalUID') or ev.get('id') or id(ev)
+        if uid in seen:
+            continue
+        seen[uid] = f
+        if f['primary'] and not declined(ev):
+            mine.add(uid)
+
+    def overlap(f):
+        ev = f['ev']
+        return min(end, when(ev, 'end')) - max(start, when(ev, 'start'))
+    def length(f):
+        return when(f['ev'], 'end') - when(f['ev'], 'start')
+    enough = min(MIN_OVERLAP, (end - start) / 2)
+    own = [f for uid, f in seen.items() if uid in mine]
+    rest = [f for uid, f in seen.items() if uid not in mine and not f['primary']]
+    # most overlap first; on a tie, an event with other people on it, then the shortest (a meeting inside a long block)
+    hits = sorted((f for f in own if overlap(f) >= enough),
+                  key=lambda f: (-overlap(f), not f['ev'].get('attendees'), length(f)))
+    maybes = sorted((f for f in rest if overlap(f) >= enough), key=lambda f: (-overlap(f), length(f)))
+    earlier = sorted((f for f in own if when(f['ev'], 'end') <= start), key=lambda f: when(f['ev'], 'end'), reverse=True)
+    return {'match': hits[0] if hits else None, 'others': maybes[:8], 'earlier': earlier[:3]}
+
+
+def next_in_series(match: dict, later: list[dict]) -> dict | None:
+    """The first event after `match` that is the same recurring event, or has the same title without the room.
+    `later` holds the user's own events only (primary calendar, not declined)."""
+    after, rec, name = when(match, 'end'), match.get('recurringEventId'), core_title(match.get('summary', ''))
+    same = [ev for ev in later if when(ev, 'start') and when(ev, 'start') >= after and not declined(ev)
+            and not (match.get('id') and ev.get('id') == match['id'])
+            and ((rec and ev.get('recurringEventId') == rec) or (name and core_title(ev.get('summary', '')) == name))]
+    return min(same, key=lambda ev: when(ev, 'start')) if same else None
+
+
+def calendars():
+    # meetings may sit on a shared team calendar instead of the primary one; holiday calendars are skipped
+    return [c for c in call(f'{CALENDARS}/users/me/calendarList').get('items', [])
+            if '#holiday' not in c['id'] and c.get('accessRole') in ('owner', 'writer', 'reader')]
+
+
+def listed(cal, time_min: datetime, time_max: datetime, extra=None) -> list[dict]:
+    query = urllib.parse.urlencode({'timeMin': time_min.isoformat(), 'timeMax': time_max.isoformat(), 'singleEvents': 'true',
+                                    'orderBy': 'startTime', 'maxResults': 250, **(extra or {})})
+    return call(f'{CALENDARS}/calendars/{urllib.parse.quote(cal["id"])}/events?{query}').get('items', [])
+
+
+def series_events(ev: dict, after: datetime) -> list[dict]:
+    """The user's own events in the next SERIES_DAYS that may be the same series: the instances of a recurring
+    event, else the events whose title contains the title without the room."""
+    until = after + timedelta(days=SERIES_DAYS)
+    window = {'timeMin': after.isoformat(), 'timeMax': until.isoformat()}
+    if ev.get('recurringEventId'):
+        url = (f'{CALENDARS}/calendars/primary/events/{urllib.parse.quote(ev["recurringEventId"])}/instances?'
+               + urllib.parse.urlencode({**window, 'maxResults': 50}))
+        return call(url).get('items', [])
+    name = core_title(ev.get('summary', ''))
+    return listed({'id': 'primary'}, after, until, {'q': name}) if name else []
+
+
+def distinctive(name: str) -> bool:
+    """A title other teams are unlikely to use too: 新品上市討論 is, 週會 or 1on1 is not."""
+    return len(re.sub(r'\s', '', name)) >= 5
+
+
+def booked_series(ev: dict, cals: list, after: datetime) -> list[dict]:
+    """When the user's own calendar has no next meeting, the same distinctive title booked on a shared calendar:
+    people often book the room for the next one without inviting themselves."""
+    name = core_title(ev.get('summary', ''))
+    if not distinctive(name):
+        return []
+    until = after + timedelta(days=SERIES_DAYS)
+    return [e for c in cals if not c.get('primary') for e in listed(c, after, until, {'q': name})]
+
+
+def meeting(start_iso: str, end_iso: str):
+    start = datetime.fromisoformat(start_iso).astimezone()
+    end = datetime.fromisoformat(end_iso).astimezone() if end_iso and end_iso != start_iso else start + timedelta(hours=1)
+    day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    cals = calendars()
+    found = [{'ev': ev, 'primary': bool(c.get('primary')), 'cal': c.get('summary', '')}
+             for c in cals for ev in listed(c, day, max(day + timedelta(days=1), end + timedelta(hours=1)))]
+    got = pick_meeting(found, start, end)
+    match = got['match']
+    if match:
+        print('== 這場會議（你在與會名單上、跟錄音時間重疊最多的那一場）')
+        show(match['ev'], match['cal'])
+        upcoming = next_in_series(match['ev'], series_events(match['ev'], end))
+        booked = not upcoming and next_in_series(match['ev'], booked_series(match['ev'], cals, end))
+        print('\n== 同一系列的下一次會議（四週內）' + ('：公司行事曆上同名的會議室預約，你不在與會名單上' if booked else ''))
+        upcoming = upcoming or booked
+        if upcoming:
+            show(upcoming, '')
+            print('   日期:', when(upcoming, 'start').strftime('%Y-%m-%d'), '週' + '一二三四五六日'[when(upcoming, 'start').weekday()])
+        else:
+            print('   （四週內的行事曆上沒有同一系列的下一次會議）')
+    else:
+        print('== 這場會議：行事曆上沒有你在與會名單上、又跟這段錄音時間重疊的會議')
+    if got['others']:
+        print('\n== 同一時段公司行事曆上的其他會議（你不在與會名單上，只是時間重疊；'
+              '逐字稿內容明顯就是那一場才用，只看時間不算）')
+        for f in got['others']:
+            show(f['ev'], f['cal'])
+    if got['earlier']:
+        print('\n== 今天稍早你參加過的會議（臨時留下來討論時，可以參考它的與會者）')
+        for f in got['earlier']:
+            show(f['ev'], f['cal'])
+    ev = match['ev'] if match else {}
+    # who was invited (an ERP room booking puts its invitees here too): the meeting's people start from them
+    guests = [{'name': flat(a.get('displayName'), 60), 'email': flat(a.get('email'), 100), 'self': bool(a.get('self'))}
+              for a in ev.get('attendees', []) if not a.get('resource') and a.get('responseStatus') != 'declined']
+    print('MATCH ' + json.dumps({'title': ev.get('summary', ''), 'series': core_title(ev.get('summary', '')),
+                                 'recurring': ev.get('recurringEventId', ''), 'start': ev.get('start', {}).get('dateTime', ''),
+                                 'guests': guests}, ensure_ascii=False))
+
+
+def flat(text, most: int = 200) -> str:
+    """Calendar text is written by anyone who books a room or sends an invite: one line, so it can't pose as a
+    heading of its own in what the minutes AI reads."""
+    return ' '.join(str(text or '').split())[:most]
+
+
 def show(ev, cal_name):
     s, e = ev['start'].get('dateTime', ev['start'].get('date')), ev['end'].get('dateTime', ev['end'].get('date'))
-    print(f'== {s[11:16] or s}–{e[11:16] or e} {ev.get("summary", "(無標題)")}  [{cal_name}]')
-    print('   地點:', ev.get('location', ''))
-    print('   主辦:', ev.get('organizer', {}).get('email', ''))
+    print(f'== {s[11:16] or s}–{e[11:16] or e} {flat(ev.get("summary") or "(無標題)")}' + (f'  [{flat(cal_name, 60)}]' if cal_name else ''))
+    print('   地點:', flat(ev.get('location')))
+    print('   主辦:', flat(ev.get('organizer', {}).get('email'), 100))
     for a in ev.get('attendees', []):
         if not a.get('resource'):
-            print('   與會:', a.get('displayName', ''), a['email'], a.get('responseStatus', ''))
+            print('   與會:', flat(a.get('displayName'), 60), flat(a.get('email'), 100), flat(a.get('responseStatus'), 20))
     for att in ev.get('attachments', []):
-        print('   附件:', att.get('title', ''), att.get('fileUrl', ''))
+        print('   附件:', flat(att.get('title')), flat(att.get('fileUrl'), 300))
     for url in re.findall(r'https?://[^\s"<>]+', ev.get('description', '')):
         print('   連結:', url)
 
@@ -365,7 +522,7 @@ def flag_value(name):
 
 
 def main():
-    need = {'pull': 4, 'events': 3, 'who': 3, 'send': 5, 'invite': 7}
+    need = {'pull': 4, 'events': 3, 'meeting': 4, 'who': 3, 'send': 5, 'invite': 7}
     positional = [a for i, a in enumerate(sys.argv) if not a.startswith('--')
                   and not (i and sys.argv[i - 1] in ('--minutes', '--confirm', '--attach', '--share'))]
     if len(sys.argv) < 2 or sys.argv[1] not in need or len(positional) < need[sys.argv[1]]:
@@ -378,6 +535,8 @@ def main():
         pull(args[0], Path(args[1]))
     elif cmd == 'events':
         events(args[0], args[1] if len(args) > 1 else '')
+    elif cmd == 'meeting':
+        meeting(args[0], args[1])
     elif cmd == 'who':
         who(args[0])
     elif cmd == 'invite':
@@ -390,4 +549,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import vlog
+    vlog.run(main)

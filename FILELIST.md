@@ -44,6 +44,7 @@
 | `scripts/notify.py` | Sends the Doc link through Google Docs sharing when Gmail is not available |
 | `scripts/check_update.py` | Looks up the newest version on GitHub |
 | `tests/` | `python3 -m unittest discover -s tests` |
+| `docs/screenshots/` | The README's pictures (English UI, made-up meetings) and `demo_home.py`, which makes the example meetings they were taken with |
 | `.github/workflows/ci.yml` | The check GitHub runs on a clean Mac for every push and pull request: the Python tests, the meeting window's scripts, the installer, the plists and both Swift builds. main only takes changes that pass it |
 | `prototypes/` | Design prototypes approved before building a screen |
 

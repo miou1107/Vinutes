@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The README shows the menu-bar panel, the meeting window and the floating bar with live captions (English, made-up meetings; docs/screenshots/demo_home.py makes those meetings again for new pictures).
+- While recording, the meeting being recorded no longer shows up among the panel's recent meetings, and Pause has no blue ring around it when the panel opens.
+- The times in the panel's recent meetings line up, whatever symbol each meeting has.
+
 ## v0.4.2 (2026-10-18)
 
 - The menu-bar icon opens a panel instead of a menu. In the middle is a big round button: red with a white dot to start recording, white with a red ring and a red square to stop it (⌃⌥R still does both). While recording, the panel shows how long it has run with the level bars, and Pause.

@@ -7,7 +7,8 @@
                and runs commands, whatever --mode or --sandbox say (tried 2026-10-15); the sandbox lets it read and
                write only the folder and its own settings, and start no other program
 
-settings.json "ai" picks one (default claude); the window's 環境設定自檢 sets it.
+settings.json "ai" picks one (default claude); item 5 of the window's 環境設定自檢 sets it, installs it with its
+maker's own script, signs it in and asks it for one short answer.
 """
 from __future__ import annotations
 
@@ -25,9 +26,11 @@ from i18n import t
 AIS = {'claude': 'Claude Code', 'codex': 'Codex', 'antigravity': 'Antigravity'}
 SHORT = {'claude': 'Claude', 'codex': 'Codex', 'antigravity': 'Antigravity'}
 COMMAND = {'claude': 'claude', 'codex': 'codex', 'antigravity': 'agy'}
-INSTALL = {'claude': 'https://docs.claude.com/en/docs/claude-code/setup',
-           'codex': 'https://github.com/openai/codex',
-           'antigravity': 'https://antigravity.google/'}
+# each maker's own install script (read 2026-10-19): all three put the command in ~/.local/bin and ask nothing,
+# Codex once told so; Codex's would otherwise offer to start Codex at the end
+INSTALLERS = {'claude': ('https://claude.ai/install.sh', 'bash', {}),
+              'codex': ('https://chatgpt.com/codex/install.sh', 'sh', {'CODEX_NON_INTERACTIVE': '1'}),
+              'antigravity': ('https://antigravity.google/cli/install.sh', 'bash', {})}
 LOGIN = {'claude': 'claude auth login', 'codex': 'codex login', 'antigravity': 'agy'}
 EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', str(Path.home() / '.local/bin'),
               str(Path.home() / '.claude/local'), str(Path.home() / '.npm-global/bin')]
@@ -107,21 +110,64 @@ def find(key: str | None = None) -> str | None:
 
 def signed_in(key: str, exe: str) -> bool | None:
     """Whether the AI is signed in on this computer; None when it did not say within 30 seconds."""
+    return account(key, exe)[0]
+
+
+def account(key: str, exe: str) -> tuple[bool | None, str]:
+    """Whether the AI is signed in (None: it did not say within 30 seconds), and with which address when it says
+    (Claude Code does; the other two do not)."""
     asks = {'claude': [exe, 'auth', 'status'], 'codex': [exe, 'login', 'status'], 'antigravity': [exe, 'models']}
     try:
         done = subprocess.run(asks[key], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        return None
+        return None, ''
     except OSError:
-        return False
+        return False, ''
     if key == 'claude':
         try:
-            return bool(json.loads(done.stdout).get('loggedIn'))
+            said = json.loads(done.stdout)
         except ValueError:
-            return False
+            return False, ''
+        return bool(said.get('loggedIn')), str(said.get('email') or '') if said.get('loggedIn') else ''
     if key == 'codex':
-        return done.returncode == 0 and 'logged in' in (done.stdout + done.stderr).lower()
-    return done.returncode == 0 and bool(done.stdout.strip())
+        return done.returncode == 0 and 'logged in' in (done.stdout + done.stderr).lower(), ''
+    return done.returncode == 0 and bool(done.stdout.strip()), ''
+
+
+def installer(key: str) -> tuple[str, str, dict]:
+    """The maker's install script, the shell that runs it, and what it needs so that it asks nothing."""
+    return INSTALLERS[key]
+
+
+def download(url: str, dest: Path):
+    """curl rather than Python's own: it uses the Mac's certificates, which some Python builds do not find."""
+    subprocess.run(['/usr/bin/curl', '-fsSL', '--proto', '=https', '--proto-redir', '=https', '--max-time', '300',
+                    '-o', str(dest), url], check=True,
+                   capture_output=True, stdin=subprocess.DEVNULL)
+
+
+def install(key: str) -> str:
+    """Installs the AI with its maker's script, the way its own instructions say (the script is saved first and
+    only run once it has fully arrived). Returns the command; SystemExit when it did not end up installed."""
+    url, shell, extra = installer(key)
+    with tempfile.TemporaryDirectory(prefix='vinutes-install-') as tmp:
+        script = Path(tmp) / 'install.sh'
+        try:
+            download(url, script)
+        except (subprocess.CalledProcessError, OSError):
+            raise SystemExit(t('ai_install_failed', ai=AIS[key]))
+        env = {**os.environ, **extra,
+               'PATH': os.pathsep.join([os.environ.get('PATH', ''), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])}
+        try:
+            done = subprocess.run([shell, str(script)], cwd=Path.home(), env=env, stdin=subprocess.DEVNULL,
+                                  capture_output=True, text=True, timeout=15 * 60)
+        except (subprocess.TimeoutExpired, OSError):
+            raise SystemExit(t('ai_install_failed', ai=AIS[key]))
+    exe = find(key)
+    if done.returncode or not exe:
+        print((done.stdout + done.stderr)[-2000:])             # for setup.log
+        raise SystemExit(t('ai_install_failed', ai=AIS[key]))
+    return exe
 
 
 def sandbox_profile(folder: Path, exe: str) -> str:

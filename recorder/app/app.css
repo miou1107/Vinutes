@@ -449,6 +449,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .setup .stt { font-size: 13px; font-weight: 700; }
 .setup .sreq { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
 .setup .sds { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.setup .sds.bad { color: var(--red); }                 /* 登入失效 */
 .setup .sside { flex: none; width: auto; min-width: 170px; max-width: 230px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .setup .sside .btn { height: 28px; min-width: 84px; padding: 0 14px; font-size: 12px; }
 .setup .sok { font-size: 12px; font-weight: 600; color: var(--green); }
@@ -459,11 +460,21 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .setup .swait { font-size: 12px; color: var(--blue-ink); }
 .setup .sbar { width: 120px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .setup .sbar i { display: block; height: 100%; background: var(--blue); }
-.setup .spills { display: flex; gap: 4px; margin-top: 6px; }
-.setup .spill { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border-radius: 11px;
-                border: 1px solid var(--blue-line); background: var(--field); color: var(--blue-ink); font-size: 11px; cursor: pointer; }
-.setup .spill:hover { background: var(--blue-bg); }
-.setup .spill.on { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+/* item 5, step 1: one card per AI, with the account it signs in with */
+.setup .aicards { display: flex; gap: 8px; margin-top: 8px; }
+.setup .aicard { all: unset; box-sizing: border-box; cursor: pointer; flex: 1; padding: 8px 10px; border-radius: 8px;
+                 border: 1px solid var(--field-line); background: var(--field); }
+.setup .aicard:hover { background: var(--blue-bg); }
+.setup .aicard b { display: block; font-size: 13px; }
+.setup .aicard span { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.setup .aicard em { display: block; margin-top: 4px; font-style: normal; font-size: 11px; color: var(--green); }
+.setup .aicard.on { border: 2px solid var(--blue); padding: 7px 9px; background: var(--blue-bg); }
+.setup .aicard:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.setup .snum.ok { background: var(--green-bg); color: var(--green); }
+/* an install with no percentage to show: a bar that keeps moving */
+.setup .sbar.sbusy { position: relative; }
+.setup .sbar.sbusy i { position: absolute; top: 0; width: 40%; border-radius: 3px; animation: sbusy 1.1s ease-in-out infinite; }
+@keyframes sbusy { from { left: -40%; } to { left: 100%; } }
 .setup .sfoot { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px 0; }
 .setup .scount { font-size: 13px; font-weight: 600; }
 

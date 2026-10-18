@@ -56,7 +56,7 @@ Vinutes 是 Mac 選單列上的錄音程式。開會時按一下就開始錄音�
 
 - Apple 晶片的 Mac（M1 以後的機型）
 - Xcode Command Line Tools（`xcode-select --install`）和 Python 3.10 以上
-- 安裝並登入其中一個 AI 命令列工具：[Claude Code](https://docs.claude.com/en/docs/claude-code/setup)、[Codex](https://github.com/openai/codex) 或 [Antigravity](https://antigravity.google/)
+- 其中一個 AI 的帳號：Claude Pro 以上方案（Claude Code）、ChatGPT Plus 以上方案（Codex），或 Google 帳號（Antigravity）。AI 不用先裝，環境設定自檢會帶你安裝並登入。
 - 要用 Google 文件、Gmail 和行事曆的話，需要一個 Google 帳號，並完成一次 Google Cloud 設定。程式會一步一步帶你做，大約 15 分鐘。
 
 ## 安裝方法

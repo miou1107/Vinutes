@@ -2455,3 +2455,164 @@ class People(unittest.TestCase):
         self.assertEqual(minutes_app.attendees('* 與會人員：Vin、[請補姓名]'), ['Vin'])
         self.assertEqual(minutes_app.attendees('* Attendees: Jessie Chen, Ming Wang'), ['Jessie Chen', 'Ming Wang'])
         self.assertEqual(minutes_app.attendees('沒有這一行'), [])
+
+
+class MeetingPeople(unittest.TestCase):
+    """人員: a meeting's list starts from the invitation, the project and the minutes; adding, naming a voice and
+    taking someone off go into the minutes' 與會人員 line and the project's list at once (Vin 2026-10-17)."""
+
+    job = Flows.job
+
+    def setUp(self):
+        Flows.setUp(self)
+        (self.job_dir / '逐字稿.txt').write_text('', encoding='utf-8')
+        self.md_path.write_text(MINUTES.replace('會中說明：', '講者 B 說明：'), encoding='utf-8')
+        for name in ('同步基準.md', '學習基準.md'):
+            (self.job_dir / name).write_text(self.md_path.read_text(encoding='utf-8'), encoding='utf-8')
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['project'] = '週會專案'
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [
+            {'name': '', 'email': 'leo@example.com', 'self': False},
+            {'name': 'Amy', 'email': 'amy@example.com', 'self': False}]}))
+        (self.job_dir / '講者.json').write_text(json.dumps({'groups': {
+            'A': {'name': '', 'seconds': 300, 'sample': [1, 5]}, 'B': {'name': '', 'seconds': 200, 'sample': [9, 12]}},
+            'lines': [], 'fixed': {}}, ensure_ascii=False))
+        minutes_app.PROJECT_PEOPLE.unlink(missing_ok=True)
+        ds.push = lambda doc_id, base, new: (ds.Plan([{'x': 1}], [], []), fake_doc(new), True)
+
+    def tearDown(self):
+        minutes_app.PROJECT_PEOPLE.unlink(missing_ok=True)
+        Flows.tearDown(self)
+
+    def test_the_list_starts_from_the_invitation_and_the_minutes(self):
+        minutes_app.save_project_people('週會專案', ['Lily', 'amy'])
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Leo', 'Amy', 'Ken'])   # 以當場會議邀請的人為主
+
+    def test_with_no_invitation_the_project_list_comes_in(self):
+        (self.job_dir / '行事曆.json').write_text('{}')
+        minutes_app.save_project_people('週會專案', ['Lily', 'amy'])
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Lily', 'amy', 'Ken'])
+
+    def test_group_addresses_are_no_people(self):
+        (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [{'email': 'rd-team@example.com'},
+                                                                          {'email': 'room3@example.com'}]}))
+        self.assertEqual(minutes_app.invited(self.job()), [])
+
+    def test_the_attendees_line_stays_on_its_line(self):
+        job = self.job()
+        self.assertEqual(minutes_app.with_people(job, '* 與會人員：\n* 會議資料：[x](u)\n', ['Amy']),
+                         '* 與會人員：Amy\n* 會議資料：[x](u)\n')
+        self.assertEqual(minutes_app.with_people(job, '* **與會人員：** Vin\n', ['Vin', 'Amy']), '* **與會人員：** Vin、Amy\n')
+        self.assertEqual(minutes_app.with_people(job, '**與會人員：Vin**\n', ['Vin', 'Amy']), '**與會人員：Vin、Amy**\n')
+        self.assertEqual(minutes_app.with_people(job, '與會人員：Vin。\n', ['Vin', 'Amy']), '與會人員：Vin、Amy。\n')
+        self.assertTrue(minutes_app.same_name('陳怡君（Jessie）', 'jessie'))
+
+    def test_renaming_a_named_voice_swaps_the_name_in_the_minutes(self):
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        minutes_app.cmd_speaker(self.job(), 'B', 'Nina')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('Nina 說明：', md)
+        self.assertIn('與會人員：Leo、Amy、Ken、Nina', md)
+
+    def test_adding_someone_writes_the_attendees_line_and_the_project_list(self):
+        minutes_app.cmd_people(self.job(), 'add', 'Sammi')
+        self.assertIn('與會人員：Leo、Amy、Ken、Sammi', self.md_path.read_text(encoding='utf-8'))
+        self.assertEqual(minutes_app.project_people('週會專案'), ['Sammi'])
+
+    def test_naming_a_voice_replaces_its_letter_and_joins_the_list(self):
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('Mia 說明：', md)
+        self.assertNotIn('講者 B', md)
+        self.assertIn('與會人員：Leo、Amy、Ken、Mia', md)
+        self.assertEqual(minutes_app.project_people('週會專案'), ['Mia'])
+
+    def test_taking_someone_off_leaves_the_project_list_and_frees_their_voice(self):
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        minutes_app.cmd_people(self.job(), 'remove', 'mia')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('與會人員：Leo、Amy、Ken\n', md)
+        self.assertEqual(minutes_app.project_people('週會專案'), [])
+        self.assertEqual([v['name'] for v in minutes_app.voices_view(self.job())], ['', ''])
+        self.assertNotIn('Mia', minutes_app.meeting_people(self.job()))   # she doesn't come back by herself
+        self.assertEqual(minutes_app.speakers_shown(self.job())['B'], '')
+
+    def test_someone_who_spoke_is_not_listed_as_silent_under_another_spelling(self):
+        minutes_app.save_meeting_people(self.job(), ['Jessie', 'Amy'])
+        minutes_app.cmd_speaker(self.job(), 'B', '陳怡君（Jessie）')
+        self.assertEqual(minutes_app.silent_people(self.job()), ['Amy'])
+
+    def test_a_renamed_project_keeps_its_people(self):
+        minutes_app.save_project_people('週會專案', ['Amy'])
+        minutes_app.save_project_people('新名字', ['Ken'])
+        minutes_app.cmd_rename_project('週會專案', '新名字')
+        self.assertEqual(minutes_app.project_people('新名字'), ['Ken', 'Amy'])
+        self.assertEqual(minutes_app.project_people('週會專案'), [])
+
+
+class SpeakerPick(unittest.TestCase):
+    """人員: each voice's menu starts on the AI's guess, which the minutes already use; picking someone else swaps
+    the name in the minutes, remembers the voice, and settles the guess (Vin 2026-10-17)."""
+    job = Flows.job
+
+    def setUp(self):
+        MeetingPeople.setUp(self)
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '講者 B 負責文章，可能是 Nina'}, {'text': '「HOWAN PASS」推測是台灣 PASS'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+
+    def tearDown(self):
+        MeetingPeople.tearDown(self)
+
+    def test_the_guess_goes_into_the_minutes_after_the_write_up(self):
+        import speakers
+        md = speakers.guesses_into(self.job_dir, self.md_path.read_text(encoding='utf-8'), self.job().result['check'])
+        self.assertIn('Nina 說明：', md)
+        self.assertEqual(minutes_app.speakers_shown(self.job()), {'A': '', 'B': 'Nina'})
+        self.assertEqual([v['name'] for v in minutes_app.voices_view(self.job())], ['', ''])   # not remembered
+
+    def test_picking_someone_else_swaps_the_name_and_settles_the_guess(self):
+        import speakers
+        self.md_path.write_text(speakers.guesses_into(self.job_dir, self.md_path.read_text(encoding='utf-8'),
+                                                      self.job().result['check']), encoding='utf-8')
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('Mia 說明：', md)
+        self.assertNotIn('Nina', md)
+        self.assertEqual(minutes_app.speakers_shown(self.job())['B'], 'Mia')
+        self.assertEqual([c['label'] for c in minutes_app.check_items(self.job())], ['「HOWAN PASS」推測是台灣 PASS'])
+
+    def written(self):
+        import speakers
+        self.md_path.write_text(speakers.guesses_into(self.job_dir, self.md_path.read_text(encoding='utf-8'),
+                                                      self.job().result['check']), encoding='utf-8')
+
+    def test_only_the_voices_own_places_change(self):
+        md = self.md_path.read_text(encoding='utf-8').replace('講者 B 說明：', '講者 B 說明：報價由 Nina 負責。')
+        self.md_path.write_text(md, encoding='utf-8')
+        self.written()
+        self.assertIn('Nina 說明：報價由 Nina 負責。', self.md_path.read_text(encoding='utf-8'))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        self.assertIn('Mia 說明：報價由 Nina 負責。', self.md_path.read_text(encoding='utf-8'))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Lily')        # and again, from the name given last
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        self.assertIn('Mia 說明：報價由 Nina 負責。', self.md_path.read_text(encoding='utf-8'))
+
+    def test_two_voices_guessed_as_the_same_person_keep_their_letters(self):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '講者 A 主持，可能是 Nina'}, {'text': '講者 B 負責文章，可能是 Nina'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        self.written()
+        self.assertIn('講者 B 說明：', self.md_path.read_text(encoding='utf-8'))
+
+    def test_a_name_inside_a_longer_name_stays(self):
+        import speakers
+        md = speakers.name_voice(self.job_dir, '陳怡君說明。怡君補充。', 'B', '怡君', 'Amy', ['陳怡君'])
+        self.assertEqual(md, '陳怡君說明。Amy補充。')
+        self.assertEqual(speakers.name_voice(self.job_dir, 'Vincent 與 Vin', 'C', 'Vin', 'Ken'), 'Vincent 與 Ken')
+
+    def test_the_mail_names_the_voice_too(self):
+        (self.job_dir / '信件內文.txt').write_text('講者 B 會再寄報價。', encoding='utf-8')
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
+        self.assertEqual((self.job_dir / '信件內文.txt').read_text(encoding='utf-8'), 'Mia 會再寄報價。')

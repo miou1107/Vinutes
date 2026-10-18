@@ -405,6 +405,14 @@ def cmd_rename_project(old: str, new: str):
     moved = [job for job in all_jobs() if project_of(job) == old]
     for job in moved:
         save_sorting(job, project=new)
+    names = project_people(new)                       # the people go with the name; two projects become one list
+    for n in project_people(old):
+        names = add_name(names, n)
+    data = read_json(PROJECT_PEOPLE)
+    if old in data:
+        data.pop(old)
+        data[new] = names
+        write_json(PROJECT_PEOPLE, data)
     out({'project': new, 'count': len(moved)})
 
 
@@ -567,12 +575,9 @@ GUESS_EN = re.compile(r'[“"](.+?)[”"]\s*(?:is probably|probably means|is lik
 
 
 # 「講者 B 負責文章，可能是 Nina」: a guess about who a voice is, shown with that voice under 人員
-SPEAKER_GUESS = re.compile(r'^\s*(?:講者|Speaker)\s*((?-i:[A-Z]))(?![A-Za-z])\s*(.*?)\s*(?:推測是|推測為|應該是|可能是|is probably|'
-                           r'is likely|probably|may be)\s*[「“"]?([^「」“”"，。,;；]+?)[」”"]?[。.]?\s*$', re.I)
-# 「可能是 Nina 或 Mia」「可能是同一人」「可能是主持人」: no one name to give the voice
-NOT_A_NAME = re.compile(r'或|與|和|同一|講者|主持|與會|\b(?:and|or|same|host|speaker)\b', re.I)
-NOT_A_ROLE = re.compile(r'從|根據|聽|看|依|\b(?:from|based|judging)\b', re.I)
-ATTENDEES = re.compile(r'^\s*(?:[*+-]\s+)?(?:\*\*)?(?:與會人員|出席人員|Attendees)(?:\*\*)?\s*[：:]\s*(.+)$', re.M | re.I)
+SPEAKER_GUESS, NOT_A_NAME, NOT_A_ROLE = speakers.SPEAKER_GUESS, speakers.NOT_A_NAME, speakers.NOT_A_ROLE
+ATTENDEES = re.compile(r'^[ \t]*(?:[*+-][ \t]+)?(?:\*\*)?(?:與會人員|出席人員|Attendees)[ \t]*(?:\*\*)?[ \t]*[：:]'
+                       r'[ \t]*(?:\*\*)?[ \t]*(?P<names>[^\n]*)$', re.M | re.I)   # one line, and **與會人員：** kept
 
 
 def attendees(md: str) -> list[str]:
@@ -580,8 +585,185 @@ def attendees(md: str) -> list[str]:
     found = ATTENDEES.search(md or '')
     if not found:
         return []
-    names = [n.strip(' *') for n in re.split(r'[、，,；;]', found.group(1))]
+    names = [n.strip(' *') for n in re.split(r'[、，,；;]', found.group('names'))]
     return [n for n in names if n and not n.startswith('[') and len(n) <= 30][:30]
+
+
+# --- 人員: who was at a meeting --------------------------------------------------------------------
+# A meeting's list starts from the people invited to it (the calendar, where ERP room bookings put their invitees),
+# the project's own list (everyone confirmed or added in its earlier meetings) and the names on the minutes'
+# 與會人員 line; voices that were given a name join it. What the user adds, confirms or takes off is kept in the
+# meeting's 人員.json and in the project's list (people.json, one list per project, Vin 2026-10-17); nobody leaves a
+# project's list by themselves.
+PROJECT_PEOPLE = CONFIG / 'people.json'
+MEETING_PEOPLE = '人員.json'
+
+
+def name_keys(name: str) -> set[str]:
+    """陳怡君（Jessie） -> {陳怡君（jessie）, 陳怡君, jessie}: the ways the same person is written in minutes."""
+    whole = name.strip().casefold()
+    keys = {whole}
+    found = re.match(r'^(.*?)\s*[（(]\s*(.*?)\s*[）)]\s*$', whole)
+    if found:
+        keys |= {k for k in found.groups() if k}
+    return keys
+
+
+def same_name(a: str, b: str) -> bool:
+    return bool(name_keys(a) & name_keys(b))
+
+
+def add_name(names: list[str], name: str) -> list[str]:
+    name = one_line(name, 30)
+    return names if not name or any(same_name(n, name) for n in names) else names + [name]
+
+
+def project_people(project: str) -> list[str]:
+    data = read_json(PROJECT_PEOPLE)
+    return [n for n in data.get(project) or [] if isinstance(n, str)] if project else []
+
+
+def save_project_people(project: str, names: list[str]):
+    if not project:
+        return
+    data = read_json(PROJECT_PEOPLE)
+    data[project] = names
+    write_json(PROJECT_PEOPLE, data)
+
+
+def invited(job: Job) -> list[str]:
+    """The people the meeting's calendar event invited (not the ones who said no): the name, else the address's
+    first part (leo@… -> Leo); this Mac's own account by the user's name."""
+    names = []
+    for g in read_json(job.dir / '行事曆.json').get('guests') or []:
+        if not isinstance(g, dict):
+            continue
+        name = (sender_name() or '') if g.get('self') else ''
+        name = name or g.get('name') or ''
+        local = (g.get('email') or '').split('@')[0]
+        if not name and local and not re.search(r'[\d_-]|team|group|room|info|service|admin|noreply|calendar', local, re.I):
+            name = ' '.join(w[:1].upper() + w[1:] for w in local.split('.') if w)
+        names = add_name(names, name)
+    return names
+
+
+def meeting_people(job: Job) -> list[str]:
+    data = read_json(job.dir / MEETING_PEOPLE)
+    if isinstance(data.get('people'), list):
+        names = [n for n in data['people'] if isinstance(n, str)]
+    else:                                             # first time: from the invitation, the project and the minutes
+        names = []
+        guests = invited(job)                         # who was invited comes first (Vin: 以當場會議邀請的人為主);
+        first = guests or project_people(project_of(job))   # with no invitation, the project's own list
+        for n in first + attendees(job.md if not job.missing else ''):
+            names = add_name(names, n)
+    for n in speakers_shown(job).values():          # a voice with a name was there
+        if n:
+            names = add_name(names, n)
+    return names
+
+
+def save_meeting_people(job: Job, names: list[str]):
+    data = read_json(job.dir / MEETING_PEOPLE)
+    data['people'] = names
+    write_json(job.dir / MEETING_PEOPLE, data)
+
+
+def speaker_map(job: Job) -> dict:
+    """{voice letter: name} the minutes already use: the AI's guess put in after the write-up, or the user's pick."""
+    found = read_json(job.dir / MEETING_PEOPLE).get('speakers')
+    return {g: n for g, n in found.items() if isinstance(n, str)} if isinstance(found, dict) else {}
+
+
+def save_speaker(job: Job, group: str, name: str):
+    data = read_json(job.dir / MEETING_PEOPLE)
+    data['speakers'] = {**speaker_map(job), group: name}
+    write_json(job.dir / MEETING_PEOPLE, data)
+
+
+def speakers_shown(job: Job) -> dict:
+    """Who each voice is, as its menu shows it: the name it was given, else the one the minutes use, else the AI's
+    guess (older minutes, written before guesses went in by themselves)."""
+    used, guess = speaker_map(job), speakers.guessed(job.result.get('check'))
+    return {v['group']: v['name'] or used.get(v['group']) or guess.get(v['group'], '') for v in voices_view(job)}
+
+
+def known_people() -> list[str]:
+    """The names offered while typing under 人員: every project's list and every voice Vinutes knows."""
+    names = []
+    for group in read_json(PROJECT_PEOPLE).values():
+        for n in group if isinstance(group, list) else []:
+            names = add_name(names, n) if isinstance(n, str) else names
+    for n in speakers.known_names():
+        names = add_name(names, n)
+    return names
+
+
+def with_people(job: Job, md: str, names: list[str]) -> str:
+    """The minutes with the 與會人員 line showing the meeting's list."""
+    found = ATTENDEES.search(md)
+    if found and names:
+        sep = ', ' if job.lang == 'en' else '、'
+        end = re.search(r'(?:\*\*)?[。.；;]?(?:\*\*)?\s*$', found.group('names')).group(0)   # its full stop and bold stay
+        md = md[:found.start('names')] + sep.join(names) + end + md[found.end('names'):]
+    return md
+
+
+def silent_people(job: Job) -> list[str]:
+    """The meeting's people that no voice in the recording is."""
+    shown = [n for n in speakers_shown(job).values() if n]
+    return [n for n in meeting_people(job) if not any(same_name(n, s) for s in shown)]
+
+
+def people_change(job: Job, names: list[str], renames=()) -> dict:
+    """Keep the list, then put it, and each voice's new name (group, the name it had, the new one), into the
+    minutes and the Doc."""
+    save_meeting_people(job, names)
+    result = fresh()
+    if job.md_path and not job.missing:
+        new_md = with_people(job, job.md, names)
+        others = names + known_people()
+        for group, before, after in renames:
+            new_md = speakers.name_voice(job.dir, new_md, group, before, after, others)
+        if new_md != job.md:
+            result = push_edit(job, new_md)
+    for group, _, after in renames:                   # the mail says it the same way
+        body = job.dir / '信件內文.txt'
+        if body.is_file() and not job.state.get('sent'):
+            text = body.read_text(encoding='utf-8')
+            if (named := speakers.letter(group).sub(lambda _: after, text)) != text:
+                body.write_text(named, encoding='utf-8')
+    return result
+
+
+def cmd_people(job: Job, action: str, name: str, group: str = ''):
+    """+ 加人 (add), ✕ (remove), or a guess about a voice the recording could not tell (add with its letter)."""
+    name = one_line(name, 30)
+    if not name:
+        sys.exit(t('people_no_name'))
+    project = project_of(job)
+    names = meeting_people(job)
+    renames = []
+    if action == 'add':
+        names = add_name(names, name)
+        save_project_people(project, add_name(project_people(project), name))
+        job.log(me(), t('log_people_add', name=name), 'speaker')
+    elif action == 'remove':
+        names = [n for n in names if not same_name(n, name)]
+        save_project_people(project, [n for n in project_people(project) if not same_name(n, name)])
+        for group, shown in speakers_shown(job).items():   # the voice with this name is a 講者 X again, in the minutes too
+            if shown and same_name(shown, name):
+                speakers.clear_name(job.dir, group)
+                renames.append((group, shown, f"{'Speaker' if job.lang == 'en' else '講者'} {group}"))
+        job.log(me(), t('log_people_remove', name=name), 'speaker')
+    else:
+        sys.exit(__doc__)
+    if action == 'add' and group:
+        renames.append((group, '', name))
+    result = people_change(job, names, renames)
+    answer(job, result, html=bool(result.get('reload')), people=meeting_people(job), voices=voices_view(job),
+           speakers=speakers_shown(job), silent=silent_people(job),
+           transcript=transcript(job), log=job.log_entries()[:200])
 
 
 def check_items(job: Job) -> list[dict]:
@@ -1468,7 +1650,8 @@ def answer(job: Job, result: dict, html: bool = False, **extra):
     skipped = list(extra.pop('skipped', [])) + list(result.get('skipped', []))
     data = {'saved_at': f'{now():%H:%M}', 'conflicts': result['conflicts'], 'held': result['held'],
             'warning': result['warning'], 'todo': todo_items(job, md), 'attendees': attendees(md), 'skipped': skipped,
-            **extra}
+            'people': meeting_people(job), 'speakers': speakers_shown(job), 'silent': silent_people(job),
+            'check': check_items(job), **extra}
     if result['reload'] or skipped or html:
         data['html'] = preview(md, result['marks'], current_anchors(job, md))
         data['shown'] = page_token(job, data['html'])
@@ -1807,14 +1990,32 @@ def voices_view(job: Job) -> list[dict]:
 
 def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     """The user named a voice in the transcript: every line of it, or one line."""
+    before = (next((v['name'] for v in voices_view(job) if v['group'] == group), '')
+              or speaker_map(job).get(group, ''))       # the name the minutes use for this voice now
     speakers.set_name(job.dir, group, name, int(line) if line.isdigit() else None)
     who = name.strip()[:30]
     lines = transcript(job)
     what = ((t('speaker_line_at', at=lines[int(line)]['at']) if int(line) < len(lines) else t('speaker_a_line'))
             if line.isdigit() else f'{t("speaker")} {group}')
     job.log(me(), t('log_speaker', what=what, who=who), 'speaker')
-    out({'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
-         'remembered': who})
+    extra = {'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
+             'remembered': who}
+    if line.isdigit():                                # one line: only the transcript
+        return out(extra)
+    project = project_of(job)                        # the whole voice: the person was there, the minutes say so
+    names = meeting_people(job)
+    if before and not same_name(before, who):         # the voice had another name: that one goes, in the minutes too
+        names = [n for n in names if not same_name(n, before)]
+    names = add_name(names, who)
+    save_speaker(job, group, who)
+    save_project_people(project, add_name(project_people(project), who))
+    settled = [c['label'] for c in check_items(job) if c.get('speaker') == group]   # the guess about it is answered
+    if settled:
+        job.state.setdefault('confirmed', []).extend(settled)
+        job.save_state()
+    result = people_change(job, names, [(group, before, who)])
+    answer(job, result, html=bool(result.get('reload')), people=meeting_people(job), speakers=speakers_shown(job),
+           silent=silent_people(job), **extra)
 
 
 def finished_body(body: str) -> str:
@@ -1866,7 +2067,9 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
                      'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
             'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
-            'attendees': attendees(md), 'attach_files': len(linked_files(job, md)), **ai_choice(),
+            'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(),
+            'speakers': speakers_shown(job), 'silent': silent_people(job),
+            'attach_files': len(linked_files(job, md)), **ai_choice(),
             'audio': str(audio) if audio.is_file() else '',
             'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file(), 'minutes_lang': job.lang,
             **neighbours(job)}
@@ -1964,7 +2167,9 @@ def cmd_refresh(job: Job):
     job.save_state()
     md = '' if job.missing else job.md
     out({'todo': todo_items(job, md) if md else [], 'check': check_items(job), 'learned': learned,
-         'attendees': attendees(md), 'log': job.log_entries()[:200], 'warning': warning,
+         'attendees': attendees(md), 'people': meeting_people(job), 'speakers': speakers_shown(job),
+         'silent': silent_people(job),
+         'log': job.log_entries()[:200], 'warning': warning,
          'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()})
 
 
@@ -1990,7 +2195,8 @@ def cmd_locate(job: Job, words: str):
 
 
 TURN: list = []
-CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh'}
+CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
+           'people', 'speaker'}
 NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo'}
 
 
@@ -2086,6 +2292,8 @@ def main():
         cmd_confirm(job, ' '.join(rest))
     elif cmd == 'attach' and len(rest) >= 2:
         cmd_attach(job, rest[0], rest[1])
+    elif cmd == 'people' and len(rest) >= 2:
+        cmd_people(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
     elif cmd == 'speaker' and len(rest) >= 2:
         cmd_speaker(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
     elif cmd == 'delete':

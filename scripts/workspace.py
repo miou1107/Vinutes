@@ -325,9 +325,12 @@ def meeting(start_iso: str, end_iso: str):
         for f in got['earlier']:
             show(f['ev'], f['cal'])
     ev = match['ev'] if match else {}
+    # who was invited (an ERP room booking puts its invitees here too): the meeting's people start from them
+    guests = [{'name': flat(a.get('displayName'), 60), 'email': flat(a.get('email'), 100), 'self': bool(a.get('self'))}
+              for a in ev.get('attendees', []) if not a.get('resource') and a.get('responseStatus') != 'declined']
     print('MATCH ' + json.dumps({'title': ev.get('summary', ''), 'series': core_title(ev.get('summary', '')),
-                                 'recurring': ev.get('recurringEventId', ''), 'start': ev.get('start', {}).get('dateTime', '')},
-                                ensure_ascii=False))
+                                 'recurring': ev.get('recurringEventId', ''), 'start': ev.get('start', {}).get('dateTime', ''),
+                                 'guests': guests}, ensure_ascii=False))
 
 
 def flat(text, most: int = 200) -> str:

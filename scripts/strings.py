@@ -64,6 +64,9 @@ EN = {
                     'the Setup Checklist.',
     'err_rate_limit': '{ai} has used up its usage limit. Click “Write up again” once it resets.',
     'err_limit_until': '{ai} has used up its usage limit until {when}. You can switch to another AI meanwhile.',
+    'people_no_name': 'Type a name first.',
+    'log_people_add': 'Added {name} to the attendees',
+    'log_people_remove': 'Took {name} off the attendees',
     'err_codex_old': "Codex is too old to work with a ChatGPT account. Update Codex, then click “Write up again”.",
     'err_not_logged_in': "{ai} isn't signed in. Sign in at item 5 of the Setup Checklist.",
     # auto_minutes.py: the write-up
@@ -311,6 +314,9 @@ ZH = {
     'err_docs_api': 'Google Cloud 專案還沒開啟 Google Docs API，請到「環境設定自檢」的第 8 項按「開啟」。',
     'err_rate_limit': '{ai} 的用量已經用完，等額度恢復後再按「重新整理」。',
     'err_limit_until': '{ai} 的用量已經用完，{when}才會恢復，可以先換用其他 AI。',
+    'people_no_name': '請先輸入名字。',
+    'log_people_add': '把 {name} 加進與會人員',
+    'log_people_remove': '把 {name} 從與會人員移除',
     'err_codex_old': 'Codex 的版本太舊，沒辦法用 ChatGPT 帳號整理。請先更新 Codex，再按「重新整理」。',
     'err_not_logged_in': '{ai} 還沒登入，請到「環境設定自檢」的第 5 項登入。',
     # auto_minutes.py: the write-up

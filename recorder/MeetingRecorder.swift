@@ -1625,7 +1625,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach", "move", "tags"]
+                                     "speaker", "attach", "move", "tags", "people"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1763,6 +1763,16 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             }
             let line = (args["line"] as? NSNumber).map { [String($0.intValue)] } ?? []
             app(["speaker", dir.path, group, name] + line, done)
+        case "people":
+            // 人員: add someone to the meeting, take someone off, or a voice's guessed name (with its letter)
+            let action = args["action"] as? String ?? ""
+            let name = (args["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let group = args["group"] as? String ?? ""
+            guard action == "add" || action == "remove", !name.isEmpty, name.count <= 30,
+                  group.isEmpty || group.range(of: #"^[A-Z]$"#, options: .regularExpression) != nil else {
+                return done(false, ["message": tr("err.speakerName")])
+            }
+            app(["people", dir.path, action, name] + (group.isEmpty ? [] : [group]), done)
         case "move":
             // the project this meeting belongs to ('' = 未分類); minutes_app.py trims it to one line
             app(["move", dir.path, args["project"] as? String ?? ""], done)

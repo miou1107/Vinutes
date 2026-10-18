@@ -240,9 +240,19 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .pmin { font-size: 12px; color: var(--muted); }
 .plink { all: unset; cursor: pointer; font-size: 12px; color: var(--blue); }
 .plink:hover { text-decoration: underline; }
-.papply { align-self: flex-start; height: 28px; font-size: 12px; }
-.pnames { display: flex; flex-wrap: wrap; gap: 6px; }
-.pname-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font-size: 12px; }
+.plink[disabled], .px[disabled] { opacity: 0.4; cursor: default; }
+.pn { font-size: 14px; }
+.px { all: unset; cursor: pointer; display: inline-flex; padding: 2px 4px; color: var(--muted); border-radius: 4px; }
+.px:hover { background: var(--line); }
+.padd { align-self: flex-start; }
+.addrow .pin { all: unset; box-sizing: border-box; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--blue); background: var(--field); font-size: 13px; }
+.ac { margin-top: 4px; border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); padding: 4px; }
+.ac[hidden] { display: none; }
+.aci { padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.aci.on, .aci:hover { background: var(--blue-bg); color: var(--blue); }
+.kind { align-self: flex-start; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px; }
+.kind.red { color: var(--red); background: var(--red-bg); }
+.kind.yellow { color: var(--yellow-label); background: var(--yellow-bg); }
 
 /* talking to Claude */
 .ask { flex: none; padding: 10px 24px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
@@ -257,7 +267,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .learn .lh { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--blue-ink); }
 .learn .lr { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 /* three rows, then a scroll bar; 展開 makes room for six */
-.learn .lrows { display: flex; flex-direction: column; gap: 6px; max-height: calc(24px * 3 + 6px * 2); overflow-y: auto; }
+.learn .lrows { display: flex; flex-direction: column; gap: 6px; max-height: calc(24px * 2 + 6px); overflow-y: auto; }
 .learn.open .lrows { max-height: calc(24px * 6 + 6px * 5); }
 .learn .lr.off .lt { text-decoration: line-through; color: var(--faint); }
 .tag { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--blue-bg); color: var(--blue-ink); border: 1px solid var(--blue-line); }
@@ -467,3 +477,18 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .pset .plbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .pset .pinput { height: 30px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); font-size: 13px; }
 .pset .dnote.small { font-size: 12px; color: var(--muted); }
+
+/* 人員: who each voice is */
+.pickwrap { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.pick { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px;
+        border: 1px solid var(--field-line); background: var(--field); font-size: 13px; cursor: pointer; }
+.pick.done { border-color: var(--line); }
+.pick[disabled] { opacity: 0.5; cursor: default; }
+.pick .ph { font-weight: 600; }
+.pick .caret { margin-left: auto; color: var(--muted); font-size: 11px; }
+.menu { border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+.mi { padding: 7px 10px; border-radius: 6px; font-size: 13px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.mi:hover, .mi.on { background: var(--blue-bg); color: var(--blue); }
+.mi .gs { color: var(--yellow-label); font-size: 12px; }
+.mi.other { color: var(--blue); border-top: 1px solid var(--line); margin-top: 4px; border-radius: 0 0 6px 6px; }
+.silent { padding: 2px; }

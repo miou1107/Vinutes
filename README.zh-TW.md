@@ -49,15 +49,15 @@ git clone https://github.com/miou1107/Vinutes ~/Vinutes
 
 第一次安裝會下載語音模型（約 1.6 GB），需要等一段時間。裝好之後，選單列會出現麥克風圖示。打開會議視窗，照環境設定自檢清單完成一次設定。
 
-## 在 Claude Code 裡查會議
+## 在 Claude Code 和其他 AI 工具裡查會議
 
-Vinutes 也可以當 MCP 伺服器用。在 Claude Code 加一次：
+Vinutes 也可以當 MCP 伺服器用。安裝或更新 Vinutes 時，會自動接上你 Mac 上的 AI 工具：Claude Code、Codex、Gemini CLI、Claude 桌面版、Antigravity 和 Cursor。後面三個要重新開一次才看得到會議。之後才裝的 AI 工具，執行這一行就能接上：
 
 ```bash
-claude mcp add --scope user vinutes -- ~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/mcp_server.py
+~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/connect_agents.py
 ```
 
-之後不管在哪個資料夾，問 Claude Code「上週的專案會議決定了什麼」，Claude 會自己去翻會議記錄和逐字稿，回答時附上是哪一天、哪一場會議。你請它改的時候，它也可以幫講者填名字、在「八、補充資訊」補一段、修改紀錄裡的文字、加標籤或換專案。Google 文件會一起更新，操作紀錄會寫是 Claude Code 改的。刪除會議和寄信，還是只能在 Vinutes 裡按。
+之後不管在哪個資料夾，問 Claude Code（或其他接上的工具）「上週的專案會議決定了什麼」，Claude 會自己去翻會議記錄和逐字稿，回答時附上是哪一天、哪一場會議。你請它改的時候，它也可以幫講者填名字、在「八、補充資訊」補一段、修改紀錄裡的文字、加標籤或換專案。Google 文件會一起更新，操作紀錄會寫是 Claude Code 改的。刪除會議和寄信，還是只能在 Vinutes 裡按。
 
 ## 怎麼更新
 

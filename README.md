@@ -8,12 +8,14 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 
 - **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on. In an online meeting it records the other side too, also with headphones on (macOS 14.2 and later).
 - **Transcribes on your Mac.** Audio is turned into text locally with Whisper and is not uploaded.
-- **Tells speakers apart** by their voices, and remembers the names you give them.
+- **Shows live captions.** CC on the floating bar shows what people are saying, under the bar, as they say it (macOS 26 and later). The captions are made on your Mac and are not written into the transcript.
+- **Tells speakers apart** by their voices. In the People tab you pick who each voice is: the minutes and the email change to that name, and the next meeting recognises the voice.
 - **Writes the minutes with the AI you already use:** Claude Code, Codex or Antigravity. Each one runs in a sandbox that can only read and write that meeting's folder.
 - **Matches the recording to your Google Calendar** to fill in the title, time, place and attendees.
 - **Publishes a Google Doc** and keeps it in sync: your colleagues' edits and comments show up in the app, and when you edit in the app only the paragraphs you changed are updated, so their comments stay where they were.
 - **Learns from your corrections.** A misheard name you fix once goes into your glossary, and the next meeting gets it right.
 - **Prepares the email** to the attendees. Nothing is sent until you press Send.
+- **Files meetings by project and tag.** Each meeting belongs to a project and can carry tags. Pick a tag in the list to see only the meetings that have it.
 - **Keeps the list tidy.** Archive the meetings you no longer need to see, or delete them: the recording, transcript and minutes go to the Trash, and the Google Doc to Google Drive's trash. Select several at once, or right-click one.
 
 ## Languages

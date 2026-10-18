@@ -1,2 +1,4 @@
 /* What macOS shows when Vinutes first asks for the microphone. */
 "NSMicrophoneUsageDescription" = "錄下會議的聲音，整理成會議紀錄。";
+/* What macOS shows when Vinutes first asks to record the sound the Mac plays. */
+"NSAudioCaptureUsageDescription" = "線上會議時，也錄下對方說的話。";

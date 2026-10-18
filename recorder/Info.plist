@@ -31,5 +31,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Vinutes records the meeting so it can write up the minutes.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Vinutes also records what the other side says in an online meeting.</string>
 </dict>
 </plist>

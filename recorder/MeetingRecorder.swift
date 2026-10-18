@@ -360,7 +360,7 @@ struct Job {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
     var bar: RecordingBar!
-    var recorder: AVAudioRecorder?
+    var recorder: MeetingCapture?
     var currentJob: URL?
     var startedAt: Date?
     var pausedAt: Date?
@@ -706,13 +706,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let dir = recordingsDir.appendingPathComponent(fmt.string(from: now))
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // 16 kHz mono PCM in CAF: what the transcriber wants, and readable even if the app dies mid-meeting
-            let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000,
-                                           AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
-                                           AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
-            let rec = try AVAudioRecorder(url: dir.appendingPathComponent("錄音.caf"), settings: settings)
-            rec.isMeteringEnabled = true         // the floating bar's bars follow how loud the room is
-            guard rec.record() else { throw NSError(domain: "rec", code: 1) }
+            // 16 kHz mono PCM in CAF: what the transcriber wants, and readable even if the app dies mid-meeting;
+            // the microphone and the sound the Mac plays (an online meeting's other side) together (Capture.swift)
+            let rec = try MeetingCapture(url: dir.appendingPathComponent("錄音.caf"))
+            rec.note = { appLog("recording: \($0)") }
+            try rec.start()
             writeJSON(["audio": "錄音.caf", "started": isoString(now), "ended": NSNull()], dir.appendingPathComponent("job.json"))
             recorder = rec
             currentJob = dir
@@ -734,7 +732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     @objc func togglePause() {
         guard let rec = recorder else { return }
         if let since = pausedAt {
-            rec.record()
+            rec.resume()
             pausedTotal += Date().timeIntervalSince(since)
             pausedAt = nil
             appLog("recording resumed")
@@ -749,7 +747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func endRecording() -> URL? {
         guard let rec = recorder, let dir = currentJob else { return nil }
         if let since = pausedAt { pausedTotal += Date().timeIntervalSince(since) }
-        rec.stop()
+        rec.stop()                          // the file is complete once the recorder is let go, just below
         tick?.invalidate()
         if let a = awake { ProcessInfo.processInfo.endActivity(a) }
         recorder = nil; currentJob = nil; startedAt = nil; pausedAt = nil; awake = nil
@@ -1454,8 +1452,7 @@ final class RecordingBar: NSObject {
     /// about -50 dB and below counts as a quiet room, 0 dB as loud
     func listen() {
         guard let owner, owner.recording, let rec = owner.recorder else { return }
-        rec.updateMeters()
-        let level = CGFloat(max(0, min(1, (rec.averagePower(forChannel: 0) + 50) / 50)))
+        let level = CGFloat(max(0, min(1, (rec.averagePower + 50) / 50)))
         dot.show(level: level, paused: owner.paused)
     }
 

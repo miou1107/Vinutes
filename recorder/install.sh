@@ -15,6 +15,8 @@
 #      microphone again.
 #   5. writes $MINUTES_HOME/recorder.json so the app knows where Python and these scripts are, and, once, keeps
 #      Chinese for people who used Vinutes before it spoke English ("language": "zh-TW" in settings.json)
+#   6. connects Vinutes to the AI tools on this Mac, so they can look things up in the meetings
+#      (scripts/connect_agents.py)
 # One AI CLI must be installed and signed in (Claude Code, Codex or Antigravity); the script says so when none is.
 set -euo pipefail
 
@@ -164,6 +166,11 @@ if not os.path.exists(marker):
 EOF
 chmod 600 "$MINUTES_HOME/recorder.json"
 echo "ok"
+
+# the AI tools on this Mac (Claude Code, Codex, Gemini, Claude's app, Antigravity, Cursor) can look things up in
+# the meetings, and change them when asked (scripts/mcp_server.py)
+echo "connecting Vinutes to the AI tools on this Mac:"
+"$VPY" "$ROOT/scripts/connect_agents.py" | sed 's/^/  /' || echo "  (not connected; run scripts/connect_agents.py later)"
 
 open "$APP"
 echo

@@ -11,7 +11,8 @@ Online meetings are recorded with the other side's voices, also with headphones 
 
 Claude Code can look things up in your meetings, and change them when you ask (issue #4).
 
-- Add Vinutes to Claude Code once (README: Use your meetings in Claude Code). Claude Code, opened in any folder, then searches the minutes and transcripts, reads a meeting, lists projects and open action items, and answers with the meeting's date and title. Archived meetings come up only when named.
+- Installing or updating Vinutes connects it to the AI tools on the Mac: Claude Code, Codex, Gemini CLI, Claude's desktop app, Antigravity and Cursor (the last three after a restart). Their other settings stay as they were; a tool installed later is connected by running scripts/connect_agents.py.
+- Claude Code (or any of them), opened in any folder, then searches the minutes and transcripts, reads a meeting, lists projects and open action items, and answers with the meeting's date and title. Archived meetings come up only when named.
 - When you ask it to, it names a voice, adds a paragraph to 八、補充資訊, changes words in the minutes (words that appear exactly once), sets the tags or moves a meeting to a project. The Google Doc follows, and 操作紀錄 says Claude Code made the change. It can't delete a meeting or send mail.
 - When the minutes were already mailed, Claude Code is told so: the people who got them see the new text in the Doc, without a new mail.
 

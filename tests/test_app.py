@@ -2777,3 +2777,45 @@ class AgentEdit(Flows):
         with self.assertRaises(SystemExit) as stop:
             minutes_app.cmd_replace(self.job(), '預算確定為 10 萬元', '預算\n## 新章節')
         self.assertIn('不能有換行', str(stop.exception.code))
+
+
+class ConnectAgents(unittest.TestCase):
+    """install.sh connects Vinutes to the AI tools that keep their servers in a JSON file without touching the rest."""
+
+    def setUp(self):
+        import connect_agents
+        self.ca = connect_agents
+        self.root = Path(tempfile.mkdtemp(prefix='agents-'))
+        self.file = self.root / 'mcp.json'
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_added_once_and_the_other_servers_kept(self):
+        self.file.write_text(json.dumps({'mcpServers': {'ownmind': {'command': 'node'}}, 'theme': 'dark'}))
+        self.assertIn('connected', self.ca.json_tool('Cursor', self.root, self.file, False))
+        self.assertEqual(self.ca.json_tool('Cursor', self.root, self.file, False), 'Cursor: already connected')
+        data = json.loads(self.file.read_text())
+        self.assertEqual(data['theme'], 'dark')
+        self.assertEqual(set(data['mcpServers']), {'ownmind', 'vinutes'})
+        self.assertTrue(data['mcpServers']['vinutes']['args'][0].endswith('mcp_server.py'))
+        self.ca.json_tool('Cursor', self.root, self.file, True)
+        self.assertEqual(set(json.loads(self.file.read_text())['mcpServers']), {'ownmind'})
+
+    def test_an_empty_file_or_none(self):
+        self.file.write_text('')
+        self.assertIn('connected', self.ca.json_tool('Antigravity', self.root, self.file, False))
+        self.assertIn('vinutes', json.loads(self.file.read_text())['mcpServers'])
+
+    def test_a_tool_not_installed_or_a_broken_file_is_left_alone(self):
+        self.assertEqual(self.ca.json_tool('Cursor', self.root / 'none', self.root / 'none' / 'mcp.json', False),
+                         'Cursor: not installed')
+        self.file.write_text('{ not json')
+        self.assertIn('left alone', self.ca.json_tool('Cursor', self.root, self.file, False))
+        self.assertEqual(self.file.read_text(), '{ not json')
+
+    def test_the_file_keeps_its_permissions(self):
+        self.file.write_text('{}')
+        os.chmod(self.file, 0o640)
+        self.ca.json_tool('Cursor', self.root, self.file, False)
+        self.assertEqual(os.stat(self.file).st_mode & 0o777, 0o640)

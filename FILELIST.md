@@ -24,6 +24,7 @@
 | `scripts/minutes_app.py` | Everything the meeting window asks for: the list, syncing the Doc, saving edits, AI rewrites, comments, history, learning from the user's edits, archiving and deleting meetings, projects and tags |
 | `scripts/ai_runner.py` | Runs Claude Code, Codex or Antigravity, each sandboxed to one meeting's folder |
 | `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper); audio is not uploaded |
+| `scripts/mcp_server.py` | Vinutes as an MCP server: Claude Code searches and reads past meetings, and names speakers, adds notes, changes words, tags and projects when asked |
 | `scripts/speakers.py` | Tells speakers apart by voice and remembers the names the user gives them |
 | `scripts/doc_sync.py` | Keeps the Markdown minutes and the Google Doc in step, paragraph by paragraph, so comments stay put |
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |

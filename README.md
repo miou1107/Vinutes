@@ -6,7 +6,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 
 ## What it does
 
-- **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on.
+- **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on. In an online meeting it records the other side too, also with headphones on (macOS 14.2 and later).
 - **Transcribes on your Mac.** Audio is turned into text locally with Whisper and is not uploaded.
 - **Tells speakers apart** by their voices, and remembers the names you give them.
 - **Writes the minutes with the AI you already use:** Claude Code, Codex or Antigravity. Each one runs in a sandbox that can only read and write that meeting's folder.
@@ -49,6 +49,16 @@ git clone https://github.com/miou1107/Vinutes ~/Vinutes
 ```
 
 The first run downloads the speech model (about 1.6 GB), so it can take a while. When it finishes, a microphone icon appears in the menu bar. Open the meeting window and go through the setup checklist once.
+
+## Use your meetings in Claude Code and other AI tools
+
+Vinutes is also an MCP server. Installing or updating Vinutes connects it to the AI tools on your Mac: Claude Code, Codex, Gemini CLI, Claude's desktop app, Antigravity and Cursor (restart the last three once). To connect a tool installed later, run:
+
+```bash
+~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/connect_agents.py
+```
+
+Then, in any folder, ask Claude Code (or any of them) "what did last week's project meeting decide?" and it searches your minutes and transcripts and answers with the meeting's date and title. When you ask it to, it can also name a speaker, add a paragraph to section 8, change words in the minutes, and set tags or the project; the Google Doc follows, and the meeting's history says Claude Code made the change. Deleting a meeting and sending mail stay in Vinutes.
 
 ## Update
 

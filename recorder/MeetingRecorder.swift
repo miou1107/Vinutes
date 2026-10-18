@@ -120,6 +120,12 @@ let STRINGS: [String: [String: String]] = [
         "bar.pause": "Pause (⌃⌥P)",
         "bar.resume": "Resume (⌃⌥P)",
         "bar.stop": "Stop recording (⌃⌥R)",
+        "bar.captions": "Live captions on your screen only; not saved in the transcript",
+        "bar.captionLanguage": "Caption language",
+        "caption.downloading": "Downloading %@ captions, the first time only…",
+        "caption.unsupported": "No live captions for this language",
+        "caption.failed": "Captions stopped. Press CC twice to try again.",
+        "caption.listening": "Listening…",
         "quit.title": "You're still recording",
         "btn.keepRecording": "Keep Recording",
         "btn.stopAndWrite": "Stop and Write Up",
@@ -156,6 +162,7 @@ let STRINGS: [String: [String: String]] = [
         "err.alreadyDone": "This meeting has already been written up.",
         "err.updateWhileRecording": "You're recording. You can update when the recording ends.",
         "err.unknownCommand": "Vinutes doesn't recognize that action.",
+        "err.pasteFailed": "The pasted picture could not be saved. You can choose it with the picture button instead.",
         "err.badFormat": "Vinutes doesn't recognize that attachment format.",
         "err.noRecipient": "Add at least one recipient.",
         "err.emptyMail": "The subject and the message both need text.",
@@ -172,6 +179,7 @@ let STRINGS: [String: [String: String]] = [
         "panel.client": "Choose the client file you downloaded from Google Cloud (a JSON file whose name starts with client_secret)",
         "panel.useFile": "Use This File",
         "panel.images": "Choose pictures to insert into the minutes",
+        "paste.name": "Pasted picture",
         "panel.files": "Choose files to add to the minutes",
         "panel.add": "Add",
     ],
@@ -215,6 +223,12 @@ let STRINGS: [String: [String: String]] = [
         "bar.pause": "暫停（⌃⌥P）",
         "bar.resume": "繼續（⌃⌥P）",
         "bar.stop": "結束錄音（⌃⌥R）",
+        "bar.captions": "即時字幕：只顯示在你的螢幕上，不會寫進逐字稿",
+        "bar.captionLanguage": "字幕語言",
+        "caption.downloading": "正在下載%@字幕資料，只有第一次要等…",
+        "caption.unsupported": "這個語言沒有即時字幕",
+        "caption.failed": "字幕停了，按兩下 CC 可以重試",
+        "caption.listening": "正在聽…",
         "quit.title": "還在錄音",
         "btn.keepRecording": "繼續錄音",
         "btn.stopAndWrite": "結束錄音並整理",
@@ -251,6 +265,7 @@ let STRINGS: [String: [String: String]] = [
         "err.alreadyDone": "這場會議已經整理好了。",
         "err.updateWhileRecording": "正在錄音，錄音結束後才能更新。",
         "err.unknownCommand": "不認得的動作。",
+        "err.pasteFailed": "貼上的圖片儲存失敗，可以改用圖片按鈕選擇圖片。",
         "err.badFormat": "不認得的附件格式。",
         "err.noRecipient": "至少要有一位收件人。",
         "err.emptyMail": "主旨和信件內容都要有字。",
@@ -267,6 +282,7 @@ let STRINGS: [String: [String: String]] = [
         "panel.client": "選擇從 Google Cloud 下載的用戶端檔案（client_secret 開頭的 JSON 檔）",
         "panel.useFile": "使用這個檔案",
         "panel.images": "選擇要插入會議記錄的圖片",
+        "paste.name": "貼上的圖片",
         "panel.files": "選擇要加進會議記錄的檔案",
         "panel.add": "加入",
     ],
@@ -344,7 +360,7 @@ struct Job {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
     var bar: RecordingBar!
-    var recorder: AVAudioRecorder?
+    var recorder: MeetingCapture?
     var currentJob: URL?
     var startedAt: Date?
     var pausedAt: Date?
@@ -367,6 +383,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // MARK: launch
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        appLog("start: Vinutes \(version), macOS \(ProcessInfo.processInfo.operatingSystemVersionString), " +
+               "language \(uiLanguage()), meeting language \(meetingLanguage()), " +
+               "microphone \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
         NSApp.mainMenu = mainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
@@ -397,6 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        appLog("quit asked" + (recording ? " while recording" : ""))
         if recording {
             let alert = NSAlert()
             alert.messageText = tr("quit.title")
@@ -406,8 +427,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
             stopRecording()
         }
-        guard let manager, manager.window.isVisible else { return .terminateNow }
-        manager.finish { NSApp.reply(toApplicationShouldTerminate: true) }      // what was typed is saved first
+        guard let manager, manager.window.isVisible else { appLog("quit", wait: true); return .terminateNow }
+        manager.finish { appLog("quit after the meeting window saved", wait: true); NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
 
@@ -427,11 +448,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             let id = EventHotKeyID(signature: OSType(0x564D_5243), id: number)       // 'VMRC'
             if RegisterEventHotKey(UInt32(key), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &ref) == noErr {
                 hotKeys.append(ref)
+            } else {
+                appLog("shortcut \(number == 1 ? "⌃⌥R" : "⌃⌥P") could not be registered (another app has it?)")
             }
         }
     }
 
     func hotKey(_ id: UInt32) {
+        appLog("shortcut \(id == 1 ? "⌃⌥R" : "⌃⌥P")" + (recording ? " while recording" : ""))
         switch id {
         case 1: recording ? stopRecording() : startRecording()
         case 2: if recording { togglePause() }
@@ -651,10 +675,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case .authorized:
             beginRecording()
         case .notDetermined:
+            appLog("asking for the microphone")
             AVCaptureDevice.requestAccess(for: .audio) { ok in
+                appLog("microphone " + (ok ? "allowed" : "refused"))
                 DispatchQueue.main.async { ok ? self.beginRecording() : self.micDenied() }
             }
         default:
+            appLog("recording refused: no microphone permission")
             micDenied()
         }
     }
@@ -679,12 +706,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let dir = recordingsDir.appendingPathComponent(fmt.string(from: now))
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // 16 kHz mono PCM in CAF: what the transcriber wants, and readable even if the app dies mid-meeting
-            let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000,
-                                           AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
-                                           AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
-            let rec = try AVAudioRecorder(url: dir.appendingPathComponent("錄音.caf"), settings: settings)
-            guard rec.record() else { throw NSError(domain: "rec", code: 1) }
+            // 16 kHz mono PCM in CAF: what the transcriber wants, and readable even if the app dies mid-meeting;
+            // the microphone and the sound the Mac plays (an online meeting's other side) together (Capture.swift)
+            let rec = try MeetingCapture(url: dir.appendingPathComponent("錄音.caf"))
+            rec.note = { appLog("recording: \($0)") }
+            try rec.start()
             writeJSON(["audio": "錄音.caf", "started": isoString(now), "ended": NSNull()], dir.appendingPathComponent("job.json"))
             recorder = rec
             currentJob = dir
@@ -695,7 +721,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refreshIcon() }
             bar.show()
             refreshIcon()
+            appLog("recording started: \(dir.lastPathComponent)")
         } catch {
+            appLog("recording could not start: \(error.localizedDescription)")
             try? FileManager.default.removeItem(at: dir)
             showError(tr("start.failTitle"), tr("start.failText", error.localizedDescription))
         }
@@ -704,12 +732,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     @objc func togglePause() {
         guard let rec = recorder else { return }
         if let since = pausedAt {
-            rec.record()
+            rec.resume()
             pausedTotal += Date().timeIntervalSince(since)
             pausedAt = nil
+            appLog("recording resumed")
         } else {
             rec.pause()
             pausedAt = Date()
+            appLog("recording paused")
         }
         refreshIcon()
     }
@@ -717,7 +747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func endRecording() -> URL? {
         guard let rec = recorder, let dir = currentJob else { return nil }
         if let since = pausedAt { pausedTotal += Date().timeIntervalSince(since) }
-        rec.stop()
+        rec.stop()                          // the file is complete once the recorder is let go, just below
         tick?.invalidate()
         if let a = awake { ProcessInfo.processInfo.endActivity(a) }
         recorder = nil; currentJob = nil; startedAt = nil; pausedAt = nil; awake = nil
@@ -733,7 +763,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         meta["ended"] = isoString(Date())
         meta["paused_seconds"] = paused
         writeJSON(meta, dir.appendingPathComponent("job.json"))
+        let size = (try? FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("錄音.caf").path))?[.size] as? Int ?? 0
+        appLog("recording stopped: \(dir.lastPathComponent), \(Int(elapsedFor(meta))) s, paused \(paused) s, \(size / 1024) KB")
         process(dir)
+    }
+
+    /// how long a finished recording ran, from its job.json
+    func elapsedFor(_ meta: [String: Any]) -> TimeInterval {
+        let f = ISO8601DateFormatter()
+        guard let a = (meta["started"] as? String).flatMap({ f.date(from: $0) }),
+              let b = (meta["ended"] as? String).flatMap({ f.date(from: $0) }) else { return 0 }
+        return b.timeIntervalSince(a)
     }
 
     @objc func cancelRecording() {
@@ -744,6 +784,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         alert.addButton(withTitle: tr("btn.delete"))
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertSecondButtonReturn, let dir = endRecording() else { return }
+        appLog("recording discarded: \(dir.lastPathComponent)")
         try? FileManager.default.removeItem(at: dir)
     }
 
@@ -758,9 +799,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         try? FileManager.default.removeItem(at: Job(dir: dir).notifiedMarker)
         writeStatus(dir, "transcribing", tr("status.preparing"))
         refreshIcon()
+        appLog("write-up started: \(dir.lastPathComponent)")
         runPipeline([dir.path]) { [weak self] code, out in
             // the script records its own failures; this covers a crash before it could
             let job = Job(dir: dir)
+            appLog("write-up ended: \(dir.lastPathComponent), exit \(code), step \(job.status["step"] as? String ?? "?")")
             if code != 0 && !job.finished {
                 self?.writeStatus(dir, "failed", lastLine(out).isEmpty ? tr("status.stopped") : lastLine(out))
             }
@@ -779,6 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                   let modified = attrs[.modificationDate] as? Date else { continue }
             meta["ended"] = isoString(modified)
             writeJSON(meta, job.dir.appendingPathComponent("job.json"))
+            appLog("recording found unfinished after a stop: \(job.dir.lastPathComponent)")
             process(job.dir)
         }
     }
@@ -795,7 +839,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     /// Runs one of the Python scripts through a login shell, so the claude command is found on the user's PATH.
     func runScript(_ name: String, _ args: [String], done: @escaping (Int32, String) -> Void) {
+        // the script, its command and the meeting folder: never what the user typed (a request, a name, a subject)
+        var parts = [name]
+        if let first = args.first { parts.append(first.hasPrefix("/") ? URL(fileURLWithPath: first).lastPathComponent : first) }
+        if args.count > 1, args[1].hasPrefix("/") { parts.append(URL(fileURLWithPath: args[1]).lastPathComponent) }
+        let what = parts.joined(separator: " ")
+        let began = Date()
+        // asked every few seconds while the window is open: logged only when they fail
+        let quiet = name == "minutes_app.py" && ["refresh", "list", "version", "log", "locate"].contains(args.first ?? "")
+        let done: (Int32, String) -> Void = { code, out in
+            let took = String(format: "%.1f s", Date().timeIntervalSince(began))
+            if code == 0 { if !quiet { appLog("ran \(what): ok, \(took)") } }
+            else { appLog("ran \(what): exit \(code), \(took): \(String(lastLine(out).prefix(300)))") }
+            done(code, out)
+        }
         guard let cfg = recorderConfig() else {
+            appLog("no recorder.json: install.sh has not been run")
             showError(tr("noApp.title"), tr("noApp.text"))
             done(1, "")
             return
@@ -894,7 +953,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     @objc func showAll() { showManager(select: nil) }
 
     func showManager(select id: String?, setup: Bool = false) {
-        if manager == nil { manager = ManagerWindow(owner: self) }
+        if manager == nil { appLog("meeting window opened" + (setup ? " on the setup checklist" : "")); manager = ManagerWindow(owner: self) }
         manager?.show(select: id, setup: setup)
     }
 
@@ -919,6 +978,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /// While the meeting window is open the app is in the Dock and in ⌘Tab, so clicking another app
     /// does not lose the window; with it closed the app is back to the menu bar only.
     func managerClosed() {
+        appLog("meeting window closed")
         manager = nil
         NSApp.setActivationPolicy(.accessory)
     }
@@ -929,6 +989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     func showError(_ title: String, _ text: String) {
+        appLog("error shown: \(title): \(String(text.prefix(300)))")
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
@@ -952,19 +1013,297 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 }
 
 
+// MARK: live captions
+// Shown under the floating bar, never written anywhere: the minutes still come from the transcript made after the
+// recording. A helper (Captions.swift) reads the recording file as it grows and runs Apple's transcriber on this Mac
+// (macOS 26 and later), so the recording itself is untouched.
+
+/// The languages the caption menu offers: (Apple's locale, its name in that language)
+let CAPTION_LANGUAGES: [(id: String, name: String)] = [("zh-TW", "中文"), ("en-US", "English"), ("ja-JP", "日本語"),
+                                                       ("ko-KR", "한국어"), ("es-ES", "Español"), ("fr-FR", "Français")]
+
+/// What captions start in: the meeting language from Settings, or the app's language when that is automatic
+func defaultCaptionLanguage() -> String {
+    switch meetingLanguage() {
+    case "en": return "en-US"
+    case "zh": return "zh-TW"
+    default: return uiLanguage() == "en" ? "en-US" : "zh-TW"
+    }
+}
+
+// MARK: logs
+// What Vinutes does goes to ~/Library/Logs/Vinutes/ (Console.app shows them too): app.log for the app, captions.log
+// for live captions (app and helper), scripts.log for the Python scripts. Only what happened and how long it took:
+// no transcript, minutes, mail text or addresses. Each file is kept under 5 MB; past that it becomes <name>.1
+// (replacing the one before), so a log never takes more than 10 MB.
+
+let LOG_DIR = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Vinutes")
+let LOG_LIMIT = 5_000_000
+private let logQueue = DispatchQueue(label: "vinutes.log")
+
+func writeLog(_ name: String, _ line: String, wait: Bool = false) {
+    let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withInternetDateTime, .withFractionalSeconds])
+    // a message may name a recipient: never an address in a log
+    let clean = line.replacingOccurrences(of: #"[\w.+-]+@[\w-]+(\.[\w-]+)+"#, with: "<address>", options: .regularExpression)
+    let text = "[\(stamp)] \(clean)\n"
+    let work = {
+        try? FileManager.default.createDirectory(at: LOG_DIR, withIntermediateDirectories: true)
+        let file = LOG_DIR.appendingPathComponent(name)
+        if let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int, size > LOG_LIMIT {
+            _ = rename(file.path, LOG_DIR.appendingPathComponent(name + ".1").path)   // one step, replacing the older
+        }
+        let fd = open(file.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)      // whole lines, also beside other writers
+        guard fd >= 0 else { return }
+        _ = text.withCString { write(fd, $0, strlen($0)) }
+        close(fd)
+    }
+    if wait { logQueue.sync(execute: work) } else { logQueue.async(execute: work) }
+}
+
+/// what the app did: app.log (wait: written before returning, for the last lines before quitting)
+func appLog(_ line: String, wait: Bool = false) { writeLog("app.log", line, wait: wait) }
+
+/// what the app did with live captions, beside the caption helper's own steps: captions.log
+func captionLog(_ line: String) { writeLog("captions.log", "app " + line) }
+
+/// Runs the caption helper (Contents/MacOS/VinutesCaptions, built from Captions.swift) on the recording file and passes
+/// what it hears to the panel. In a process of its own: Apple's transcriber can fail or crash there without touching
+/// the recording or this app.
+final class CaptionFeed {
+    private var process: Process?
+    private var wanted = false
+    var onText: ((String, String, String) -> Void)?
+    var onNote: ((String) -> Void)?
+
+    func start(file: URL, language: String) {
+        stop()
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/VinutesCaptions")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            captionLog("no caption helper at \(helper.path)")
+            onNote?(tr("caption.failed"))
+            return
+        }
+        let p = Process()
+        p.executableURL = helper
+        p.arguments = [file.path, language]
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out
+        p.standardError = err
+        var pending = Data()
+        out.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            pending.append(chunk)
+            while let end = pending.firstIndex(of: 10) {
+                let line = pending.subdata(in: pending.startIndex..<end)
+                pending.removeSubrange(pending.startIndex...end)
+                guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: String] else { continue }
+                DispatchQueue.main.async { if self?.process === p { self?.handle(obj, language) } }   // not an old helper's
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            captionLog("helper said: " + String(decoding: chunk, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        p.terminationHandler = { [weak self] done in
+            let how = done.terminationReason == .uncaughtSignal ? "signal \(done.terminationStatus)" : "exit \(done.terminationStatus)"
+            captionLog("helper \(done.processIdentifier) ended: \(how)")
+            DispatchQueue.main.async {
+                guard let self, self.wanted, self.process === done else { return }
+                self.process = nil
+                if !(done.terminationReason == .exit && done.terminationStatus == 0) { self.onNote?(tr("caption.failed")) }
+            }
+        }
+        do {
+            try p.run()
+            process = p
+            wanted = true
+            captionLog("helper \(p.processIdentifier) started: \(language) \(file.lastPathComponent)")
+        } catch {
+            captionLog("helper did not start: \(error.localizedDescription)")
+            onNote?(tr("caption.failed"))
+        }
+    }
+
+    private func handle(_ obj: [String: String], _ language: String) {
+        guard wanted else { return }
+        if let note = obj["note"] {
+            let name = CAPTION_LANGUAGES.first { $0.id == language }?.name ?? language
+            switch note {
+            case "downloading": onNote?(tr("caption.downloading", name))
+            case "unsupported": onNote?(tr("caption.unsupported"))
+            case "failed": onNote?(tr("caption.failed"))
+            default: onNote?(tr("caption.listening"))
+            }
+        } else {
+            onText?(obj["prev"] ?? "", obj["done"] ?? "", obj["hearing"] ?? "")
+        }
+    }
+
+    func stop() {
+        wanted = false
+        if let p = process, p.isRunning {
+            captionLog("stopping helper \(p.processIdentifier)")
+            p.terminate()
+        }
+        process = nil
+    }
+}
+
+/// The captions: one line, no background, purple words with a white outline, the newest words on the right and the
+/// older ones fading out on the left (Vin 2026-10-17). A panel of its own under the floating bar that follows it and
+/// lets clicks through.
+final class CaptionPanel {
+    let panel: NSPanel
+    private let back = NSTextField(labelWithString: ""), front = NSTextField(labelWithString: "")
+    private let width: CGFloat = 320, height: CGFloat = 30, fade: CGFloat = 0.28   // the left 28% fades out
+    private let font = NSFont.systemFont(ofSize: 18, weight: .bold)
+    static let done = NSColor(srgbRed: 0x7C / 255, green: 0x4D / 255, blue: 1, alpha: 1)
+    static let hearing = NSColor(srgbRed: 0xA3 / 255, green: 0xA3 / 255, blue: 0xA9 / 255, alpha: 1)
+
+    init() {
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                        styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.canHide = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        view.wantsLayer = true
+        let mask = CAGradientLayer()                       // transparent on the left edge, fully shown from `fade` on
+        mask.frame = view.bounds
+        mask.startPoint = CGPoint(x: 0, y: 0.5)
+        mask.endPoint = CGPoint(x: 1, y: 0.5)
+        mask.colors = [NSColor.clear.cgColor, NSColor.black.cgColor]
+        mask.locations = [0, NSNumber(value: Double(fade))]
+        view.layer?.mask = mask
+        panel.contentView = view
+        for f in [back, front] {
+            f.frame = NSRect(x: 0, y: 2, width: width, height: height - 4)
+            f.autoresizingMask = [.width]
+            f.drawsBackground = false
+            f.lineBreakMode = .byClipping
+            f.maximumNumberOfLines = 1
+            view.addSubview(f)
+        }
+    }
+
+    private func words(_ parts: [(String, NSColor)], outline: Bool) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.alignment = .right
+        style.lineBreakMode = .byClipping
+        let out = NSMutableAttributedString()
+        for (text, color) in parts {
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: style]
+            if outline {                           // the white edge behind the words: an outline only, drawn wide
+                attrs[.strokeColor] = NSColor.white
+                attrs[.strokeWidth] = 26
+                attrs[.foregroundColor] = NSColor.white
+            } else {
+                attrs[.foregroundColor] = color
+            }
+            out.append(NSAttributedString(string: text, attributes: attrs))
+        }
+        return out
+    }
+
+    /// the end of the line that fits the panel; what is cut off the front is what the fade would hide anyway
+    private func fitting(_ done: String, _ hearing: String) -> (String, String) {
+        var d = done, h = hearing
+        let room = width - 8
+        while !(d + h).isEmpty, words([(d + h, .clear)], outline: false).size().width > room {
+            if !d.isEmpty { d.removeFirst() } else { h.removeFirst() }
+        }
+        return (d, h)
+    }
+
+    func show(prev: String, done: String, hearing: String, align: NSTextAlignment) {
+        let (d, h) = fitting(done.replacingOccurrences(of: "…", with: ""), hearing)
+        back.attributedStringValue = words([(d + h, .clear)], outline: true)
+        front.attributedStringValue = words([(d, Self.done), (h, Self.hearing)], outline: false)
+    }
+
+    func note(_ text: String, align: NSTextAlignment) { show(prev: "", done: "", hearing: text, align: align) }
+
+    /// under the bar, lined up with its right edge (or its left edge when the bar sits on the left of the screen)
+    func place(under bar: NSRect) -> NSTextAlignment {
+        let screen = (NSScreen.screens.first { $0.frame.intersects(bar) } ?? NSScreen.main)?.visibleFrame ?? bar
+        let left = bar.midX < screen.midX
+        var x = left ? bar.minX : bar.maxX - width
+        x = max(screen.minX + 4, min(x, screen.maxX - width - 4))
+        var y = bar.minY - height - 4
+        if y < screen.minY { y = bar.maxY + 4 }                 // the bar sits low on the screen: captions above it
+        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: false)
+        return left ? .left : .right
+    }
+}
+
+/// Five small bars that jump with the microphone's level while recording, so a glance shows the recording is
+/// running and the microphone hears the room; they lie flat and turn orange while paused.
+final class LevelBars: NSView {
+    private var bars: [CALayer] = []
+    private let count = 5, barWidth: CGFloat = 3, gap: CGFloat = 2, low: CGFloat = 3
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        for i in 0..<count {
+            let bar = CALayer()
+            bar.cornerRadius = barWidth / 2
+            bar.frame = CGRect(x: CGFloat(i) * (barWidth + gap), y: 0, width: barWidth, height: low)
+            layer?.addSublayer(bar)
+            bars.append(bar)
+        }
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: CGFloat(count) * barWidth + CGFloat(count - 1) * gap).isActive = true
+        heightAnchor.constraint(equalToConstant: 18).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// level: 0 (silence) ... 1 (loud); paused: flat and orange
+    func show(level: CGFloat, paused: Bool) {
+        let color = (paused ? NSColor.systemOrange : NSColor.systemRed).cgColor
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.12)
+        for bar in bars {
+            let h = paused ? low : low + (bounds.height - low) * min(1, level * CGFloat.random(in: 0.45...1.2))
+            bar.backgroundColor = color
+            bar.frame = CGRect(x: bar.frame.minX, y: (bounds.height - h) / 2, width: barWidth, height: h)
+        }
+        CATransaction.commit()
+    }
+}
+
 /// The small floating bar while recording: time, pause / resume, stop. Stays above other windows,
 /// on every desktop, and never takes the keyboard away from the meeting notes.
 final class RecordingBar: NSObject {
     weak var owner: AppDelegate?
     let panel: NSPanel
-    let dot = NSImageView()
+    let dot = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))
+    var meter: Timer?
+    var ccButton: NSButton?
+    var langButton: NSButton?
+    let captions = CaptionPanel()
+    let feed = CaptionFeed()
+    var captionLanguage = defaultCaptionLanguage()
+    var align: NSTextAlignment = .right
+    var captionsOn: Bool {
+        get { UserDefaults.standard.bool(forKey: "captionsOn") }
+        set { UserDefaults.standard.set(newValue, forKey: "captionsOn") }
+    }
     let time = NSTextField(labelWithString: "00:00")
     var pauseButton: NSButton!
     var stopButton: NSButton!
 
     init(owner: AppDelegate) {
         self.owner = owner
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 150, height: 38),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 164, height: 38),
                         styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: true)
         super.init()
         panel.level = .floating
@@ -989,10 +1328,25 @@ final class RecordingBar: NSObject {
         time.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
         pauseButton = button("pause.fill", #selector(AppDelegate.togglePause), tr("bar.pause"))
         stopButton = button("stop.fill", #selector(AppDelegate.stopRecording), tr("bar.stop"))
-        let row = NSStackView(views: [dot, time, pauseButton, stopButton])
+        var views: [NSView] = [dot, time]
+        if #available(macOS 26.0, *) {
+            let cc = NSButton(image: symbol("captions.bubble", 14, .semibold) ?? NSImage(), target: self, action: #selector(toggleCaptions))
+            cc.isBordered = false
+            cc.toolTip = tr("bar.captions")
+            let lang = NSButton(image: symbol("chevron.down", 9, .bold) ?? NSImage(), target: self, action: #selector(pickLanguage(_:)))
+            lang.isBordered = false
+            lang.toolTip = tr("bar.captionLanguage")
+            lang.contentTintColor = .secondaryLabelColor
+            ccButton = cc
+            langButton = lang
+            views += [cc, lang]
+        }
+        views += [pauseButton, stopButton]
+        let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.spacing = 10
         row.setCustomSpacing(6, after: dot)
+        if let cc = ccButton { row.setCustomSpacing(1, after: cc) }
         row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 12)
         row.translatesAutoresizingMaskIntoConstraints = false
         fx.addSubview(row)
@@ -1000,6 +1354,11 @@ final class RecordingBar: NSObject {
                                      row.trailingAnchor.constraint(equalTo: fx.trailingAnchor),
                                      row.centerYAnchor.constraint(equalTo: fx.centerYAnchor)])
         panel.setFrameAutosaveName("RecordingBar")
+        if ccButton != nil { panel.setContentSize(NSSize(width: 204, height: 38)) }
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.align = self.captions.place(under: self.panel.frame)
+        }
     }
 
     func button(_ image: String, _ action: Selector, _ tip: String) -> NSButton {
@@ -1014,16 +1373,93 @@ final class RecordingBar: NSObject {
         if !panel.setFrameUsingName("RecordingBar"), let screen = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: screen.maxX - panel.frame.width - 24, y: screen.maxY - panel.frame.height - 14))
         }
+        // a place saved when the bar was narrower can leave its right end off the screen
+        if let screen = (NSScreen.screens.first { $0.frame.intersects(panel.frame) } ?? NSScreen.main)?.visibleFrame {
+            let f = panel.frame
+            panel.setFrameOrigin(NSPoint(x: max(screen.minX, min(f.minX, screen.maxX - f.width)),
+                                         y: max(screen.minY, min(f.minY, screen.maxY - f.height))))
+        }
         update()
         panel.orderFrontRegardless()
+        meter?.invalidate()
+        meter = Timer.scheduledTimer(withTimeInterval: 0.13, repeats: true) { [weak self] _ in self?.listen() }
+        captionLanguage = defaultCaptionLanguage()     // each recording starts in the meeting language
+        if captionsOn { startCaptions() }
+        refreshCaptionButton()
     }
 
-    func hide() { panel.orderOut(nil) }
+    func hide() {
+        meter?.invalidate()
+        meter = nil
+        stopCaptions()
+        panel.orderOut(nil)
+    }
+
+    // captions
+
+    @objc func toggleCaptions() {
+        captionsOn.toggle()
+        if captionsOn { startCaptions() } else { stopCaptions() }
+        refreshCaptionButton()
+    }
+
+    @objc func pickLanguage(_ sender: NSButton) {
+        let menu = NSMenu()
+        for lang in CAPTION_LANGUAGES {
+            let it = NSMenuItem(title: lang.name, action: #selector(chooseLanguage(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = lang.id
+            it.state = lang.id == captionLanguage ? .on : .off
+            menu.addItem(it)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc func chooseLanguage(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? String, id != captionLanguage else { return }
+        captionLanguage = id
+        if !captionsOn { captionsOn = true; refreshCaptionButton() }
+        startCaptions()
+    }
+
+    func refreshCaptionButton() {
+        ccButton?.image = symbol(captionsOn ? "captions.bubble.fill" : "captions.bubble", 14, .semibold)
+        ccButton?.contentTintColor = captionsOn ? CaptionPanel.done : .labelColor
+    }
+
+    func startCaptions() {
+        guard #available(macOS 26.0, *), let owner, owner.recording, let job = owner.currentJob else { return }
+        align = captions.place(under: panel.frame)
+        feed.onText = { [weak self] prev, done, hearing in
+            guard let self else { return }
+            self.captions.show(prev: prev, done: done, hearing: hearing, align: self.align)
+        }
+        feed.onNote = { [weak self] text in
+            guard let self else { return }
+            self.captions.note(text, align: self.align)
+        }
+        captions.note(tr("caption.listening"), align: align)
+        feed.start(file: job.appendingPathComponent("錄音.caf"), language: captionLanguage)
+        captions.panel.orderFrontRegardless()
+    }
+
+    func stopCaptions() {
+        feed.stop()
+        captions.note("", align: align)
+        captions.panel.orderOut(nil)
+    }
+
+    /// about -50 dB and below counts as a quiet room, 0 dB as loud
+    func listen() {
+        guard let owner, owner.recording, let rec = owner.recorder else { return }
+        let level = CGFloat(max(0, min(1, (rec.averagePower + 50) / 50)))
+        dot.show(level: level, paused: owner.paused)
+    }
 
     func update() {
         guard let owner, owner.recording else { return }
-        dot.image = symbol(owner.paused ? "pause.circle.fill" : "circle.fill", owner.paused ? 13 : 10)
-        dot.contentTintColor = owner.paused ? .systemOrange : .systemRed
+        if owner.paused { dot.show(level: 0, paused: true) }
+
         time.stringValue = clock(owner.elapsed)
         time.textColor = owner.paused ? .secondaryLabelColor : .labelColor
         pauseButton.image = symbol(owner.paused ? "play.fill" : "pause.fill", 14, .semibold)
@@ -1150,7 +1586,21 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let id = (body["id"] as? NSNumber)?.intValue,
               let cmd = body["cmd"] as? String else { return }
-        handle(cmd, body["args"] as? [String: Any] ?? [:]) { [weak self] ok, data in self?.reply(id, ok, data) }
+        if cmd == "closed" && id == -1 {                 // finish(): the page has saved what was typed
+            let waiting = closing_
+            closing_ = []
+            waiting.forEach { $0() }
+            return
+        }
+        let began = Date()
+        let quiet = ["refresh", "gdoc", "blink", "version", "audio", "find", "log"].contains(cmd)  // asked every few seconds
+        handle(cmd, body["args"] as? [String: Any] ?? [:]) { [weak self] ok, data in
+            if !ok || !quiet {
+                let why = ok ? "" : ": " + String(((data as? [String: Any])?["message"] as? String ?? "").prefix(200))
+                appLog(String(format: "window %@: %@, %.1f s%@", cmd, ok ? "ok" : "failed", Date().timeIntervalSince(began), why))
+            }
+            self?.reply(id, ok, data)
+        }
     }
 
     /// minutes_app.py: the last line `JSON {...}` is the answer; anything else, its last line is the message.
@@ -1172,7 +1622,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach"]
+                                     "speaker", "attach", "move", "tags", "people"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1184,6 +1634,10 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             pendingSetup = false
         case "list":
             app(["list"], done)
+        case "record":                                   // the button shown before the first meeting is recorded
+            guard let owner else { return done(false, ["message": tr("err.unknownCommand")]) }
+            owner.startRecording()
+            done(true, ["recording": owner.recording])
         case "setLanguage":
             let lang = args["lang"] as? String ?? ""
             guard lang == "en" || lang == "zh-TW", let owner else { return done(false, ["message": tr("err.unknownCommand")]) }
@@ -1224,6 +1678,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["confirm", dir.path, args["item"] as? String ?? ""], done)
         case "pick":
             pickFiles(images: args["kind"] as? String == "image", done)
+        case "pastePicture":
+            pastedPictures(done)
         case "setupState":
             setupState(progress: args["progress"] as? Bool ?? false, done)
         case "setupMic":
@@ -1304,6 +1760,29 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             }
             let line = (args["line"] as? NSNumber).map { [String($0.intValue)] } ?? []
             app(["speaker", dir.path, group, name] + line, done)
+        case "people":
+            // 人員: add someone to the meeting, take someone off, or a voice's guessed name (with its letter)
+            let action = args["action"] as? String ?? ""
+            let name = (args["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let group = args["group"] as? String ?? ""
+            guard action == "add" || action == "remove", !name.isEmpty, name.count <= 30,
+                  group.isEmpty || group.range(of: #"^[A-Z]$"#, options: .regularExpression) != nil else {
+                return done(false, ["message": tr("err.speakerName")])
+            }
+            app(["people", dir.path, action, name] + (group.isEmpty ? [] : [group]), done)
+        case "move":
+            // the project this meeting belongs to ('' = 未分類); minutes_app.py trims it to one line
+            app(["move", dir.path, args["project"] as? String ?? ""], done)
+        case "tags":
+            // a list of words or nothing: anything else would empty the meeting's tags
+            guard let given = args["tags"] as? [String] else { return done(false, ["message": tr("err.tryAgain")]) }
+            let tags = given.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard let data = try? JSONSerialization.data(withJSONObject: tags),
+                  let json = String(data: data, encoding: .utf8) else { return done(false, ["message": tr("err.tryAgain")]) }
+            app(["tags", dir.path, json], done)
+        case "renameProject":
+            let old = args["old"] as? String ?? "", new = args["new"] as? String ?? ""
+            app(["rename_project", old, new], done)
         case "retry":
             // only a recording that failed starts over; a finished one keeps its Doc and its sent mail
             guard Job(dir: dir).step == "failed" else { return done(false, ["message": tr("err.alreadyDone")]) }
@@ -1600,6 +2079,62 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         }
     }
 
+    /// ⌘V in the box under the Doc: the pictures on the clipboard, as {path, name}, like the picture button's. Picture
+    /// files copied in Finder are used where they are; a picture itself (a screenshot, an image copied from a page) is
+    /// saved as a PNG in the temporary folder first. Nothing else on the clipboard is read.
+    func pastedPictures(_ done: @escaping (Bool, Any) -> Void) {
+        let board = NSPasteboard.general
+        let urls = board.readObjects(forClasses: [NSURL.self],
+                                     options: [.urlReadingFileURLsOnly: true,
+                                               .urlReadingContentsConformToTypes: [UTType.image.identifier]]) as? [URL] ?? []
+        if !urls.isEmpty {
+            for url in urls { picked.insert(url.path) }
+            appLog("pasted \(urls.count) picture file(s)")
+            return done(true, ["files": urls.map { ["path": $0.path, "name": $0.lastPathComponent] }])
+        }
+        // text copied in Excel, Word or Keynote comes with a picture of itself: when the text is what was copied
+        // (it comes first), it pastes as text; a screenshot or "Copy Image" has the picture first
+        let first = board.pasteboardItems?.first?.types.first.flatMap { UTType($0.rawValue) }
+        if let text = board.string(forType: .string), !text.isEmpty, !(first?.conforms(to: .image) ?? false) {
+            return done(true, ["files": []])
+        }
+        let png = board.data(forType: .png)
+        let image = png == nil ? NSImage(pasteboard: board) : nil
+        guard png != nil || image != nil else { return done(true, ["files": []]) }
+        let name = tr("paste.name")
+        // a big picture takes a moment to become a PNG: not on the main thread, where the window would stop
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = png ?? image.flatMap { $0.tiffRepresentation }.flatMap { NSBitmapImageRep(data: $0) }
+                .flatMap { $0.representation(using: .png, properties: [:]) }
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Vinutes pasted", isDirectory: true)
+            let fmt = DateFormatter()
+            fmt.locale = Locale(identifier: "en_US_POSIX")
+            fmt.calendar = Calendar(identifier: .gregorian)
+            fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
+            let stamp = fmt.string(from: Date())
+            var url = folder.appendingPathComponent("\(name) \(stamp).png")
+            var n = 2
+            while FileManager.default.fileExists(atPath: url.path) {      // two pastes in the same second
+                url = folder.appendingPathComponent("\(name) \(stamp) \(n).png")
+                n += 1
+            }
+            var saved = false
+            if let data {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try data.write(to: url)
+                    saved = true
+                } catch { appLog("pasted picture not saved: \(error.localizedDescription)") }
+            }
+            DispatchQueue.main.async {
+                guard saved else { return done(false, ["message": tr("err.pasteFailed")]) }
+                self?.picked.insert(url.path)
+                appLog("pasted a picture, \(data?.count ?? 0) bytes")
+                done(true, ["files": [["path": url.path, "name": url.lastPathComponent]]])
+            }
+        }
+    }
+
     /// Every [__] in the Doc blinks three times (Resources/app/docblink.js): on opening a meeting, and after a
     /// 待補充 item moved the Doc to its place. A Doc still loading blinks once it shows.
     func blinkDoc() {
@@ -1752,10 +2287,18 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     // MARK: closing
 
     /// Calls back once the page has saved what was typed and handed the user's edits to `learn`.
+    /// what waits for the page to save before the window closes or the app quits
+    var closing_: [() -> Void] = []
+
     func finish(_ done: @escaping () -> Void) {
         var called = false
         let once = { if !called { called = true; done() } }
-        web.callAsyncJavaScript("return await window.beforeClose()", arguments: [:], in: nil, in: .page) { _ in once() }
+        closing_.append(once)
+        // the page says it is done through the "app" handler; no completion block here, since WebKit's Swift wrapper
+        // for one crashed the app while it was quitting (2026-10-17)
+        web.evaluateJavaScript("Promise.resolve(window.beforeClose && window.beforeClose()).catch(() => {})"
+                               + ".then(() => window.webkit.messageHandlers.app.postMessage({id: -1, cmd: 'closed'}))",
+                               completionHandler: nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { once() }       // a stuck save must not keep the app open
     }
 

@@ -180,4 +180,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import vlog
+    vlog.run(main)

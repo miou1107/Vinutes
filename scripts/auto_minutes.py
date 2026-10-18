@@ -13,7 +13,7 @@ A job folder is $MINUTES_HOME/recordings/<YYYYMMDD-HHMMSS>/ with the recording a
 ({"step": "transcribing|writing|done|failed", "message", "pid"}), the outcome to result.json.
 
 Who does what, so that nothing goes out without the user:
-  - this script transcribes (transcribe.py), reads that day's calendar (workspace.py events) into 行事曆.txt and
+  - this script transcribes (transcribe.py), finds the meeting on the calendar (workspace.py meeting) for 行事曆.txt and
     copies the transcript, the calendar, SKILL.md, the glossaries, notes.md, the user's settings and copies of
     earlier minutes into the job's 整理/ folder;
   - the Claude Code CLI then runs restricted (claude -p --restricted --strict-mcp-config) in 整理/: no shell, no
@@ -77,13 +77,56 @@ FRIENDLY = [
     ('open comments', 'err_open_comments'),
     ('GOOGLE DOCS API DISABLED', 'err_docs_api'),
     ('rate limit', 'err_rate_limit'),
+    ('usage limit', 'err_rate_limit'),
+    ('weekly limit', 'err_rate_limit'),
+    ('limit reached', 'err_rate_limit'),
+    ('limit will reset', 'err_rate_limit'),
     ('not supported when using Codex with a ChatGPT account', 'err_codex_old'),
     ('not logged in', 'err_not_logged_in'),
 ]
 
 
+LIMIT = re.compile(r'limit\b[^\n]{0,80}?\breset(?:s|s at|s on| at| on)?\s+(?:at\s+)?(?:(?P<mon>[A-Za-z]{3,9})\.?\s+'
+                   r'(?P<day>\d{1,2}),?\s*(?:at\s+)?)?(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>am|pm)', re.I)
+MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+
+def limit_until(text: str, now: datetime | None = None) -> str:
+    """'You've hit your weekly limit · resets 12pm (Asia/Taipei)' -> 明天中午 12 點 / tomorrow at 12 pm; '' if no time"""
+    found = LIMIT.search(text or '')
+    if not found:
+        return ''
+    now = now or datetime.now()
+    hour = int(found['h']) % 12 + (12 if found['ap'].lower() == 'pm' else 0)
+    minute = int(found['m'] or 0)
+    if found['mon'] and found['mon'][:3].lower() in MONTHS:
+        try:
+            at = now.replace(month=MONTHS.index(found['mon'][:3].lower()) + 1, day=int(found['day']), hour=hour,
+                             minute=minute, second=0, microsecond=0)
+        except ValueError:                                   # Feb 29 in another year, a day that is no date
+            return ''
+        if at < now - timedelta(days=1):                     # December's message read in January
+            at = at.replace(year=at.year + 1)
+    else:
+        at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at <= now:
+            at += timedelta(days=1)
+    days = (at.date() - now.date()).days
+    h12 = at.hour % 12 or 12
+    if ui_lang() == 'zh-TW':
+        part = ('凌晨' if at.hour < 6 else '上午' if at.hour < 12 else '中午' if at.hour == 12 else
+                '下午' if at.hour < 18 else '晚上')
+        day = {0: '今天', 1: '明天'}.get(days, f'{at.month}/{at.day} ')
+        return f'{day}{part} {h12} 點' + (f' {at.minute} 分' if at.minute else '')
+    day = {0: 'today', 1: 'tomorrow'}.get(days, f'{at.month}/{at.day}')
+    return f'{day} at {h12}' + (f':{at.minute:02d}' if at.minute else '') + (' am' if at.hour < 12 else ' pm')
+
+
 def friendly(text: str, default: str) -> str:
     import ai_runner
+    when = limit_until(text)
+    if when:
+        return t('err_limit_until', ai=ai_runner.name(), when=when)
     for key, words in FRIENDLY:
         if key.lower() in text.lower():
             return t(words, ai=ai_runner.name())
@@ -240,20 +283,53 @@ def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
     for other in sorted(job.parent.iterdir(), reverse=True):
         r = read_json(other / 'result.json')
         if other != job and r.get('status') == 'ok' and r.get('title'):
-            recent.append({'date': other.name[:8], 'title': r['title'], 'project': r.get('project') or ''})
+            project, tags = sorted_as(other, r)
+            recent.append({'date': other.name[:8], 'title': r['title'], 'project': project, 'tags': tags})
         if len(recent) >= 40:
             break
     (ref / '最近的會議.json').write_text(json.dumps(recent, ensure_ascii=False, indent=1), encoding='utf-8')
-    day = (meta.get('started') or '')[:10]
-    if day:
-        try:
-            done = script('workspace.py', 'events', day, timeout=120)
-            found = done.stdout if done.returncode == 0 else '（讀不到行事曆：' + friendly(done.stderr, '原因不明') + '）\n'
-        except subprocess.TimeoutExpired:
-            found = '（讀不到行事曆：連線逾時）\n'
-        (job / '行事曆.txt').write_text(found or '（這一天沒有行程）\n', encoding='utf-8')
+    if meta.get('started'):
+        (job / '行事曆.txt').write_text(read_calendar(job, meta), encoding='utf-8')
         shutil.copy(job / '行事曆.txt', work / '行事曆.txt')
     return work
+
+
+def read_calendar(job: Path, meta: dict) -> str:
+    """行事曆.txt for the agent: the meeting the recording was, as workspace.py meeting picked it (only one the
+    user is on), the next one of its series, and how earlier meetings of the series were named and filed.
+    The pick is kept in 行事曆.json, so a later recording of the same series finds this one."""
+    started = meta.get('started') or ''
+    try:
+        done = script('workspace.py', 'meeting', started, meta.get('ended') or started, timeout=120)
+    except subprocess.TimeoutExpired:
+        return '（讀不到行事曆：連線逾時）\n'
+    if done.returncode:
+        return '（讀不到行事曆：' + friendly(done.stderr, '原因不明') + '）\n'
+    lines, match = [], {}
+    for text in done.stdout.splitlines():
+        if text.startswith('MATCH '):
+            try:
+                match = json.loads(text[6:])
+            except ValueError:
+                match = {}
+        else:
+            lines.append(text)
+    write_json(job / '行事曆.json', match if isinstance(match, dict) else {})
+    found = '\n'.join(lines).strip() + '\n'
+    match = match if isinstance(match, dict) else {}
+    key = ('recurring', match['recurring']) if match.get('recurring') else ('series', match.get('series'))
+    before = []
+    # only meetings recorded before this one, newest first: a recording written up again doesn't learn from later ones
+    for other in sorted((p for p in job.parent.iterdir() if p.name < job.name), reverse=True) if key[1] else []:
+        r = read_json(other / 'result.json')
+        if r.get('status') == 'ok' and read_json(other / '行事曆.json').get(key[0]) == key[1]:
+            project, _ = sorted_as(other, r)
+            before.append(f'   {other.name[:4]}-{other.name[4:6]}-{other.name[6:8]} {r.get("title", "")}　專案：{project or "（沒有）"}')
+        if len(before) >= 3:
+            break
+    if before:
+        found += '\n== 同一系列之前整理過的會議（會議名稱與專案照抄）\n' + '\n'.join(before) + '\n'
+    return found
 
 
 def unnamed(lang: str) -> str:
@@ -282,9 +358,9 @@ def prompt(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str
            '一律用繁體中文（台灣用語）寫，人名照逐字稿的寫法，金額保留原本的幣別。\n' if spoken not in ('zh', 'yue') else '') +
         f'- 逐字稿：{job}/逐字稿.txt（每行開頭是從錄音開始算的時間，有講者的話接著是講者，見 SKILL.md 第 2 節「辨識講者」）\n'
         f'- 錄音時間：{started} 到 {ended}{length}\n'
-        f'- 當天行事曆：{job}/行事曆.txt\n'
+        f'- 行事曆（程式已經挑好這場會議）：{job}/行事曆.txt\n'
         f'- 詞彙表與使用者設定：{job}/參考/\n'
-        f'- 之前的會議名稱與專案：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
+        f'- 之前的會議名稱、專案與標籤：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
         f'- 之前的會議紀錄（補背景用）：{job}/參考/舊紀錄/\n'
         f'- 紀錄寫成 {job}/{DRAFT}，程式會照 result.json 的 title 存進紀錄資料夾。\n'
         f'- 信件內文寫成 {job}/{BODY}，最後寫 {job}/result.json。\n'
@@ -312,9 +388,9 @@ def prompt_en(job: Path, meta: dict, spoken: str) -> str:
         f'- Transcript: {job}/逐字稿.txt (each line starts with the time from the start of the recording, then the '
         'speaker when known; see the guide\'s section "Reading the transcript")\n'
         f'- Recording: {started} to {ended}{length}\n'
-        f'- That day\'s calendar: {job}/行事曆.txt\n'
+        f'- The calendar (the program has picked the meeting): {job}/行事曆.txt\n'
         f'- Glossaries and the user\'s settings: {job}/參考/\n'
-        f'- Earlier meeting names and projects: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
+        f'- Earlier meeting names, projects and tags: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
         f'- Earlier minutes, for background: {job}/參考/舊紀錄/\n'
         f'- Write the minutes to {job}/{DRAFT}; the program files them under the title in result.json.\n'
         f'- Write the mail text to {job}/{BODY}, and last {job}/result.json.\n'
@@ -328,6 +404,7 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
     ai = ai_runner.chosen()
     # the agent works in its own folder and can write nothing else; the program copies the minutes out
     log(job, f'{ai} in {work}')
+    began = (job / 'log.txt').stat().st_size if (job / 'log.txt').is_file() else 0   # what this run says starts here
     with (job / 'log.txt').open('a', encoding='utf-8') as out:
         try:
             done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
@@ -338,7 +415,10 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
             raise Failed(str(err))
     log(job, f'{ai} exited {done.returncode}')
     if done.returncode:
-        raise Failed(friendly((job / 'log.txt').read_text(encoding='utf-8')[-3000:],
+        with (job / 'log.txt').open('rb') as said:                # not an earlier run's limit message
+            said.seek(began)
+            text = said.read().decode('utf-8', 'replace')[-3000:]
+        raise Failed(friendly(text,
                               t('write_error', ai=ai_runner.name(ai))))
 
 
@@ -388,10 +468,29 @@ def check_result(work: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> d
     return {'status': 'ok', 'title': title, 'minutes_md': str(md),
             'when': line(result.get('when'), 40), 'place': line(result.get('place'), 40), 'mail': mail,
             'project': line(result.get('project'), 30),
+            'tag_suggestions': tag_list(result.get('tags'))[:3],
             'next_meeting': line(result.get('next_meeting'), 40),
             'todo': items(result.get('todo'), ('label', 'line'))[:10],
             'check': items(result.get('check'), ('text', 'heard', 'meant'))[:10],
             'notes': strings(result.get('notes'))[:5]}
+
+
+def tag_list(value) -> list:
+    """Short tags, each once (minutes_app.clean_tags keeps the user's the same way)."""
+    found = []
+    for v in value if isinstance(value, list) else []:
+        tag = line(v, 20) if isinstance(v, str) else ''
+        if tag and tag not in found:
+            found.append(tag)
+    return found
+
+
+def sorted_as(job: Path, result: dict) -> tuple:
+    """A meeting's project and tags as the window shows them: what the user set in 分類.json (minutes_app.py),
+    else the project Claude named."""
+    mine = read_json(job / '分類.json')
+    project = mine['project'] if isinstance(mine.get('project'), str) else result.get('project')
+    return line(project, 30), tag_list(mine.get('tags'))
 
 
 def items(value, keys: tuple) -> list:
@@ -467,6 +566,9 @@ def run(job: Path):
         md = Path(result['minutes_md'])
         shutil.copy(work / DRAFT, md)
         import speakers
+        md.write_text(speakers.guesses_into(job, md.read_text(encoding='utf-8'), result.get('check')), encoding='utf-8')
+        if (job / BODY).is_file():                   # the mail names the voices the same way
+            (job / BODY).write_text(speakers.named_letters(job, (job / BODY).read_text(encoding='utf-8')), encoding='utf-8')
         base = next((md.stem.removesuffix(end) for end, _ in SUFFIX.values() if md.stem.endswith(end)), md.stem)
         md.with_name(base + SUFFIX[lang][1] + '.txt').write_text(speakers.labelled_transcript(job, unnamed(lang)),
                                                                  encoding='utf-8')
@@ -633,8 +735,9 @@ def main():
 
 
 if __name__ == '__main__':
+    import vlog
     try:
-        main()
+        vlog.run(main)
     except subprocess.TimeoutExpired:
         sys.exit(t('timeout'))
     except Exception as err:                         # the app shows the last line; a traceback means nothing there

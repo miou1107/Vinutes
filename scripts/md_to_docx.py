@@ -310,6 +310,11 @@ def build(md_path: Path, out_path: Path):
     return out_path
 
 
-if __name__ == '__main__':
+def main():
     src = Path(sys.argv[1])
     print(build(src, Path(sys.argv[2]) if len(sys.argv) > 2 else src.with_suffix('.docx')))
+
+
+if __name__ == '__main__':
+    import vlog
+    vlog.run(main)

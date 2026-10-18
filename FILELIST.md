@@ -43,6 +43,7 @@
 | `scripts/notify.py` | Sends the Doc link through Google Docs sharing when Gmail is not available |
 | `scripts/check_update.py` | Looks up the newest version on GitHub |
 | `tests/` | `python3 -m unittest discover -s tests` |
+| `.github/workflows/ci.yml` | The check GitHub runs on a clean Mac for every push and pull request: the Python tests, the meeting window's scripts, the installer, the plists and both Swift builds. main only takes changes that pass it |
 | `prototypes/` | Design prototypes approved before building a screen |
 
 The user's own files are not here. They live in `~/.config/vin-meeting-minutes-zh/` (settings, Google sign-in, glossary, voices, recordings), shared with the vin-meeting-minutes-zh skill.

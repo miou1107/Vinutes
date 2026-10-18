@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Online meetings are recorded with the other side's voices, also with headphones on (issue #3).
+
+- A recording now has the microphone and the sound the Mac plays, mixed into the same file, so a Meet, Teams, Zoom or LINE call is in the transcript and the minutes even when you wear headphones or AirPods. Sound Vinutes itself plays (a recording in the meeting window) is left out.
+- The first recording after this version asks once to let Vinutes record the Mac's sound (macOS 14.2 and later). If you don't allow it, or on an older Mac, Vinutes records the microphone only, as before.
+- Other sounds the Mac plays during the meeting (music, notification sounds) are recorded too.
+- Plugging in or taking off headphones, or AirPods connecting, mid-meeting: Vinutes keeps recording both, on the new microphone and output.
+
 Claude Code can look things up in your meetings, and change them when you ask (issue #4).
 
 - Add Vinutes to Claude Code once (README: Use your meetings in Claude Code). Claude Code, opened in any folder, then searches the minutes and transcripts, reads a meeting, lists projects and open action items, and answers with the meeting's date and title. Archived meetings come up only when named.

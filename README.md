@@ -6,7 +6,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 
 ## What it does
 
-- **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on.
+- **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on. In an online meeting it records the other side too, also with headphones on (macOS 14.2 and later).
 - **Transcribes on your Mac.** Audio is turned into text locally with Whisper and is not uploaded.
 - **Tells speakers apart** by their voices, and remembers the names you give them.
 - **Writes the minutes with the AI you already use:** Claude Code, Codex or Antigravity. Each one runs in a sandbox that can only read and write that meeting's folder.

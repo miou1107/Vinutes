@@ -91,7 +91,7 @@ make_icon() {
   iconutil -c icns "$BUILD/AppIcon.iconset" -o "$NEW/Contents/Resources/AppIcon.icns"
 }
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || true)"
-SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Captions.swift" "$ROOT/recorder/Info.plist" \
+SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Capture.swift" "$ROOT/recorder/Captions.swift" "$ROOT/recorder/Info.plist" \
               "$ROOT/recorder/make_icon.swift" "$ROOT"/recorder/app/* \
               "$ROOT"/recorder/l10n/*.lproj/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}"
 if [[ -x "$APP/Contents/MacOS/MeetingRecorder" && "$(cat "$APP/Contents/Resources/source.sum" 2>/dev/null)" == "$SOURCE_SUM" ]]; then
@@ -100,7 +100,9 @@ else
   BUILD="$(mktemp -d)"
   trap 'rm -rf "$BUILD"' EXIT
   # build first, so a failed build leaves the running app alone
-  swiftc -O -swift-version 5 -o "$BUILD/MeetingRecorder" "$ROOT/recorder/MeetingRecorder.swift"
+  # with two files, the one with the app's top-level code has to be called main.swift
+  cp "$ROOT/recorder/MeetingRecorder.swift" "$BUILD/main.swift"
+  swiftc -O -swift-version 5 -o "$BUILD/MeetingRecorder" "$BUILD/main.swift" "$ROOT/recorder/Capture.swift"
   # live captions run in a helper of their own; it needs macOS 26, so on an older Mac the app is built without it
   swiftc -O -swift-version 5 -parse-as-library -o "$BUILD/VinutesCaptions" "$ROOT/recorder/Captions.swift" 2>/dev/null \
     || echo "(no live captions: they need macOS 26 or later)"

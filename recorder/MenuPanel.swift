@@ -1,4 +1,4 @@
-// The panel under the menu-bar icon (Vin 2026-10-18, after the Snagit-style prototype): a large round button that
+// The panel under the menu-bar icon (Vin 2026-10-18, after the prototype he picked): a large round button that
 // starts the recording (red, a white dot) and, while recording, stops it (white, red ring, a red square); under it
 // how long the recording runs with the level bars, and pause (no discard here: Vin was afraid of hitting it by
 // mistake; a wrong recording is deleted from the meeting list); the last three meetings; All meetings, Settings and

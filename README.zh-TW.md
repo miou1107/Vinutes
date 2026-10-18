@@ -60,7 +60,7 @@ Vinutes 也可以當 MCP 伺服器用。安裝或更新 Vinutes 時，會自動�
 ~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/connect_agents.py
 ```
 
-之後不管在哪個資料夾，問 Claude Code（或其他接上的工具）「上週的專案會議決定了什麼」，Claude 會自己去翻會議記錄和逐字稿，回答時附上是哪一天、哪一場會議。你請它改的時候，它也可以幫講者填名字、在「八、補充資訊」補一段、修改紀錄裡的文字、加標籤或換專案。Google 文件會一起更新，操作紀錄會寫是 Claude Code 改的。刪除會議和寄信，還是只能在 Vinutes 裡按。
+之後不管在哪個資料夾，問 Claude Code（或其他接上的工具）「上週的專案會議決定了什麼」，Claude 會自己去翻會議記錄和逐字稿，回答時附上是哪一天、哪一場會議。你請它改的時候，它也可以幫講者填名字、在「八、補充資訊」補一段、修改紀錄裡的文字、加標籤或換專案。Google 文件會一起更新，「紀錄」分頁會寫是 Claude Code 改的。刪除會議和寄信，還是只能在 Vinutes 裡按。
 
 ## 怎麼更新
 

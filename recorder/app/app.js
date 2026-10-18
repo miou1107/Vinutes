@@ -1087,7 +1087,7 @@ function renderRail() {
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
-        <button class="tab${tab === 'comments' ? ' on' : ''}" role="tab" id="tabC">${esc(t('comments'))}${open ? ' ' + open : ''}</button>
+        <button class="tab${tab === 'comments' ? ' on' : ''}" role="tab" id="tabC">${esc(t('comments'))}${open ? `<b class="n">${open}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>
@@ -1139,8 +1139,8 @@ function renderDocsRail(el) {
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
-        <button class="tab${tab === 'todo' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_handle'))}${waiting ? ` <b class="n ${todo.length ? 'red' : 'yellow'}">${waiting}</b>` : ''}</button>
-        <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${unnamed ? ` <b class="n yellow">${unnamed}</b>` : ''}</button>
+        <button class="tab${tab === 'todo' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_handle'))}${waiting ? `<b class="n${todo.length ? ' red' : ''}">${waiting}</b>` : ''}</button>
+        <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${unnamed ? `<b class="n">${unnamed}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>

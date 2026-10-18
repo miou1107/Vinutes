@@ -30,6 +30,35 @@ BUNDLE_ID="com.github.miou1107.vinutes"
 OLD_BUNDLE_ID="com.github.miou1107.meeting-recorder"
 step() { printf '\n== %s\n' "$*"; }
 
+# macOS remembers the microphone and the Mac's-sound permission for the app's signature. Signed ad hoc, every build
+# is a new signature and asks again; signed with one certificate kept in the login keychain, updates keep the
+# permission. The certificate is made here the first time (self-signed, for signing code only, never leaves the Mac).
+# Prints the certificate's hash, or nothing when it could not be made.
+SIGN_NAME="Vinutes Local Signing"
+find_identity() {
+  security find-identity -p codesigning "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null \
+    | awk -v n="\"$SIGN_NAME\"" 'index($0, n) { print $2; exit }'
+}
+signing_identity() {
+  local hash dir
+  hash="$(find_identity)"
+  if [[ -z "$hash" ]]; then
+    dir="$(mktemp -d)"
+    printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' 'x509_extensions=ext' '[dn]' "CN=$SIGN_NAME" \
+      '[ext]' 'basicConstraints=critical,CA:false' 'keyUsage=critical,digitalSignature' \
+      'extendedKeyUsage=critical,codeSigning' > "$dir/cert.conf"
+    /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -config "$dir/cert.conf" \
+        -keyout "$dir/key.pem" -out "$dir/cert.pem" >/dev/null 2>&1 \
+      && /usr/bin/openssl pkcs12 -export -inkey "$dir/key.pem" -in "$dir/cert.pem" -out "$dir/id.p12" \
+        -passout pass:vinutes >/dev/null 2>&1 \
+      && security import "$dir/id.p12" -k "$HOME/Library/Keychains/login.keychain-db" -P vinutes -x \
+        -T /usr/bin/codesign >/dev/null 2>&1
+    rm -rf "$dir"
+    hash="$(find_identity)"
+  fi
+  [[ -n "$hash" ]] && echo "$hash"
+}
+
 step "Checking this Mac"
 if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
   echo "NOT SUPPORTED: the recorder needs a Mac with Apple silicon (M1 or newer)."; exit 1
@@ -93,9 +122,10 @@ make_icon() {
   iconutil -c icns "$BUILD/AppIcon.iconset" -o "$NEW/Contents/Resources/AppIcon.icns"
 }
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || true)"
+SIGN_ID="$(signing_identity || true)"
 SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Capture.swift" "$ROOT/recorder/Captions.swift" "$ROOT/recorder/Info.plist" \
               "$ROOT/recorder/make_icon.swift" "$ROOT"/recorder/app/* \
-              "$ROOT"/recorder/l10n/*.lproj/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}"
+              "$ROOT"/recorder/l10n/*.lproj/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}-${SIGN_ID:0:8}"   # a new certificate signs again
 if [[ -x "$APP/Contents/MacOS/MeetingRecorder" && "$(cat "$APP/Contents/Resources/source.sum" 2>/dev/null)" == "$SOURCE_SUM" ]]; then
   echo "unchanged (version ${VERSION:-unknown})"
 else
@@ -118,7 +148,12 @@ else
   sed "s/__VERSION__/${VERSION:-0}/g" "$ROOT/recorder/Info.plist" > "$NEW/Contents/Info.plist"
   make_icon || echo "(no icon: drawing it failed; the app works without one)"
   echo "$SOURCE_SUM" > "$NEW/Contents/Resources/source.sum"
-  codesign --force --sign - "$NEW" >/dev/null || { echo "STOP: signing the app failed (codesign)."; exit 1; }
+  if [[ -n "$SIGN_ID" ]] && codesign --force --timestamp=none --sign "$SIGN_ID" "$NEW" >/dev/null 2>&1; then
+    :
+  else
+    echo "(signed without the Vinutes certificate: after this update macOS asks again for the microphone and the Mac's sound)"
+    codesign --force --sign - "$NEW" >/dev/null || { echo "STOP: signing the app failed (codesign)."; exit 1; }
+  fi
 
   if pgrep -xq MeetingRecorder; then
     # quitting asks the user first when a recording is running

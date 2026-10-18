@@ -21,7 +21,8 @@
 #      counter on GitHub (install.txt or update.txt), so its download count shows roughly how many Macs use
 #      Vinutes. Nothing about the Mac or its user is sent. VINUTES_NO_COUNT=1, or a file named no-count in
 #      $MINUTES_HOME (which the update button's run also sees), skips it.
-# One AI CLI must be installed and signed in (Claude Code, Codex or Antigravity); the script says so when none is.
+# The AI that writes the minutes (Claude Code, Codex or Antigravity) is installed and signed in from the app's setup
+# checklist; the script only says so when none is here yet.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -112,8 +113,7 @@ for cli in claude codex agy; do
   if WHERE="$(/bin/zsh -lc "command -v $cli" 2>/dev/null)" && [[ -n "$WHERE" ]]; then echo "$cli: $WHERE"; FOUND=1; fi
 done
 if [[ -z "$FOUND" ]]; then
-  echo "MISSING: the recorder needs one of them to write the minutes: Claude Code (claude), Codex (codex) or"
-  echo "Antigravity (agy). Install one and sign in; the app's Setup Checklist picks which one it uses."
+  echo "NOT YET: none of them is here. Item 5 of the app's Setup Checklist installs the one you pick and signs it in."
 fi
 
 step "Building $APP"

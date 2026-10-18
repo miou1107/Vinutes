@@ -20,6 +20,7 @@ EN = {
 
     # ai_runner.py
     'ai_unknown': "There's no AI by that name.",
+    'ai_install_failed': "{ai} couldn't be installed.",
     'ai_bad_settings': "settings.json isn't in the right format, so the AI can't be changed.",
 
     # attachments.py
@@ -285,6 +286,7 @@ ZH = {
 
     # ai_runner.py
     'ai_unknown': '沒有這個 AI。',
+    'ai_install_failed': '{ai} 安裝失敗',
     'ai_bad_settings': 'settings.json 的格式不對，沒辦法換 AI。',
 
     # attachments.py

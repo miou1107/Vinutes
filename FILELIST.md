@@ -24,7 +24,7 @@
 | `recorder/install.sh` | Installs or updates Vinutes: Python packages, speech and voice models, builds and opens the app |
 | `scripts/auto_minutes.py` | After a recording: transcript, calendar match, minutes by the chosen AI, Google Doc, draft email; also sends the email when the user presses Send |
 | `scripts/minutes_app.py` | Everything the meeting window asks for: the list, syncing the Doc, saving edits, AI rewrites, comments, history, learning from the user's edits, archiving and deleting meetings, projects and tags |
-| `scripts/ai_runner.py` | Runs Claude Code, Codex or Antigravity, each sandboxed to one meeting's folder |
+| `scripts/ai_runner.py` | Runs Claude Code, Codex or Antigravity, each sandboxed to one meeting's folder; installs each with its maker's own script |
 | `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper); audio is not uploaded |
 | `scripts/connect_agents.py` | Adds Vinutes' MCP server to the AI tools installed on the Mac (Claude Code, Codex, Gemini CLI, Claude's app, Antigravity, Cursor); install.sh runs it |
 | `scripts/mcp_server.py` | Vinutes as an MCP server: Claude Code searches and reads past meetings, and names speakers, adds notes, changes words, tags and projects when asked |
@@ -32,7 +32,7 @@
 | `scripts/doc_sync.py` | Keeps the Markdown minutes and the Google Doc in step, paragraph by paragraph, so comments stay put |
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |
 | `scripts/attachments.py` | Files, links and pictures added under the Doc: uploads them to Google Drive and lists them in the minutes' last section |
-| `scripts/setup_check.py` | The setup checklist: models, AI sign-in, Google connection |
+| `scripts/setup_check.py` | The setup checklist: models, the AI (installed, signed in, one test answer), Google connection |
 | `scripts/i18n.py` | Which language the app speaks (the user's pick, else the Mac's) and which language the minutes are written in |
 | `scripts/strings.py` | Every message the Python scripts show, in English and Traditional Chinese |
 | `scripts/google_setup.py` | Google sign-in and the user's `settings.json` |

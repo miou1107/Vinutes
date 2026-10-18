@@ -2,7 +2,8 @@
 // starts the recording (red, a white dot) and, while recording, stops it (white, red ring, a red square); under it
 // how long the recording runs with the level bars, and pause (no discard here: Vin was afraid of hitting it by
 // mistake; a wrong recording is deleted from the meeting list); the last three meetings; All meetings, Settings and
-// Quit in equal thirds; the version, with an update button when GitHub has a newer one.
+// Quit in equal thirds; the version, with an update button when GitHub has a newer one. A recording started while
+// the AI is not set up shows a yellow note under the controls, with a button to the setup (Vin 2026-10-19).
 import AppKit
 
 final class MenuPanel: NSObject, NSPopoverDelegate {
@@ -15,6 +16,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
     private let labelRow = NSStackView()
     private let controls = NSStackView()
     private let pause = NSButton()
+    private let aiNote = NSStackView()
     private let recent = NSStackView()
     private let versionRow = NSStackView()
     private let version = NSTextField(labelWithString: "")
@@ -77,6 +79,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         top.setCustomSpacing(10, after: hint)
         top.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 14, right: 16)
         root.addArrangedSubview(top)
+        root.addArrangedSubview(buildAiNote())
 
         root.addArrangedSubview(line())
         recent.orientation = .vertical
@@ -115,6 +118,35 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         versionRow.addArrangedSubview(update)
         root.addArrangedSubview(versionRow)
         return root
+    }
+
+    /// 注意！ 內容生成模型尚未設定 / 需先完成 AI 設定，才能自動生成會議記錄 / 前往設定 (the prototype's words)
+    private func buildAiNote() -> NSView {
+        let box = NSStackView()
+        box.orientation = .vertical
+        box.alignment = .leading
+        box.spacing = 4
+        box.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 8
+        box.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.2).cgColor
+        let title = NSTextField(wrappingLabelWithString: tr("panel.aiTitle"))
+        title.font = .systemFont(ofSize: 12, weight: .semibold)
+        let text = NSTextField(wrappingLabelWithString: tr("panel.aiText"))
+        text.font = .systemFont(ofSize: 12)
+        [title, text].forEach { $0.preferredMaxLayoutWidth = 244 }
+        let go = NSButton(title: tr("panel.aiSetup"), target: self, action: #selector(aiSetupClicked))
+        go.bezelStyle = .rounded
+        go.controlSize = .small
+        go.refusesFirstResponder = true
+        [title, text, go].forEach { box.addArrangedSubview($0) }
+        box.setCustomSpacing(8, after: text)                 // only once the text is in the stack
+        box.widthAnchor.constraint(equalToConstant: 268).isActive = true
+        aiNote.orientation = .vertical
+        aiNote.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 14, right: 16)
+        aiNote.addArrangedSubview(box)
+        aiNote.isHidden = true
+        return aiNote
     }
 
     private func line() -> NSView {
@@ -163,6 +195,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
             hint.stringValue = "⌃⌥R"
         }
         controls.isHidden = !rec
+        aiNote.isHidden = !(rec && owner.aiWarned)
 
         // the meeting being recorded is not a recent meeting yet (compared by folder name: the two URLs can differ
         // by a trailing slash)
@@ -236,6 +269,11 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
     }
 
     @objc private func pauseClicked() { owner?.togglePause() }     // togglePause redraws the panel
+
+    @objc private func aiSetupClicked() {
+        close()
+        owner?.openSetup()
+    }
 
     @objc private func updateClicked() {
         guard let owner, !owner.recording else { return }

@@ -1601,6 +1601,147 @@ class SetupCheck(unittest.TestCase):
         return f
 
 
+class AiSetup(unittest.TestCase):
+    """Item 5 of the checklist, step by step: pick the AI, Vinutes installs it, the user signs in, one short answer
+    shows the account can write the minutes (the prototype Vin approved on 2026-10-19)."""
+
+    def setUp(self):
+        import ai_runner
+        import google_setup
+        import setup_check
+        self.ai, self.gs, self.sc = ai_runner, google_setup, setup_check
+        self.home = Path(tempfile.mkdtemp(prefix='aisetup-'))
+        self.saved_gs = {n: getattr(google_setup, n) for n in ('CONFIG',)}
+        self.saved_sc = {n: getattr(setup_check, n) for n in ('RUNNING', 'FAILED', 'TESTED', 'LOGIN_DONE')}
+        self.saved_ai = {n: getattr(ai_runner, n) for n in ('find', 'account', 'download', 'run')}
+        self.settings = google_setup.SETTINGS                   # the AI chosen is kept there (MINUTES_HOME)
+        self.before = self.settings.read_text(encoding='utf-8') if self.settings.exists() else None
+        google_setup.CONFIG = self.home
+        setup_check.RUNNING, setup_check.FAILED = self.home / 'setup-running.json', self.home / 'setup-failed.json'
+        setup_check.TESTED = self.home / 'setup-ai.json'
+        setup_check.LOGIN_DONE = self.home / 'setup-ai-login-done'
+        ai_runner.choose('claude')
+
+    def tearDown(self):
+        for n, v in self.saved_gs.items():
+            setattr(self.gs, n, v)
+        for n, v in self.saved_sc.items():
+            setattr(self.sc, n, v)
+        for n, v in self.saved_ai.items():
+            setattr(self.ai, n, v)
+        if self.before is None:
+            self.settings.unlink(missing_ok=True)
+        else:
+            self.settings.write_text(self.before, encoding='utf-8')
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def test_each_ai_is_installed_from_its_makers_own_script_without_questions(self):
+        self.assertEqual(self.ai.installer('claude')[:2], ('https://claude.ai/install.sh', 'bash'))
+        url, shell, extra = self.ai.installer('codex')
+        self.assertEqual((url, shell), ('https://chatgpt.com/codex/install.sh', 'sh'))
+        self.assertEqual(extra, {'CODEX_NON_INTERACTIVE': '1'})        # it would otherwise ask to start Codex
+        self.assertEqual(self.ai.installer('antigravity')[:2], ('https://antigravity.google/cli/install.sh', 'bash'))
+
+    def _script(self, body: str):
+        self.ai.download = lambda url, dest: Path(dest).write_text('#!/bin/sh\n' + body + '\n')
+
+    def test_an_install_runs_the_downloaded_script_and_ends_with_the_command_found(self):
+        marker = self.home / 'ran'
+        self._script(f'echo done > "{marker}"')
+        self.ai.find = lambda key=None: '/x/claude' if marker.exists() else None
+        self.assertEqual(self.ai.install('claude'), '/x/claude')
+        self.assertTrue(marker.exists())
+
+    def test_an_install_that_fails_or_leaves_no_command_says_so(self):
+        self._script('exit 3')
+        self.ai.find = lambda key=None: None
+        with self.assertRaises(SystemExit):
+            self.ai.install('claude')
+        self._script('exit 0')
+        with self.assertRaises(SystemExit):
+            self.ai.install('claude')
+
+    def test_the_checklist_asks_about_the_sign_in_also_when_the_app_starts(self):
+        self.ai.find = lambda key=None: '/x/claude' if (key or 'claude') == 'claude' else None
+        self.ai.account = lambda key, exe: (False, '')
+        self.assertEqual(self.sc.status(True)['ai']['state'], 'login')     # was 'done' as soon as it was installed
+        self.ai.account = lambda key, exe: (True, 'someone@example.com')
+        ai = self.sc.status(True)['ai']
+        self.assertEqual((ai['state'], ai['email'], ai['installed']), ('done', 'someone@example.com', ['claude']))
+
+    def test_an_install_in_progress_or_failed_shows_on_step_two_of_that_ai_only(self):
+        self.ai.find = lambda key=None: None
+        self.assertEqual(self.sc.ai(True)['state'], 'install')
+        job = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)', 'setup_check.py'])
+        try:
+            self.sc.RUNNING.write_text(json.dumps({'ai-claude': job.pid}))
+            self.assertEqual(self.sc.ai(True)['state'], 'installing')
+            self.assertEqual(self.sc.main_progress()['ai'], {'state': 'installing'})
+            self.ai.choose('codex')                                   # Claude is still installing, not Codex
+            self.assertEqual(self.sc.ai(True)['state'], 'install')
+            self.assertEqual(self.sc.main_progress()['ai'], {'state': 'ended'})
+        finally:
+            job.kill()
+            job.wait()
+        self.sc.RUNNING.write_text('{}')
+        self.sc.FAILED.write_text(json.dumps({'ai-claude': 'exit 3'}))
+        self.assertNotIn('failed', {k for k, v in self.sc.ai(True).items() if v})   # Codex was never tried
+        self.ai.choose('claude')
+        self.assertEqual(self.sc.ai(True), {**self.sc.ai(True), 'state': 'install', 'failed': True})
+
+    def test_the_short_answer_tells_a_working_account_from_a_used_up_or_signed_out_one(self):
+        self.assertEqual(self.sc.test_result(0, 'OK'), 'done')
+        self.assertEqual(self.sc.test_result(1, "You've hit your usage limit · resets 3pm"), 'quota')
+        self.assertEqual(self.sc.test_result(1, 'Error: not logged in. Please run /login'), 'login')
+        self.assertEqual(self.sc.test_result(1, 'Your subscription does not include Claude Code'), 'plan')
+        self.assertEqual(self.sc.test_result(1, 'something else went wrong'), 'error')
+        self.assertEqual(self.sc.test_result(0, ''), 'error')                  # it said nothing back
+        self.assertEqual(self.sc.test_result(0, 'OK\nwarning: rate limit headers missing'), 'done')   # it answered
+
+    def test_a_passed_test_is_kept_for_that_ai_only(self):
+        self.ai.find = lambda key=None: f'/x/{key or "claude"}'
+        self.ai.account = lambda key, exe: (True, '')
+        self.ai.run = lambda prompt, folder, **kw: subprocess.CompletedProcess([], 0, 'OK', '')
+        self.assertEqual(self.sc.ai_test(), {'test': 'done', 'ai': 'claude'})
+        self.assertTrue(self.sc.ai(True)['tested'])
+        self.ai.choose('codex')
+        self.assertFalse(self.sc.ai(True)['tested'])
+        self.ai.run = lambda prompt, folder, **kw: subprocess.CompletedProcess([], 1, '', 'usage limit reached')
+        self.assertEqual(self.sc.ai_test()['test'], 'quota')
+        self.assertFalse(self.sc.ai(True)['tested'])
+
+    def test_an_account_whose_plan_cannot_write_keeps_item_five_open(self):
+        self.ai.find = lambda key=None: '/x/claude'
+        self.ai.account = lambda key, exe: (True, 'free@example.com')
+        self.ai.run = lambda prompt, folder, **kw: subprocess.CompletedProcess(
+            [], 1, '', 'Your subscription does not include Claude Code')
+        self.assertEqual(self.sc.ai_test()['test'], 'plan')
+        self.assertEqual(self.sc.ai(True)['state'], 'plan')          # not ✓ just because it is signed in
+        self.ai.account = lambda key, exe: (True, 'paid@example.com')
+        self.assertEqual(self.sc.ai(True)['state'], 'done')          # another account: it is asked again
+        self.ai.run = lambda prompt, folder, **kw: subprocess.CompletedProcess([], 0, 'OK', '')
+        self.ai.account = lambda key, exe: (True, 'free@example.com')
+        self.assertEqual(self.sc.ai_test()['test'], 'done')          # the same account after an upgrade
+        self.assertEqual(self.sc.ai(True)['state'], 'done')
+
+    def test_an_ai_that_was_signed_in_before_says_its_sign_in_ran_out(self):
+        self.ai.find = lambda key=None: '/x/claude'
+        self.ai.account = lambda key, exe: (False, '')
+        self.assertFalse(self.sc.ai(True)['was_signed'])              # a first sign-in: the steps
+        self.ai.account = lambda key, exe: (True, 'someone@example.com')
+        self.sc.ai(True)
+        self.ai.account = lambda key, exe: (False, '')
+        ai = self.sc.ai(True)
+        self.assertEqual((ai['state'], ai['was_signed']), ('login', True))   # 登入失效, 重新登入
+
+    def test_the_sign_in_window_leaves_a_mark_when_it_ends(self):
+        self.ai.find = lambda key=None: '/x/claude'
+        self.ai.account = lambda key, exe: (True, '')
+        self.assertEqual(self.sc.ai(True)['login_at'], 0)
+        self.sc.LOGIN_DONE.write_text('')
+        self.assertGreater(self.sc.ai(True)['login_at'], 1_700_000_000_000)    # milliseconds, like Date.now()
+
+
 class ListCorner(Flows):
     """The list's two buttons per meeting and the version in its corner."""
 

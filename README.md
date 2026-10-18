@@ -56,7 +56,7 @@ Names, numbers and dates are what most often come out wrong. In a meeting held i
 
 - A Mac with Apple silicon (M1 or newer)
 - Xcode Command Line Tools (`xcode-select --install`) and Python 3.10 or newer
-- One AI command-line tool installed and signed in: [Claude Code](https://docs.claude.com/en/docs/claude-code/setup), [Codex](https://github.com/openai/codex) or [Antigravity](https://antigravity.google/)
+- An account for one of the AIs that write the minutes: Claude Pro or higher (Claude Code), ChatGPT Plus or higher (Codex), or a Google account (Antigravity). Nothing to install beforehand: the setup checklist installs the AI you pick and signs it in.
 - For Google Docs, Gmail and Calendar: a Google account and a one-time Google Cloud setup. The app walks you through it step by step; it takes about 15 minutes.
 
 ## Install

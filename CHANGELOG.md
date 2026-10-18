@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Item 5 of the setup checklist (the AI that writes the minutes) walks through four steps: pick Claude Code, Codex or Antigravity (each card names the account it needs), Vinutes installs it with its maker's own script, you sign in, and the AI answers one short test. Before, the checklist only opened each AI's install page, and the install was up to you in Terminal.
+- Vinutes now asks about the AI's sign-in when it starts too: an AI that is installed but signed out opens the checklist, with Sign in again on item 5. Before, that showed only after a meeting, when its minutes could not be written.
+- A recording started while the AI isn't set up still records. The menu-bar panel opens once with a yellow note and Set Up; the transcript is kept, and Write up again makes the minutes once the AI is ready.
+- In the AI menu by the prompt box, an AI that isn't installed or signed in opens these steps for it. Before, it was greyed out and could not be picked.
+- An AI installed from the checklist is connected to your meetings right away, the way install.sh connects the AI tools already on the Mac.
+- The README no longer asks you to install an AI before installing Vinutes.
 - install.sh downloads one small file from the counter on GitHub after it installs or updates the app, so its download count shows roughly how many Macs use Vinutes. Nothing about the Mac or its user is sent. A file named no-count in ~/.config/vin-meeting-minutes-zh (or VINUTES_NO_COUNT=1) leaves a Mac out.
 
 ## v0.4.3 (2026-10-18)

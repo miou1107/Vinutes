@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Claude Code can look things up in your meetings, and change them when you ask (issue #4).
+
+- Add Vinutes to Claude Code once (README: Use your meetings in Claude Code). Claude Code, opened in any folder, then searches the minutes and transcripts, reads a meeting, lists projects and open action items, and answers with the meeting's date and title. Archived meetings come up only when named.
+- When you ask it to, it names a voice, adds a paragraph to 八、補充資訊, changes words in the minutes (words that appear exactly once), sets the tags or moves a meeting to a project. The Google Doc follows, and 操作紀錄 says Claude Code made the change. It can't delete a meeting or send mail.
+- When the minutes were already mailed, Claude Code is told so: the people who got them see the new text in the Doc, without a new mail.
+
 Each meeting shows which project it belongs to, and can carry tags.
 
 - In the list, a meeting's icon is the first character of its project on a colour of its own, the same colour every time. A meeting without a project shows an empty dashed circle. Meetings still being written up and ones that failed keep their own icons, and "Not finished" is in red.

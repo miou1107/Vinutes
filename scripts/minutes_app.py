@@ -19,6 +19,9 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
                                                    learns the user's own edits; the side panel's lists again
   minutes_app.py locate <job> <words>              how far down the Doc those words are ({"at": 0.0–1.0})
+  minutes_app.py note <job> <text>                 a paragraph at the end of 「八、補充資訊」, written by someone else
+                                                   than the user (an agent through mcp_server.py)
+  minutes_app.py replace <job> <old> <new>         the words `old`, which the minutes have exactly once, become `new`
   minutes_app.py speaker <job> <group> <name> [line]  the user named a voice (講者 A -> Alex), or one line's
   minutes_app.py archive <job> | unarchive <job>   封存: the list hides the meeting (shown under 已封存) or shows it again
   minutes_app.py move <job> <project>             the meeting belongs to this project ('' = 未分類)
@@ -123,9 +126,15 @@ def now() -> datetime:
     return datetime.now().astimezone()
 
 
-def me() -> str:
+def user_name() -> str:
     """How the log names the user: the sender name from settings.json, else the part of the address before @."""
     return sender_name() or (owner() or t('you')).split('@')[0]
+
+
+def me() -> str:
+    """Who is making this change: the user, or an agent working through the MCP server (mcp_server.py), which
+    sets VINUTES_ACTOR=Claude Code."""
+    return one_line(os.environ.get('VINUTES_ACTOR'), 30) or user_name()
 
 
 # --- one job ---------------------------------------------------------------------------------
@@ -375,7 +384,11 @@ def suggested_tags(job: Job) -> list[str]:
 
 
 def save_sorting(job: Job, **change):
-    write_json(job.dir / SORTING, {**sorting(job), **change})
+    """Read, change and write 分類.json as one step: the window and an agent (mcp_server.py) may both set it."""
+    import fcntl
+    with open(job.dir / '.sorting.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        write_json(job.dir / SORTING, {**sorting(job), **change})
 
 
 def cmd_move(job: Job, project: str):
@@ -1760,6 +1773,56 @@ def cmd_attach(job: Job, note: str, raw: str):
     answer(job, result, html=True, reply=t('reply_attached', names=names), changed=False)
 
 
+# --- an agent changes the minutes (mcp_server.py) ------------------------------------------------
+# Claude Code asked by the user: the change goes in like the window's own, Doc and all, and the log names the agent.
+
+def agent_edit(job: Job, change) -> str:
+    """The minutes after `change(md)`, from the Doc as it is now; the user's own typing is learned first and the
+    agent's change is never learned as theirs."""
+    actor = os.environ.pop('VINUTES_ACTOR', None)     # what the user typed is logged as theirs, not the agent's
+    try:
+        cmd_learn(job, quiet=True)
+    finally:
+        if actor is not None:
+            os.environ['VINUTES_ACTOR'] = actor
+    if job.doc_id and not connect():
+        sync_up(job, user_name())                    # anything not sent yet is what the user typed
+        try:
+            pull(job)
+        except SystemExit:
+            pass
+    md = job.md
+    new = change(md)
+    relearn(job, md, new)
+    result = push_edit(job, new, who=me())
+    job.save_state()
+    out({'changed': new != md, 'held': bool(result.get('held')), 'warning': result.get('warning') or '',
+         'sent': bool(job.result.get('sent_at')), 'doc_url': job.result.get('doc_url') or ''})
+    return new
+
+
+def cmd_note(job: Job, text: str):
+    import attachments
+    text = text.strip()
+    if not text:
+        sys.exit(t('note_empty'))
+    line = '- ' + doc_sync.escape_lead(' '.join(text.split()))
+    agent_edit(job, lambda md: attachments.add_lines(md, [line], job.lang))
+    job.log(me(), t('log_noted', text=cut_words(text, 30)), 'note')
+
+
+def cmd_replace(job: Job, old: str, new: str):
+    if '\n' in new or '\n' in old:
+        sys.exit(t('replace_lines'))
+    def change(md: str) -> str:
+        found = md.count(old) if old else 0
+        if found != 1:
+            sys.exit(t('replace_missing') if not found else t('replace_many', n=found))
+        return md.replace(old, new)
+    agent_edit(job, change)
+    job.log(me(), t('log_replaced', old=cut_words(old, 20), new=cut_words(new, 20)), 'edit')
+
+
 # --- Claude changes the minutes --------------------------------------------------------------
 
 def ai_edit(job: Job, request: str, label: str):
@@ -2196,8 +2259,8 @@ def cmd_locate(job: Job, words: str):
 
 TURN: list = []
 CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
-           'people', 'speaker'}
-NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo'}
+           'people', 'speaker', 'note', 'replace'}
+NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace'}
 
 
 def wait_for_turn(job: Job):
@@ -2205,7 +2268,7 @@ def wait_for_turn(job: Job):
     import fcntl
     import time
     lock = open(job.dir / '.app.lock', 'w')
-    deadline = time.time() + 15 * 60
+    deadline = time.time() + (0 if os.environ.get('VINUTES_NO_WAIT') else 15 * 60)   # an agent asks again later
     while True:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2294,6 +2357,10 @@ def main():
         cmd_attach(job, rest[0], rest[1])
     elif cmd == 'people' and len(rest) >= 2:
         cmd_people(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
+    elif cmd == 'note' and rest:
+        cmd_note(job, ' '.join(rest))
+    elif cmd == 'replace' and len(rest) == 2:
+        cmd_replace(job, rest[0], rest[1])
     elif cmd == 'speaker' and len(rest) >= 2:
         cmd_speaker(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
     elif cmd == 'delete':

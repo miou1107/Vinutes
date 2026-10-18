@@ -2616,3 +2616,164 @@ class SpeakerPick(unittest.TestCase):
         (self.job_dir / '信件內文.txt').write_text('講者 B 會再寄報價。', encoding='utf-8')
         minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
         self.assertEqual((self.job_dir / '信件內文.txt').read_text(encoding='utf-8'), 'Mia 會再寄報價。')
+
+
+class McpServer(unittest.TestCase):
+    """Claude Code reads and changes meetings through mcp_server.py (issue #4): every meeting from any folder,
+    archived ones only by name; writing goes through minutes_app's own commands and is logged as Claude Code."""
+
+    job = Flows.job
+
+    def setUp(self):
+        Flows.setUp(self)
+        import mcp_server
+        self.mcp = mcp_server
+        self.saved_recordings = minutes_app.RECORDINGS
+        minutes_app.RECORDINGS = self.root
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r.pop('doc_url')                              # no Google here: the change stays in the file
+        r['project'] = '週會專案'
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        (self.job_dir / '逐字稿.txt').write_text('[00:05] 報價下週由 Kai 寄出\n[01:10] 好\n', encoding='utf-8')
+
+    def tearDown(self):
+        minutes_app.RECORDINGS = self.saved_recordings
+        Flows.tearDown(self)
+
+    def ask(self, tool, **args):
+        reply = self.mcp.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                                 'params': {'name': tool, 'arguments': args}})['result']
+        text = reply['content'][0]['text']
+        return (text, True) if reply.get('isError') else (json.loads(text), False)
+
+    def test_the_tools_and_which_ones_write(self):
+        tools = self.mcp.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'})['result']['tools']
+        writes = {t['name'] for t in tools if not t['annotations']['readOnlyHint']}
+        self.assertEqual(writes, {'name_speaker', 'add_note', 'replace_text', 'set_tags', 'set_project'})
+        self.assertFalse([t['name'] for t in tools if re.search(r'delete|send|mail', t['name'])])
+        init = self.mcp.handle({'jsonrpc': '2.0', 'id': 0, 'method': 'initialize',
+                                'params': {'protocolVersion': '2025-06-18'}})['result']
+        self.assertEqual(init['protocolVersion'], '2025-06-18')
+        self.assertIsNone(self.mcp.handle({'jsonrpc': '2.0', 'method': 'notifications/initialized'}))
+
+    def test_search_finds_the_minutes_and_what_was_said(self):
+        found, err = self.ask('search_meetings', query='預算 10')
+        self.assertFalse(err)
+        self.assertEqual(found['meetings'][0]['meeting'], '20261014-103000')
+        self.assertTrue(all('預算' in m['text'] for m in found['meetings'][0]['matches']))
+        said, _ = self.ask('search_meetings', query='報價 Kai')
+        self.assertEqual(said['meetings'][0]['matches'][0], {'source': 'transcript', 'at': '00:05',
+                                                              'text': '報價下週由 Kai 寄出'})
+        none, _ = self.ask('search_meetings', query='預算', project='別的專案')
+        self.assertEqual(none['meetings'], [])
+
+    def test_an_archived_meeting_only_when_asked_for(self):
+        (self.job_dir / '封存.json').write_text('{}')
+        self.assertEqual(self.ask('list_meetings')[0]['meetings'], [])
+        self.assertEqual(len(self.ask('list_meetings', include_archived=True)[0]['meetings']), 1)
+        self.assertIn('預算 10 萬元', self.ask('get_minutes', meeting='20261014-103000')[0]['minutes'])
+
+    def test_a_meeting_that_does_not_exist(self):
+        said, err = self.ask('get_minutes', meeting='../../etc')
+        self.assertTrue(err)
+        self.assertIn('list_meetings', said)
+
+    def test_replacing_words_changes_the_minutes_once_and_logs_claude_code(self):
+        done, err = self.ask('replace_text', meeting='20261014-103000', old='預算確定為 10 萬元', new='預算確定為 12 萬元')
+        self.assertFalse(err, done)
+        self.assertIn('預算確定為 12 萬元', self.md_path.read_text(encoding='utf-8'))
+        self.assertEqual(self.job().log_entries()[0]['who'], 'Claude Code')
+        again, err = self.ask('replace_text', meeting='20261014-103000', old='預算確定為 10 萬元', new='x')
+        self.assertTrue(err)
+        self.assertIn('紀錄裡沒有這段文字', again)
+        many, err = self.ask('replace_text', meeting='20261014-103000', old='Kai', new='Kenny')
+        self.assertTrue(err)
+        self.assertIn('出現 2 次', many)
+
+    def test_a_note_goes_into_section_eight(self):
+        done, err = self.ask('add_note', meeting='20261014-103000', text='報價確定為每人 1,200 元。')
+        self.assertFalse(err, done)
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertRegex(md, r'## 八、補充資訊\n\n- 報價確定為每人 1,200 元。\n$')
+
+    def test_minutes_already_mailed_say_so(self):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['sent_at'] = '2026-10-14T12:00:00+08:00'
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        done, _ = self.ask('add_note', meeting='20261014-103000', text='補一句。')
+        self.assertTrue(done['sent'])
+        self.assertTrue(any('without a new mail' in n for n in done['notes']))
+
+    def test_nothing_changes_while_the_minutes_are_being_written(self):
+        (self.job_dir / 'status.json').write_text(json.dumps({'step': 'transcribe'}))
+        said, err = self.ask('set_tags', meeting='20261014-103000', tags=['報價'])
+        self.assertTrue(err)
+        self.assertIn('written up', said)
+        self.assertEqual(minutes_app.tags_of(self.job()), [])
+
+    def test_tags_and_project(self):
+        self.ask('set_tags', meeting='20261014-103000', tags=['報價', '報價', 'KOL'])
+        self.assertEqual(minutes_app.tags_of(self.job()), ['報價', 'KOL'])
+        self.assertEqual(self.ask('set_project', meeting='20261014-103000', project='新專案')[0]['project'], '新專案')
+
+    def test_name_speaker_names_the_voice(self):
+        (self.job_dir / '講者.json').write_text(json.dumps({'groups': {
+            'A': {'name': '', 'seconds': 300, 'sample': [1, 5]}, 'B': {'name': '', 'seconds': 200, 'sample': [9, 12]}},
+            'lines': ['A', 'B'], 'fixed': {}}, ensure_ascii=False))
+        done, err = self.ask('name_speaker', meeting='20261014-103000', speaker='講者 B', name='Mia')
+        self.assertFalse(err, done)
+        self.assertEqual(self.ask('get_transcript', meeting='20261014-103000')[0]['lines'][1], '[01:10] Mia：好')
+        nobody, err = self.ask('name_speaker', meeting='20261014-103000', speaker='C', name='Kai')
+        self.assertTrue(err)
+
+    def test_a_meeting_busy_with_something_else_answers_at_once(self):
+        import fcntl
+        import time
+        with open(self.job_dir / '.app.lock', 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            began = time.time()
+            said, err = self.ask('add_note', meeting='20261014-103000', text='補一句。')
+        self.assertTrue(err)
+        self.assertIn('別的動作', said)
+        self.assertLess(time.time() - began, 10)
+
+    def test_the_server_only_writes_json_and_survives_a_bad_message(self):
+        lines = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}},
+                 {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': ['x']},
+                 {'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call', 'params': {'name': 'nope'}},
+                 {'jsonrpc': '2.0', 'id': 4, 'method': 'tools/list'}]
+        done = subprocess.run([sys.executable, str(Path(minutes_app.__file__).with_name('mcp_server.py'))],
+                              input='\n'.join(json.dumps(m) for m in lines) + '\nnot json\n', capture_output=True,
+                              text=True, timeout=60, env={**os.environ, 'MINUTES_HOME': HOME})
+        replies = [json.loads(line) for line in done.stdout.splitlines()]
+        self.assertEqual([r.get('id') for r in replies], [1, 2, 3, 4, None])
+        self.assertEqual(replies[2]['error']['code'], -32602)
+        self.assertEqual(replies[4]['error']['code'], -32700)
+        self.assertIn('tools', replies[3]['result'])
+
+
+class AgentEdit(Flows):
+    """An agent's change through minutes_app (note, replace) goes to the Google Doc too, and what the user typed
+    before it is still logged as the user's."""
+
+    def test_the_doc_gets_the_change_and_each_one_is_logged_by_who_made_it(self):
+        sent = []
+        ds.push = lambda doc_id, base, new: (sent.append(new), (ds.Plan([{'x': 1}], [], []), fake_doc(new), True))[1]
+        saved_connect = minutes_app.connect
+        minutes_app.connect = lambda: 'OFFLINE'      # nothing to pull: the push is what is checked
+        self.md_path.write_text(MINUTES.replace('主要來自三篇文章', '主要來自四篇文章'), encoding='utf-8')
+        os.environ['VINUTES_ACTOR'] = 'Claude Code'
+        try:
+            minutes_app.cmd_replace(self.job(), '預算確定為 10 萬元', '預算確定為 12 萬元')
+        finally:
+            os.environ.pop('VINUTES_ACTOR', None)
+            minutes_app.connect = saved_connect
+        self.assertIn('預算確定為 12 萬元', sent[-1])
+        who = {e['text']: e['who'] for e in self.job().log_entries()}
+        self.assertEqual(who[next(t for t in who if '12 萬元' in t)], 'Claude Code')
+        self.assertNotEqual(who[next(t for t in who if '四' in t)], 'Claude Code')     # the user's own typing
+
+    def test_a_replacement_over_two_lines_is_refused(self):
+        with self.assertRaises(SystemExit) as stop:
+            minutes_app.cmd_replace(self.job(), '預算確定為 10 萬元', '預算\n## 新章節')
+        self.assertIn('不能有換行', str(stop.exception.code))

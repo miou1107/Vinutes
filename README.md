@@ -50,6 +50,16 @@ git clone https://github.com/miou1107/Vinutes ~/Vinutes
 
 The first run downloads the speech model (about 1.6 GB), so it can take a while. When it finishes, a microphone icon appears in the menu bar. Open the meeting window and go through the setup checklist once.
 
+## Use your meetings in Claude Code
+
+Vinutes is also an MCP server. Add it to Claude Code once:
+
+```bash
+claude mcp add --scope user vinutes -- ~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/mcp_server.py
+```
+
+Then, in any folder, ask Claude Code "what did last week's project meeting decide?" and it searches your minutes and transcripts and answers with the meeting's date and title. When you ask it to, it can also name a speaker, add a paragraph to section 8, change words in the minutes, and set tags or the project; the Google Doc follows, and the meeting's history says Claude Code made the change. Deleting a meeting and sending mail stay in Vinutes.
+
 ## Update
 
 When a newer version is on GitHub, the meeting window shows an update button. You can also update by hand:

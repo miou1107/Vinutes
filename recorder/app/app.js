@@ -120,7 +120,7 @@ const S = {
   setupSeq: 0,               // goes up with every click in 環境設定自檢: an older answer is not shown
   attach: [],                // files, links and pictures picked for 「八、補充資訊」, sent with the next sentence
   urlOpen: false, menuOpen: false,
-  learned: [], learnOpen: false, learnShown: 0,   // learnOpen: the list of what Claude learned shows six rows instead of three
+  learned: [], learnOpen: false, learnShown: 0,   // learnOpen: the list of what Claude learned shows six rows instead of two
   banner: null, bannerTimer: null, alert: null,
   player: { open: false, playing: false, pos: 0, dur: 0, speed: 1 },
   sheet: null, mail: null,
@@ -171,14 +171,18 @@ function refreshDoc(id = S.sel, again = false) {
   const seq = S.editSeq;
   const p = call('refresh', { id }).then((r) => {
     if (r.busy || S.sel !== id || !S.d || !docsMode()) return;
-    const before = JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees]);
+    const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent]);
+    const before = seen();
     if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = r.check || []; }   // not over a confirm made meanwhile
     if (r.attendees) S.d.attendees = r.attendees;
+    if (r.people && !S.peopleBusy) S.d.people = r.people;
+    if (r.speakers && !S.peopleBusy) S.d.speakers = r.speakers;
+    if (r.silent && !S.peopleBusy) S.d.silent = r.silent;
     S.d.log = r.log || [];
     if ('can_undo' in r && !S.busy) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
-    if (JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees]) !== before) renderRail();
+    if (seen() !== before && !S.pickOpen) renderRail();
   }).catch(() => {}).finally(() => { if (S.refreshing && S.refreshing.p === p) S.refreshing = null; });
   S.refreshing = { id, p };
   return p;
@@ -559,7 +563,8 @@ async function select(id) {
   }
   S.sel = id;
   S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null;
-  S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.alert = null;
+  S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
+  S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
   S.tagAdding = false;
   S.attach = []; S.urlOpen = false; S.menuOpen = false;
   S.dirty = false; S.saveText = ''; S.saveErr = false;
@@ -993,6 +998,9 @@ function afterEdit(r) {
   if (r.unsaved) setSave(['not_saved_edit'], true);
   else setSave([r.held ? 'held' : 'saved', r.saved_at || hhmm()]);
   if (r.attendees) S.d.attendees = r.attendees;       // 與會人員 under 人員, after the names went into the minutes
+  if (r.people) S.d.people = r.people;
+  if (r.speakers) S.d.speakers = r.speakers;
+  if (r.check) S.d.check = r.check;
   if (r.todo) { S.d.todo = r.todo; renderFoot(); renderRail(); }
   if ('can_undo' in r) S.canUndo = !!r.can_undo;
   if (r.reload_doc) placeDoc(true);                 // the whole Doc was uploaded again: the one shown loads again
@@ -1098,133 +1106,190 @@ function renderDocsRail(el) {
   const d = S.d;
   const todo = d.todo || [];
   const all = d.check || [];
-  // guesses about who a voice is go under 人員, beside that voice; the rest (words heard) stay under 待確認
-  const people = all.filter((c) => c.speaker);
-  const check = all.filter((c) => !c.speaker);
-  const tabs = ['fill', 'check', 'people', 'log'];
-  const tab = tabs.includes(S.tab) ? S.tab : (todo.length ? 'fill' : check.length ? 'check' : people.length ? 'people' : 'log');
+  // guesses about who a voice is go under 人員, with that voice; 待處理 has the blanks and the words heard
+  const voiced = (c) => c.speaker && (d.voices || []).some((v) => v.group === c.speaker);
+  const people = all.filter(voiced);
+  const check = all.filter((c) => !voiced(c));
+  const waiting = todo.length + check.length;
+  const shown = d.speakers || {};
+  const unnamed = (d.voices || []).filter((v) => !(v.name || shown[v.group])).length;   // voices nobody is picked for
+  const tabs = ['todo', 'people', 'log'];
+  const tab = tabs.includes(S.tab) ? S.tab : (waiting ? 'todo' : unnamed ? 'people' : 'log');
   const pick = (t) => () => { S.railOpen = true; S.tab = t; renderRail(); };
   if (!S.railOpen) {
     el.className = 'rail closed';
     el.innerHTML = `
       <button class="iconbtn" id="expand" title="${esc(t('expand'))}" aria-label="${esc(t('expand'))}">${ICON.expand}</button>
-      <button class="iconbtn" id="railF" title="${esc(t('to_fill'))}" aria-label="${esc(t('to_fill'))}">${ICON.lines}${todo.length ? `<span class="badge red">${todo.length}</span>` : ''}</button>
-      <button class="iconbtn" id="railK" title="${esc(t('to_confirm'))}" aria-label="${esc(t('to_confirm'))}">${ICON.check}${check.length ? `<span class="badge">${check.length}</span>` : ''}</button>
-      <button class="iconbtn" id="railP" title="${esc(t('people'))}" aria-label="${esc(t('people'))}">${ICON.people}${people.length ? `<span class="badge">${people.length}</span>` : ''}</button>
+      <button class="iconbtn" id="railF" title="${esc(t('to_handle'))}" aria-label="${esc(t('to_handle'))}">${ICON.lines}${waiting ? `<span class="badge${todo.length ? ' red' : ''}">${waiting}</span>` : ''}</button>
+      <button class="iconbtn" id="railP" title="${esc(t('people'))}" aria-label="${esc(t('people'))}">${ICON.people}${unnamed ? `<span class="badge">${unnamed}</span>` : ''}</button>
       <button class="iconbtn" id="railL" title="${esc(t('activity'))}" aria-label="${esc(t('activity'))}">${ICON.clock}</button>`;
     $('#expand').addEventListener('click', () => { S.railOpen = true; renderRail(); });
-    $('#railF').addEventListener('click', pick('fill'));
-    $('#railK').addEventListener('click', pick('check'));
+    $('#railF').addEventListener('click', pick('todo'));
     $('#railP').addEventListener('click', pick('people'));
     $('#railL').addEventListener('click', pick('log'));
     return;
   }
   el.className = 'rail';
-  const body = tab === 'fill'
-    ? (todo.length ? todo.map((t, i) => `<button class="todo" data-t="${i}"><b>${esc(t.label)}</b>${t.anchor && t.anchor !== t.label ? `<span>${esc(t.anchor)}</span>` : ''}</button>`).join('')
-                   : `<div class="empty">${esc(t('all_filled'))}</div>`)
-    : tab === 'check'
-      ? (check.length ? check.map((c, i) => `<div class="card guess"><div class="text">${esc(c.label)}</div>
+  const body = tab === 'todo'
+    ? (waiting ? todo.map((it, i) => `<button class="todo" data-t="${i}"><span class="kind red">${esc(t('to_fill'))}</span><b>${esc(it.label)}</b>${it.anchor && it.anchor !== it.label ? `<span>${esc(it.anchor)}</span>` : ''}</button>`).join('')
+        + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t('to_confirm'))}</span><div class="text">${esc(c.label)}</div>
           <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`).join('')
-                      : `<div class="empty">${esc(t('all_confirmed'))}</div>`)
-      : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
+      : `<div class="empty">${esc(t('nothing_to_handle'))}</div>`)
+    : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
-        <button class="tab${tab === 'fill' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_fill'))}${todo.length ? ` <b class="n red">${todo.length}</b>` : ''}</button>
-        <button class="tab${tab === 'check' ? ' on' : ''}" role="tab" id="tabK">${esc(t('to_confirm'))}${check.length ? ` <b class="n yellow">${check.length}</b>` : ''}</button>
-        <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${people.length ? ` <b class="n yellow">${people.length}</b>` : ''}</button>
+        <button class="tab${tab === 'todo' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_handle'))}${waiting ? ` <b class="n ${todo.length ? 'red' : 'yellow'}">${waiting}</b>` : ''}</button>
+        <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${unnamed ? ` <b class="n yellow">${unnamed}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
       </div>
       <span style="flex:1"></span>
       <button class="iconbtn" id="collapse" title="${esc(t('collapse'))}" aria-label="${esc(t('collapse'))}">${ICON.collapse}</button>
     </div>
     <div class="railbody" id="railbody">${body}</div>`;
-  $('#tabF').addEventListener('click', pick('fill'));
-  $('#tabK').addEventListener('click', pick('check'));
+  $('#tabF').addEventListener('click', pick('todo'));
   $('#tabP').addEventListener('click', pick('people'));
   $('#tabL').addEventListener('click', pick('log'));
   $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); });
-  el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
-    const item = todo[Number(b.dataset.t)];
-    showInDoc(item.find, true);
-    askAbout(item);
-  }));
-  if (tab === 'check') {
-    el.querySelectorAll('.card.guess .text').forEach((t, i) => t.addEventListener('click', () => showInDoc(check[i].find)));
+  if (tab === 'todo') {
+    el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
+      const item = todo[Number(b.dataset.t)];
+      showInDoc(item.find, true);
+      askAbout(item);
+    }));
+    el.querySelectorAll('.card.guess .text').forEach((x, i) => x.addEventListener('click', () => showInDoc(check[i].find)));
     el.querySelectorAll('.okc2[data-c]').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
   }
-  if (tab === 'people') wirePeople(el, people);
+  if (tab === 'people') wirePeople(el);
 }
 
-// 人員: each voice in the recording, with what Claude guessed about it (confirm it, or name the voice yourself),
-// guesses about voices the recording does not tell apart, and the names on the minutes' 與會人員 line
+// 人員: one card per voice in the recording, with a menu to pick who it is. The menu starts on the name the minutes
+// use (the AI's guess, put in after the write-up); picking someone puts that name in the minutes at once and
+// remembers the voice. The people invited who did not speak are listed under it (Vin 2026-10-17).
 function peopleHTML(people) {
   const d = S.d;
   const voices = d.voices || [];
-  const guessOf = (g) => people.find((c) => c.speaker === g);
-  const loose = people.filter((c) => !voices.some((v) => v.group === c.speaker));
-  const guess = (c) => esc(t('people_guess', c.who, c.role || ''));
-  const rows = voices.map((v) => {
-    const c = guessOf(v.group);
+  const shown = d.speakers || {};
+  const busy = S.peopleBusy || S.busy;
+  if (!voices.length) {
+    const names = d.people || [];
+    return `<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}`;
+  }
+  const cards = voices.map((v) => {
+    const name = v.name || shown[v.group] || '';
     const playing = S.player.playing && S.peoplePlay === v.group;
-    // a voice already named (by hand, or known from an earlier meeting) keeps the guess only to be settled
-    const yes = !c ? '' : v.name
-      ? `<button class="okc2 ploose" data-l="${esc(c.label)}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button>`
-      : `<button class="okc2 pyes" data-g="${esc(v.group)}"${S.peopleBusy ? ' disabled' : ''}>${ICON.checkSmall}<span>${esc(t('people_yes', c.who))}</span></button>`;
-    return `<div class="card person${c ? ' guess' : ''}" data-g="${esc(v.group)}">
-      <div class="prow"><span class="pchip" style="${voiceStyle(v.group, v.name)}">${esc(v.label)}</span>
+    const open = S.pickOpen === v.group;
+    const guess = (people.find((c) => c.speaker === v.group) || {}).who || '';
+    const choices = [...new Set([guess, ...(d.people || [])].filter(Boolean))];
+    const menu = !open ? '' : S.pickTyping === v.group
+      ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
+      : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
+          <div class="mi other" data-other="1">${esc(t('people_other'))}</div></div>`;
+    return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
+        <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
         <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
         <button class="plink phear" data-g="${esc(v.group)}">${esc(t(playing ? 'stop_play' : 'hear'))}</button></div>
-      ${c ? `<div class="text">${guess(c)}</div>` : ''}
-      <div class="prow">${yes}<button class="plink pname" data-g="${esc(v.group)}">${esc(t(v.name ? 'people_rename' : 'people_set'))}</button></div></div>`;
+      <div class="pickwrap"><button class="pick${name ? ' done' : ''}" data-g="${esc(v.group)}" aria-haspopup="listbox" aria-expanded="${open}"${busy ? ' disabled' : ''}>
+        ${name ? `<b>${esc(name)}</b>` : `<span class="ph">${esc(t('people_pick'))}</span>`}<span class="caret">▾</span></button>${menu}</div></div>`;
   });
-  const others = loose.map((c) => `<div class="card guess"><div class="text">${esc(c.label)}</div>
-      <button class="okc2 ploose" data-l="${esc(c.label)}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`);
-  const named = voices.filter((v) => v.name);
-  const names = d.attendees || [];
-  if (!rows.length && !others.length && !names.length) return `<div class="empty">${esc(t('people_none'))}</div>`;
-  return `${rows.length ? `<div class="phead">${esc(t('people_voices'))}</div>${rows.join('')}` : ''}${others.join('')}
-    ${named.length && d.doc_url && !d.readonly ? `<button class="btn ghost papply" id="pApply"${S.busy ? ' disabled' : ''}>${esc(t('people_apply'))}</button>` : ''}
-    ${names.length ? `<div class="phead">${esc(t('people_attendees'))}</div><div class="pnames">${names.map((n) => `<span class="pname-chip">${esc(n)}</span>`).join('')}</div>` : ''}`;
+  const silent = d.silent || [];                   // the server tells names apart (陳怡君（Jessie） is Jessie)
+  return `<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
+    ${silent.length ? `<div class="pmin silent">${esc(t('people_silent_list', silent.join(t('list_sep'))))}</div>` : ''}`;
 }
 
-function wirePeople(el, people) {
+// what the server sends back after a change to the people: who each voice is, the voices, the minutes
+function peopleDone(r) {
+  if (!S.d) return;
+  for (const k of ['people', 'speakers', 'silent', 'voices', 'transcript', 'voice_names', 'log', 'check']) if (r[k]) S.d[k] = r[k];
+  afterEdit(r);
+}
+
+// true when the change went in
+async function peopleCall(cmd, args) {
+  if (S.peopleBusy || S.busy) return false;
+  const id = S.sel;
+  S.peopleBusy = true; S.editSeq++;                 // a refresh meanwhile does not draw the old names again
+  renderRail();
+  try {
+    const r = await call(cmd, { id, ...args });
+    if (S.sel !== id) return false;
+    peopleDone(r);
+    return true;
+  } catch (e) { showAlert(e.message); return false; } finally { S.peopleBusy = false; if (S.sel === id) renderRail(); }
+}
+
+function closePick() { S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; }
+
+function wirePeople(el) {
   const d = S.d;
   const voices = d.voices || [];
   el.querySelectorAll('.phear').forEach((b) => b.addEventListener('click', () => {
     const v = voices.find((x) => x.group === b.dataset.g);
     if (!v) return;
-    if (S.player.playing && S.peoplePlay === v.group) audio('pause', { at: S.player.pos });
-    else { S.peoplePlay = v.group; audio('play', { at: v.sample[0] }); }
+    clearTimeout(S.peopleStop);
+    if (S.player.playing && S.peoplePlay === v.group) { audio('pause', { at: S.player.pos }); setTimeout(renderRail, 300); return; }
+    audio('play', { at: v.sample[0] }, true);
+    S.peoplePlay = v.group;
+    // the stretch of this voice, then it stops: what follows may be someone else
+    const long = Math.max(3, (v.sample[1] || v.sample[0] + 8) - v.sample[0]) * 1000;
+    S.peopleStop = setTimeout(() => {
+      if (S.player.playing && S.peoplePlay === v.group) audio('pause', { at: S.player.pos }, true);
+      S.peoplePlay = null;
+      renderRail();
+    }, long);
     setTimeout(renderRail, 600);
   }));
-  el.querySelectorAll('.pname').forEach((b) => b.addEventListener('click', () => openTranscript({ ask: { group: b.dataset.g, line: null } })));
-  el.querySelectorAll('.pyes').forEach((b) => b.addEventListener('click', async () => {
-    const c = people.find((x) => x.speaker === b.dataset.g);
-    if (!c || S.peopleBusy) return;
-    const id = S.sel;
-    S.peopleBusy = true; S.editSeq++;                  // a refresh meanwhile does not draw the button again
-    b.disabled = true;
-    try {
-      const r = await call('speaker', { id, group: c.speaker, name: c.who });   // the voice is remembered too
-      if (S.sel !== id || !S.d) return;
-      S.d.transcript = r.transcript || S.d.transcript;
-      S.d.voices = r.voices || S.d.voices;
-      S.d.voice_names = r.voice_names || S.d.voice_names;
-      await confirmCheck(c);
-    } catch (e) { showAlert(e.message); } finally { S.peopleBusy = false; if (S.sel === id) renderRail(); }
+  el.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const g = b.dataset.g;
+    if (S.pickOpen === g) closePick(); else { closePick(); S.pickOpen = g; }
+    renderRail();
   }));
-  el.querySelectorAll('.ploose').forEach((b) => b.addEventListener('click', () => {
-    const c = people.find((x) => x.label === b.dataset.l);
-    if (c) { b.disabled = true; confirmCheck(c); }
+  const choose = (g, name) => {
+    closePick();
+    name = (name || '').trim();
+    if (name) peopleCall('speaker', { group: g, name });   // into the minutes, and the voice is remembered
+    else renderRail();
+  };
+  el.querySelectorAll('.menu .mi').forEach((m) => m.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (m.dataset.other) { S.pickTyping = S.pickOpen; S.peopleTyped = ''; renderRail(); const i = $('#pIn'); if (i) i.focus(); return; }
+    choose(S.pickOpen, m.dataset.n);
   }));
-  const apply = $('#pApply');
-  if (apply) apply.addEventListener('click', () => {
-    const w = mailWords();                            // 講者 A in Chinese minutes, Speaker A in English ones
-    const pairs = voices.filter((v) => v.name).map((v) => w.people_pair(v.group, v.name)).join(w.list_sep);
-    ask(w.people_apply_ask(pairs));
+  const input = $('#pIn');
+  if (!input) return;
+  const list = $('#pAc');
+  const group = S.pickTyping;
+  let offered = [], at = 0;
+  const offer = () => {                             // names from earlier meetings and every project's list
+    const q = input.value.trim().toLowerCase();
+    S.peopleTyped = input.value;
+    offered = q ? (d.people_known || []).filter((n) => n.toLowerCase().includes(q)).slice(0, 6) : [];
+    at = 0;
+    list.hidden = !offered.length;
+    list.innerHTML = offered.map((n, i) => `<div class="aci${i === at ? ' on' : ''}" data-i="${i}">${esc(n)}</div>`).join('');
+  };
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('input', offer);
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;   // the 注音 candidate list takes Enter first (WebKit: 229)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!offered.length) return;
+      e.preventDefault();
+      at = (at + (e.key === 'ArrowDown' ? 1 : offered.length - 1)) % offered.length;
+      list.querySelectorAll('.aci').forEach((x, i) => x.classList.toggle('on', i === at));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      choose(group, offered.length ? offered[at] : input.value);
+    } else if (e.key === 'Escape') {
+      closePick(); renderRail();
+    }
   });
+  list.addEventListener('mousedown', (e) => {       // before the box loses focus
+    const x = e.target.closest('.aci');
+    if (x) { e.preventDefault(); choose(group, offered[Number(x.dataset.i)]); }
+  });
+  offer();
 }
 
 // a blank to fill: the question goes into the box under the Doc, ready for the answer
@@ -1459,6 +1524,7 @@ function renderAttachMenu() {
 }
 document.addEventListener('click', (e) => {
   if (S.menuOpen && !e.target.closest('#attachMenu')) { S.menuOpen = false; renderAttachMenu(); }
+  if (S.pickOpen && !e.target.closest('.pickwrap')) { closePick(); renderRail(); }
   if (S.aiOpen && !e.target.closest('#aiMenu')) { S.aiOpen = false; renderAiMenu(); }
 });
 
@@ -1571,6 +1637,8 @@ function renderLearned() {
   const top = $('#askTop');
   if (!top) return;
   const learned = S.learned;
+  const fresh = learned.length > S.learnShown;        // something new: the box comes back for it
+  if (fresh) S.learnHidden = false;
   const kept = top.querySelector('.lrows');
   const scroll = kept ? kept.scrollTop : 0;        // turning one row off keeps the list where it was
   top.innerHTML = `
@@ -1578,8 +1646,8 @@ function renderLearned() {
     ${!S.busy && S.said ? `<div class="replyline${S.saidErr ? ' err' : ''}">${S.saidErr ? '' : ICON.done}
         <span class="asked">${esc(t('quote', S.askedQuick ? t(`quick_${S.askedQuick}`) : S.asked))}</span><span class="said">${esc(S.said)}</span>
         ${S.canUndo && !S.saidErr ? `<button class="btn ghost" id="undo" style="height:24px;padding:0 10px;font-size:12px">${esc(t('undo'))}</button>` : ''}</div>` : ''}
-    ${learned.length ? `<div class="learn${S.learnOpen ? ' open' : ''}"><div class="lh">${ICON.book}<span>${esc(t('learned_head', aiName()))}</span>
-        ${learned.length > 3 ? `<span style="flex:1"></span><button class="btn ghost" id="learnMore" style="height:22px;padding:0 8px;font-size:11px">${esc(t(S.learnOpen ? 'collapse' : 'expand'))}</button>` : ''}</div>
+    ${learned.length && !S.learnHidden ? `<div class="learn${S.learnOpen ? ' open' : ''}"><div class="lh">${ICON.book}<span>${esc(t('learned_head', aiName()))}</span>
+        ${learned.length > 2 ? `<span style="flex:1"></span><button class="btn ghost" id="learnMore" style="height:22px;padding:0 8px;font-size:11px">${esc(t(S.learnOpen ? 'collapse' : 'expand'))}</button>` : ''}</div>
         <div class="lrows">${learned.map((l, i) => {
           const keep = l.kind !== 'once';
           const where = t(keep && l.off ? 'learn_off' : { term: 'learn_term', pref: 'learn_pref', style: 'learn_pref', once: 'learn_once' }[l.kind]);
@@ -1588,10 +1656,22 @@ function renderLearned() {
             ${keep ? `<button class="btn ghost" data-i="${i}" style="height:22px;padding:0 8px;font-size:11px">${esc(t(l.off ? 'learn_on_btn' : 'learn_off_btn'))}</button>` : ''}</div>`;
         }).join('')}</div></div>` : ''}`.trim();
   const rows = top.querySelector('.lrows');
-  if (rows) rows.scrollTop = learned.length > S.learnShown ? rows.scrollHeight : scroll;   // something new: show it
+  if (rows) rows.scrollTop = fresh ? rows.scrollHeight : scroll;   // something new: show it
   S.learnShown = learned.length;
+  // the box shows what was just learned for 5 seconds, then goes (Vin 2026-10-18); not while the pointer is on it
+  // or it is expanded. 操作紀錄 keeps every line.
+  const box = top.querySelector('.learn');
+  const hideLater = () => {
+    clearTimeout(S.learnTimer);
+    S.learnTimer = setTimeout(() => { if (!S.learnOpen && !S.learnHover) { S.learnHidden = true; renderLearned(); } }, 5000);
+  };
+  if (fresh) hideLater();
+  if (box) {
+    box.addEventListener('mouseenter', () => { S.learnHover = true; clearTimeout(S.learnTimer); });
+    box.addEventListener('mouseleave', () => { S.learnHover = false; hideLater(); });
+  }
   const more = $('#learnMore');
-  if (more) more.addEventListener('click', () => { S.learnOpen = !S.learnOpen; renderLearned(); });
+  if (more) more.addEventListener('click', () => { S.learnOpen = !S.learnOpen; if (!S.learnOpen) hideLater(); renderLearned(); });
   const undo = $('#undo');
   if (undo) undo.addEventListener('click', undoLast);
   top.querySelectorAll('.learn .lr button').forEach((b) => b.addEventListener('click', () => toggleLearned(Number(b.dataset.i))));
@@ -1700,7 +1780,8 @@ async function confirmCheck(item) {
   } catch (e) { showAlert(e.message); }
 }
 
-function audio(action, args = {}) {
+function audio(action, args = {}, fromPeople = false) {
+  if (!fromPeople && action !== 'rate') { clearTimeout(S.peopleStop); S.peoplePlay = null; }   // ▶ 聽錄音's stop is off
   if (action === 'stop') { S.player.open = false; S.player.playing = false; renderFoot(); markPlaying(); }
   if (action === 'play') { S.player.open = true; }
   if (action === 'rate') { S.player.speed = args.rate; renderFoot(); }
@@ -1847,6 +1928,7 @@ function openTranscript(keep = {}) {
       d.transcript = r.transcript || d.transcript;
       d.voices = r.voices || d.voices;
       d.voice_names = r.voice_names || d.voice_names;
+      if (!oneLine) { if (r.people) d.people = r.people; afterEdit(r); }   // the minutes say the name now
       const guess = oneLine ? null : (d.check || []).find((c) => c.speaker === ask.group);
       openTranscript({ toast: oneLine ? '' : t('voice_saved', name) });
       if (guess) await confirmCheck(guess);          // named by hand: the guess about this voice is settled

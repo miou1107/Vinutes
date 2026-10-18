@@ -566,6 +566,9 @@ def run(job: Path):
         md = Path(result['minutes_md'])
         shutil.copy(work / DRAFT, md)
         import speakers
+        md.write_text(speakers.guesses_into(job, md.read_text(encoding='utf-8'), result.get('check')), encoding='utf-8')
+        if (job / BODY).is_file():                   # the mail names the voices the same way
+            (job / BODY).write_text(speakers.named_letters(job, (job / BODY).read_text(encoding='utf-8')), encoding='utf-8')
         base = next((md.stem.removesuffix(end) for end, _ in SUFFIX.values() if md.stem.endswith(end)), md.stem)
         md.with_name(base + SUFFIX[lang][1] + '.txt').write_text(speakers.labelled_transcript(job, unnamed(lang)),
                                                                  encoding='utf-8')

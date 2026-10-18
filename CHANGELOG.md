@@ -9,13 +9,14 @@ Each meeting shows which project it belongs to, and can carry tags.
 - The list shows each meeting's tags. Pick one in the new Tags menu, or click a tag on a meeting, to see only the meetings with it. Search finds tags too.
 - The gear beside the project name opens Project settings: rename the project (every meeting of it gets the new name; a name another project already uses puts the two together), or move this meeting to another project or a new one.
 - Claude's next minutes see the project names and tags you chose, so a series keeps them.
-- The box of what Claude learned from your edits is three lines high and scrolls; Expand shows six.
+- The box of what Claude learned from your edits is two lines high and scrolls (Expand shows six), and it goes away 5 seconds after something new is learned, unless the pointer is on it; 操作紀錄 keeps every line.
 
 The meeting window is easier to start with and has more room for the Doc.
 
 - Before the first meeting is recorded, the window shows Record your first meeting with a Start recording button and the shortcut ⌃⌥R. The new recording shows up in the list as soon as it starts.
 - Send email is at the right of the top row. Once the minutes are sent, it becomes "Sent to N people" (the time and format show when you point at it), and the bottom row is gone unless a recording is playing.
-- A People tab beside 待補充 and 待確認 lists the voices in the recording: play a moment of each, confirm Claude's guess of who it is (the voice is remembered for next time), or name it yourself; the names on the minutes' 與會人員 line are listed under it, and one button asks the AI to put the names into the minutes. Guesses about voices move there from 待確認.
+- 待補充 and 待確認 are one tab, 待處理, with one number; each card says which it is.
+- The People tab shows each voice in the recording with a menu of who it is. The menu starts on the name the AI guessed, and the minutes already use it (a guess is written in when the minutes are, and the voice is not remembered from a guess); pick someone else, or type a name under 其他人⋯, and the minutes and the mail change at once where that voice is meant (講者 B, or the name it was given there), while the same name said about someone else stays; Vinutes remembers that voice for the next meeting. Two voices the AI guessed as the same person keep their letters until you pick. ▶ 聽錄音 plays that person's stretch and stops. The people invited who didn't speak are listed under it. The names offered come from the meeting's calendar invitation (an ERP room booking's invitees come through it), the project's own list from earlier meetings, and the minutes' 與會人員 line, which follows the list.
 - When the AI has used up its limit, the window says when it is back (明天中午 12 點) instead of only that the change failed.
 - The number of meetings shown is beside the list's title, 所有會議記錄 (2), instead of on a row of its own.
 - ⌘V in the box where you ask Claude adds a picture on the clipboard (a screenshot, an image copied from a page, a picture file copied in Finder), the same as one chosen with the picture button; text still pastes as text.

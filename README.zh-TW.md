@@ -86,6 +86,12 @@ GitHub 上有新版時，會議視窗會出現更新按鈕。也可以自己更�
 git -C ~/Vinutes pull && ~/Vinutes/recorder/install.sh
 ```
 
+安裝或更新完成後，Vinutes 會從 GitHub 下載一個很小的檔案，用下載次數估算大約有幾台 Mac 在用。下載時不會送出這台 Mac 或使用者的任何資料。不想被計入的話，在終端機執行下面這一行，之後安裝和更新都不會再下載：
+
+```bash
+touch ~/.config/vin-meeting-minutes-zh/no-count
+```
+
 ## 資料放在哪裡
 
 設定、Google 登入資料、詞彙表和錄音都放在 `~/.config/vin-meeting-minutes-zh/`，跟 Vinutes 的程式分開放，所以更新或重新安裝 Vinutes 都不會改到這些資料。這個資料夾跟 [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill 共用，Google 只要登入一次，兩邊都能用。

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- install.sh downloads one small file from the counter on GitHub after it installs or updates the app, so its download count shows roughly how many Macs use Vinutes. Nothing about the Mac or its user is sent. A file named no-count in ~/.config/vin-meeting-minutes-zh (or VINUTES_NO_COUNT=1) leaves a Mac out.
+
 ## v0.4.3 (2026-10-18)
 
 - The README shows the menu-bar panel, the meeting window and the floating bar with live captions (English, made-up meetings; docs/screenshots/demo_home.py makes those meetings again for new pictures).

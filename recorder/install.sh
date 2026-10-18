@@ -17,6 +17,10 @@
 #      Chinese for people who used Vinutes before it spoke English ("language": "zh-TW" in settings.json)
 #   6. connects Vinutes to the AI tools on this Mac, so they can look things up in the meetings
 #      (scripts/connect_agents.py)
+#   7. when the app was installed or updated (not when nothing changed), downloads one small file from the
+#      counter on GitHub (install.txt or update.txt), so its download count shows roughly how many Macs use
+#      Vinutes. Nothing about the Mac or its user is sent. VINUTES_NO_COUNT=1, or a file named no-count in
+#      $MINUTES_HOME (which the update button's run also sees), skips it.
 # One AI CLI must be installed and signed in (Claude Code, Codex or Antigravity); the script says so when none is.
 set -euo pipefail
 
@@ -166,6 +170,8 @@ else
       exit 1
     fi
   fi
+  COUNT=install                              # what the counter at the end records
+  for old in "$APP" "${OLD_APPS[@]}"; do if [[ -d "$old" ]]; then COUNT=update; fi; done
   rm -rf "$APP" "${OLD_APPS[@]}"
   mkdir -p "$(dirname "$APP")"
   mv "$NEW" "$APP"
@@ -208,6 +214,11 @@ echo "connecting Vinutes to the AI tools on this Mac:"
 "$VPY" "$ROOT/scripts/connect_agents.py" | sed 's/^/  /' || echo "  (not connected; run scripts/connect_agents.py later)"
 
 open "$APP"
+
+# one download from the counter on GitHub per install or update; quiet, and never stops the install
+if [[ -n "${COUNT:-}" && -z "${VINUTES_NO_COUNT:-}" && ! -e "$MINUTES_HOME/no-count" ]]; then
+  curl -fsSL --max-time 5 -o /dev/null "https://github.com/miou1107/Vinutes/releases/download/counter/$COUNT.txt" || true
+fi
 echo
 echo "DONE: Vinutes is in the menu bar (the microphone icon at the top right of the screen)."
 echo "The first recording asks for microphone permission; the first finished job asks to show notifications."

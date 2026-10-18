@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.2 (2026-10-18)
 
 - The menu-bar icon opens a panel instead of a menu. In the middle is a big round button: red with a white dot to start recording, white with a red ring and a red square to stop it (⌃⌥R still does both). While recording, the panel shows how long it has run with the level bars, and Pause.
 - Under it are the last three meetings, then All Meetings (opens the meeting list), Settings and Quit in three equal buttons. Settings has the setup checklist, open at login, the two languages and the recordings folder.

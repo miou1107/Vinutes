@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 (2026-10-18)
 
 Online meetings are recorded with the other side's voices, also with headphones on (issue #3).
 

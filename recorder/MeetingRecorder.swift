@@ -83,12 +83,9 @@ let STRINGS: [String: [String: String]] = [
     "en": [
         "menu.start": "Start Recording",
         "menu.pause": "Pause Recording",
-        "menu.resume": "Resume Recording",
         "menu.stop": "Stop Recording",
-        "menu.discard": "Discard This Recording",
         "menu.recent": "Recent Meetings",
         "menu.none": "No recordings yet",
-        "menu.more": "More…",
         "menu.folder": "Open Recordings Folder",
         "menu.settings": "Settings",
         "menu.setup": "Setup Checklist",
@@ -97,7 +94,12 @@ let STRINGS: [String: [String: String]] = [
         "menu.languageAuto": "Same as Mac",
         "menu.meetingLanguage": "Meeting Language",
         "menu.meetingAuto": "Detect Automatically",
-        "menu.quit": "Quit Vinutes",
+        "panel.all": "All Meetings",
+        "panel.quit": "Quit",
+        "panel.stopHint": "Click to stop recording",
+        "panel.resume": "Resume",
+        "panel.update": "Update to %@",
+        "update.failTitle": "Vinutes didn't update",
         "app.hide": "Hide %@",
         "app.quit": "Quit %@",
         "edit": "Edit",
@@ -135,11 +137,8 @@ let STRINGS: [String: [String: String]] = [
         "btn.close": "Close",
         "btn.ok": "OK",
         "btn.cancel": "Cancel",
-        "btn.delete": "Delete Recording",
         "start.failTitle": "Can't start recording",
         "start.failText": "Another app may be using the microphone. (%@)",
-        "discard.title": "Discard this recording?",
-        "discard.text": "The recording will be deleted.",
         "status.preparing": "Getting ready to transcribe",
         "status.stopped": "Writing up stopped before it finished.",
         "noApp.title": "Can't find Vinutes' files",
@@ -186,12 +185,9 @@ let STRINGS: [String: [String: String]] = [
     "zh-TW": [
         "menu.start": "開始錄音",
         "menu.pause": "暫停",
-        "menu.resume": "繼續錄音",
         "menu.stop": "結束錄音",
-        "menu.discard": "放棄這段錄音",
         "menu.recent": "最近會議",
         "menu.none": "還沒有錄音",
-        "menu.more": "更多…",
         "menu.folder": "打開錄音資料夾",
         "menu.settings": "設定",
         "menu.setup": "環境設定自檢",
@@ -200,7 +196,12 @@ let STRINGS: [String: [String: String]] = [
         "menu.languageAuto": "自動判斷",
         "menu.meetingLanguage": "會議語言",
         "menu.meetingAuto": "自動判斷",
-        "menu.quit": "退出本程式",
+        "panel.all": "所有會議",
+        "panel.quit": "退出",
+        "panel.stopHint": "按一下結束錄音",
+        "panel.resume": "繼續",
+        "panel.update": "更新到 %@",
+        "update.failTitle": "更新沒有完成",
         "app.hide": "隱藏 %@",
         "app.quit": "結束 %@",
         "edit": "編輯",
@@ -238,11 +239,8 @@ let STRINGS: [String: [String: String]] = [
         "btn.close": "關閉",
         "btn.ok": "好",
         "btn.cancel": "取消",
-        "btn.delete": "刪除錄音",
         "start.failTitle": "沒辦法開始錄音",
         "start.failText": "麥克風可能被其他程式占用。（%@）",
-        "discard.title": "放棄這段錄音？",
-        "discard.text": "錄音檔會刪除。",
         "status.preparing": "準備轉逐字稿",
         "status.stopped": "整理中斷了。",
         "noApp.title": "找不到 Vinutes 的程式",
@@ -357,9 +355,10 @@ struct Job {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
     var bar: RecordingBar!
+    var panel: MenuPanel!
     var recorder: MeetingCapture?
     var currentJob: URL?
     var startedAt: Date?
@@ -389,10 +388,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                "microphone \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
         NSApp.mainMenu = mainMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem.button?.target = self                 // the icon opens the panel (MenuPanel.swift), not a menu
+        statusItem.button?.action = #selector(statusClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         bar = RecordingBar(owner: self)
+        panel = MenuPanel(owner: self)
         try? FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
         registerHotKeys()
         refreshIcon()
@@ -463,50 +463,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
     }
 
-    // MARK: menu
+    // MARK: menu bar
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        menu.autoenablesItems = false
-        menu.addItem(titleItem())
-        menu.addItem(.separator())
-        if recording {
-            menu.addItem(item(paused ? tr("menu.resume") : tr("menu.pause"), #selector(togglePause), key: "p",
-                              image: paused ? "play.fill" : "pause.fill"))
-            menu.addItem(item(tr("menu.stop"), #selector(stopRecording), key: "r", image: "stop.fill"))
-            menu.addItem(item(tr("menu.discard"), #selector(cancelRecording), image: "trash"))
-        } else {
-            let start = item(tr("menu.start"), #selector(startRecording), key: "r", image: "record.circle")
-            start.image = symbol("record.circle", 13, .regular, tint: .systemRed)
-            menu.addItem(start)
-        }
-        menu.addItem(.separator())
+    @objc func statusClicked() {
+        guard let button = statusItem.button else { return }
+        panel.toggle(from: button)
+    }
 
-        let header = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        header.attributedTitle = NSAttributedString(string: tr("menu.recent"), attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor])
-        header.isEnabled = false
-        menu.addItem(header)
-        let jobs = recentJobs(limit: 200).filter { $0.dir != currentJob && !$0.archived }.prefix(4)
-        if jobs.isEmpty {
-            let none = NSMenuItem(title: tr("menu.none"), action: nil, keyEquivalent: "")
-            none.isEnabled = false
-            menu.addItem(none)
-        }
-        for job in jobs {
-            let name = job.step == "done" ? job.title : stateText(job)
-            let entry = item("", #selector(openJob(_:)), image: stateSymbol(job))
-            let title = NSMutableAttributedString(string: "\(job.label)  ", attributes: [.foregroundColor: NSColor.secondaryLabelColor])
-            title.append(NSAttributedString(string: name))
-            entry.attributedTitle = title
-            entry.representedObject = job.dir
-            entry.isEnabled = true                  // a meeting still being written opens on its progress
-            menu.addItem(entry)
-        }
-        menu.addItem(item(tr("menu.more"), #selector(showAll), image: "ellipsis"))
-        menu.addItem(.separator())
-        menu.addItem(item(tr("menu.folder"), #selector(openFolder), image: "folder"))
-        let settings = item(tr("menu.settings"), #selector(noop), image: "gearshape")
+    /// The panel's Settings: the setup checklist, open at login, the two languages, the recordings folder.
+    func settingsMenu() -> NSMenu {
         let sub = NSMenu()
         sub.autoenablesItems = false
         sub.addItem(item(tr("menu.setup"), #selector(openSetup), image: "checklist"))
@@ -516,30 +481,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         sub.addItem(.separator())
         sub.addItem(languageItem())
         sub.addItem(meetingLanguageItem())
-        settings.submenu = sub
-        settings.action = nil
-        menu.addItem(settings)
-        menu.addItem(.separator())
-        let quit = item(tr("menu.quit"), #selector(quit), image: "power")
-        quit.keyEquivalent = "q"
-        quit.keyEquivalentModifierMask = [.command]
-        menu.addItem(quit)
+        sub.addItem(.separator())
+        sub.addItem(item(tr("menu.folder"), #selector(openFolder), image: "folder"))
+        return sub
     }
 
-    /// The first line of the menu: the app's name next to its microphone badge.
-    func titleItem() -> NSMenuItem {
-        let it = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        it.attributedTitle = NSAttributedString(string: "Vinutes", attributes: [.font: NSFont.boldSystemFont(ofSize: 13)])
-        it.image = NSImage(size: NSSize(width: 20, height: 20), flipped: false) { rect in
-            NSColor(red: 0.12, green: 0.23, blue: 0.41, alpha: 1).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-            if let mic = symbol("mic.fill", 11, .semibold, tint: .white) {
-                mic.draw(in: NSRect(x: (rect.width - mic.size.width) / 2, y: (rect.height - mic.size.height) / 2,
-                                    width: mic.size.width, height: mic.size.height))
+    /// 版本更新 from the panel: what the meeting window has typed is saved first, then the same update its corner runs.
+    private var updating = false
+
+    func updateApp() {
+        guard !recording, !updating else { return }
+        updating = true
+        let run: () -> Void = { [weak self] in
+            // the meeting window may have taken up to 20 s to save: a recording started meanwhile wins
+            guard let self else { return }
+            guard !self.recording else { self.updating = false; return }
+            self.runScript("minutes_app.py", ["update"]) { [weak self] code, out in
+                guard code != 0 else { return }           // install.sh quits this app and opens the new one
+                self?.updating = false
+                let why = lastLine(out)
+                self?.showError(tr("update.failTitle"), why.isEmpty || why.hasPrefix("JSON ") ? tr("err.tryAgain") : why)
             }
-            return true
         }
-        return it
+        if let manager, manager.window.isVisible { manager.finish(run) } else { run() }
     }
 
     @objc func noop() {}
@@ -665,6 +629,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         button.toolTip = recording ? (paused ? tr("tip.paused") : tr("tip.recording")) : "Vinutes"
         bar.update()
+        if panel?.isShown == true { panel.refresh() }
     }
 
     // MARK: recording
@@ -774,18 +739,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         guard let a = (meta["started"] as? String).flatMap({ f.date(from: $0) }),
               let b = (meta["ended"] as? String).flatMap({ f.date(from: $0) }) else { return 0 }
         return b.timeIntervalSince(a)
-    }
-
-    @objc func cancelRecording() {
-        let alert = NSAlert()
-        alert.messageText = tr("discard.title")
-        alert.informativeText = tr("discard.text")
-        alert.addButton(withTitle: tr("btn.keepRecording"))
-        alert.addButton(withTitle: tr("btn.delete"))
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertSecondButtonReturn, let dir = endRecording() else { return }
-        appLog("recording discarded: \(dir.lastPathComponent)")
-        try? FileManager.default.removeItem(at: dir)
     }
 
     // MARK: background job
@@ -1454,6 +1407,7 @@ final class RecordingBar: NSObject {
         guard let owner, owner.recording, let rec = owner.recorder else { return }
         let level = CGFloat(max(0, min(1, (rec.averagePower + 50) / 50)))
         dot.show(level: level, paused: owner.paused)
+        owner.panel?.listen(level: level, paused: owner.paused)
     }
 
     func update() {

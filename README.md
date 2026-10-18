@@ -86,6 +86,12 @@ When a newer version is on GitHub, the meeting window shows an update button. Yo
 git -C ~/Vinutes pull && ~/Vinutes/recorder/install.sh
 ```
 
+After installing or updating, Vinutes downloads one small file from GitHub; the number of downloads shows roughly how many Macs use it. Nothing about your Mac or you is sent. To be left out, run this once, and later installs and updates skip the download:
+
+```bash
+touch ~/.config/vin-meeting-minutes-zh/no-count
+```
+
 ## Where your data lives
 
 Your settings, Google sign-in, glossary and recordings are kept in `~/.config/vin-meeting-minutes-zh/`, never in this folder, so updating or reinstalling Vinutes leaves them alone. The folder is shared with the [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill, so you sign in to Google only once for both.

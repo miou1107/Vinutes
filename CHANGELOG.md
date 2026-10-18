@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.1 (2026-10-18)
 
 - Updating Vinutes no longer asks again for the microphone and the Mac's sound. The installer now signs the app with a certificate of its own, made once in the login keychain (Vinutes Local Signing), instead of a new ad hoc signature every time. The first update with this change asks one last time. The certificate's key can't be exported, but a program running as you could use it to sign itself as Vinutes and get the same permissions; remove the certificate in Keychain Access to go back to asking after every update.
 - The tabs at the top of the right column are underlined tabs: the one you are on is blue with a line under it, the others light up under the pointer, and their numbers sit in small round badges. In Chinese they read 待處理, 人員 and 紀錄 (was 操作紀錄).

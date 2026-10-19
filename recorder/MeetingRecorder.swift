@@ -1601,7 +1601,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice"]
+                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice", "askMany"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1664,6 +1664,18 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["resolve", dir.path, args["comment"] as? String ?? ""], done)
         case "confirm":
             app(["confirm", dir.path, args["item"] as? String ?? ""], done)
+        case "askMany":
+            // what was still waiting under 待修改 when the window closed: done one after another without it
+            var items: [[String: Any]] = []
+            for item in args["items"] as? [[String: Any]] ?? [] {
+                let kind = item["kind"] as? String ?? ""
+                guard ["ask", "quick", "correct"].contains(kind) else { continue }
+                items.append(["kind": kind, "text": item["text"] as? String ?? "", "item": item["item"] as? String ?? "",
+                              "pictures": (item["pictures"] as? [String] ?? []).filter { picked.contains($0) }])
+            }
+            guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: items),
+                  let json = String(data: data, encoding: .utf8) else { return done(true, [:]) }
+            app(["ask_many", dir.path, json], done)
         case "dropVoice":
             // 移除講者 X under 人員, or 復原: a voice letter only
             let group = args["group"] as? String ?? ""

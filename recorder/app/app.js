@@ -590,6 +590,7 @@ async function select(id) {
     const d = await call('open', { id });
     if (S.sel !== id) return;
     S.d = d;
+    S.d.check = checkShown(d.check, id);           // a correction still on its way keeps its card off
     S.shown = d.shown || '';
     S.canUndo = !!d.can_undo;
     S.learned = d.learned || [];
@@ -623,6 +624,13 @@ async function leave() {
 function learnLater(id) { call('learn', { id }).catch(() => {}); }
 window.beforeClose = async () => {
   await flush();
+  // what still waits under 待修改 is done without the window, in order, after what the AI is on now
+  for (const [id, w] of Object.entries(S.work)) {
+    const items = w.waits.map((q) => (q.correct ? { kind: 'correct', item: q.correct.label, text: q.correct.value }
+      : q.quick ? { kind: 'quick', text: q.quick } : { kind: 'ask', text: q.text, pictures: q.pics.map((x) => x.path) }));
+    w.waits = [];
+    if (items.length) call('askMany', { id, items }).catch(() => {});
+  }
   if (docsMode()) {
     await new Promise((r) => setTimeout(r, 1500));   // Google saves the last words typed into the Doc first
     await refreshDoc(S.sel, true);
@@ -1313,7 +1321,7 @@ function peopleHTML(people) {
       ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
       : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
           <div class="mi other" data-other="1">${esc(t('people_other'))}</div>
-          <div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div></div>`;
+          ${v.name ? '' : `<div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div>`}</div>`;
     return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
         <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
         <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
@@ -1328,8 +1336,9 @@ function peopleHTML(people) {
 
 // voices taken off (移除講者 X), each with 復原 (Vin 2026-10-19)
 function offHTML() {
+  const busy = S.peopleBusy || S.busy || aiBusy();
   return (S.d.voices_off || []).map((v) => `<div class="pgone"><span>${esc(t('people_off', t('people_voice', v.group)))}</span>
-    <button class="plink pback" data-g="${esc(v.group)}">${esc(t('undo'))}</button></div>`).join('');
+    <button class="plink pback" data-g="${esc(v.group)}"${busy ? ' disabled' : ''}>${esc(t('undo'))}</button></div>`).join('');
 }
 
 // what the server sends back after a change to the people: who each voice is, the voices, the minutes
@@ -1542,7 +1551,12 @@ function renderAsk() {
         <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>
       <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>`;
     const input = $('#promptInput');
-    const go = () => (S.pasting ? null : S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
+    const go = () => {
+      if (S.pasting) return;
+      if (!S.attach.length) return ask(input.value.trim());
+      if (aiBusy()) return showAlert(t('attach_wait', aiName()));   // 「八、補充資訊」 waits for the AI's change
+      sendAttach(input.value.trim());
+    };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inputMethod(e)) go(); });
     input.addEventListener('paste', pastePicture);    // a picture for the AI: no Google Doc needed
     $('#askGo').addEventListener('click', go);
@@ -1753,7 +1767,7 @@ async function pastePicture(e) {
 function renderPics() {
   const box = $('#picBox');
   if (!box) return;
-  box.innerHTML = S.pics.map((x, i) => `<span class="pchip" title="${esc(x.name)}">${x.url ? `<img src="${esc(x.url)}" alt="">` : ICON.image}
+  box.innerHTML = S.pics.map((x, i) => `<span class="picchip" title="${esc(x.name)}">${x.url ? `<img src="${esc(x.url)}" alt="">` : ICON.image}
     <button class="ax" data-i="${i}" aria-label="${esc(t('remove'))}">✕</button></span>`).join('');
   box.querySelectorAll('.ax').forEach((b) => b.addEventListener('click', () => { S.pics.splice(Number(b.dataset.i), 1); renderPics(); }));
 }
@@ -1858,8 +1872,9 @@ function ask(text, quick, extra = {}) {
   if (S.busy || (!text && !quick)) return;
   const id = S.sel;
   const w = S.work[id] || (S.work[id] = { now: null, waits: [] });
-  w.waits.push({ text, quick: quick || '', pics: extra.correct ? [] : S.pics, ...extra });
-  if (!extra.correct) {
+  const own = !extra.correct && !quick;              // a quick button leaves the pasted pictures for the next sentence
+  w.waits.push({ text, quick: quick || '', pics: own ? S.pics : [], ...extra });
+  if (own) {
     S.pics = []; renderPics();
     const box = $('#promptInput');
     if (box) box.value = '';
@@ -1900,8 +1915,8 @@ async function runNext(id) {
       if (q.card) putBack(q.card);                 // the change did not go in: the card is back
     } else {
       S.said = r.reply || ''; S.canUndo = !!r.changed || S.canUndo;
-      if (r.voices) S.d.voices = r.voices;
-      if (r.changed || r.html || q.correct) afterEdit(r);
+      if (r.voices) peopleDone(r);                   // a voice named through 修改: 人員 and the transcript too
+      else if (r.changed || r.html || q.correct) afterEdit(r);
     }
     if (docEl()) docEl().contentEditable = editable();
     renderAsk(); renderFoot(); renderRail(); refreshLog();
@@ -1978,7 +1993,7 @@ function renderFoot() {
             placeholder="${esc(t(c.person || c.speaker ? 'name_ph' : 'fix_ph'))}"><button class="okbtn" data-save="${i}" title="${esc(t('save'))}"
             aria-label="${esc(t('save'))}">${ICON.checkSmall}</button><button class="okbtn skip" data-cancel="${i}" title="${esc(t('cancel'))}"
             aria-label="${esc(t('cancel'))}">✕</button></span>`
-        : `<span class="chip yellow"><span class="cl" data-fix="${i}" title="${esc(t('fix'))}">${esc(c.label)}</span>
+        : `<span class="chip yellow"><button class="cl" data-fix="${i}" title="${esc(t('fix'))}">${esc(c.label)}</button>
             <button class="okbtn" data-c="${i}" title="${esc(t('looks_right'))}" aria-label="${esc(t('looks_right'))}">${ICON.checkSmall}</button>
             <button class="okbtn skip" data-skip="${i}" title="${esc(t('skip'))}" aria-label="${esc(t('skip'))}">✕</button></span>`)).join('')}</div></div>` : ''}
     ${p.open ? `<div class="player">

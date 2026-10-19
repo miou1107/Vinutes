@@ -3306,11 +3306,40 @@ class AskTheAi(unittest.TestCase):
         self.assertEqual(self.briefs.load('官網改版')['terms'], [])
 
     def test_a_note_without_a_word_goes_to_the_ai_as_it_is(self):
+        self.change = lambda md: md.replace('與會人員：Amy、Ken', '與會人員：Amy、Ken、C')
         minutes_app.cmd_correct(self.job(), '講者 C 只有附和，未列與會', 'C 是 Amy，有與會')
         prompt = self.calls[-1]['prompt']
         self.assertIn('講者 C 只有附和，未列與會', prompt)
         self.assertIn('C 是 Amy，有與會', prompt)
         self.assertNotIn('講者 C 只有附和，未列與會', self.labels())
+
+    def test_a_correction_the_ai_leaves_undone_keeps_the_card_and_learns_nothing(self):
+        minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', 'Threads App')   # the minutes come back unchanged
+        self.assertIn('「Fresh」推測是 Threads', self.labels())
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])
+        self.assertIn('「Fresh」推測是 Threads', [c['label'] for c in self.outs[-1]['check']])
+
+    def test_a_new_name_put_right_goes_into_the_brief_with_its_role(self):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '新的人名：Grace', 'person': 'Grace', 'role': '說明會窗口'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        self.change = lambda md: md.replace('Amy、Ken', 'Amy、Ken、Gracie')
+        minutes_app.cmd_correct(self.job(), '新的人名：Grace', 'Gracie')
+        self.assertEqual([(x['name'], x['role']) for x in self.briefs.load('官網改版')['people']], [('Gracie', '說明會窗口')])
+        self.assertIn('Grace', self.calls[-1]['prompt'])
+
+    def test_requests_left_waiting_when_the_window_closes_are_done_in_order(self):
+        self.change = lambda md: md.replace('10 萬元', '12 萬元', 1) if '12 萬元' not in md else md.replace('Threads 與', 'Threads App 與')
+        items = [{'kind': 'ask', 'text': '預算改成 12 萬'}, {'kind': 'correct', 'item': '沒有這一項', 'text': 'x'},
+                 {'kind': 'correct', 'item': '「Fresh」推測是 Threads', 'text': 'Threads App'}]
+        self.main('ask_many', str(self.job_dir), json.dumps(items, ensure_ascii=False))
+        self.assertEqual(len(self.calls), 2)                       # the missing item is passed over, the rest still go
+        self.assertIn('預算改成 12 萬', self.calls[0]['prompt'])
+        self.assertIn('Threads App', self.calls[1]['prompt'])
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('12 萬元', md)
+        self.assertIn('Threads App 與', md)
+        self.assertNotIn('「Fresh」推測是 Threads', self.labels())
 
     def test_a_voice_guess_put_right_names_the_voice(self):
         named = []
@@ -3356,11 +3385,15 @@ class VoiceOff(unittest.TestCase):
         self.assertNotIn('講者 C', speakers.labelled_transcript(self.job_dir))     # the AI does not see it as a person
 
     def test_a_voice_taken_off_can_be_put_back(self):
+        minutes_app.save_speaker(self.job(), 'C', 'Ken')                  # the name the minutes gave it
         minutes_app.cmd_drop_voice(self.job(), 'C')
+        self.assertNotIn('C', minutes_app.speaker_map(self.job()))
         minutes_app.cmd_drop_voice(self.job(), 'C', back=True)
         self.assertEqual([v['group'] for v in minutes_app.voices_view(self.job())], ['A', 'B', 'C'])
         self.assertEqual(self.outs[-1]['voices_off'], [])
         self.assertEqual(minutes_app.transcript(self.job())[1]['who'], '講者 C')
+        self.assertEqual(minutes_app.speaker_map(self.job())['C'], 'Ken')
+        self.assertIn('講者 C 只有附和，未列與會', [c['label'] for c in minutes_app.check_items(self.job())])
 
     def test_a_named_voice_taken_off_is_forgotten_as_that_person(self):
         import speakers

@@ -128,6 +128,7 @@ const S = {
   pics: [],                  // pictures pasted into the box, for the AI to look at with the next sentence
   askedPic: '',              // the picture that went with the last answered sentence, shown small beside it
   fixing: '', fixText: '', fixFocus: false, fixPick: false,   // the 待確認 item open to type what it should be: its label, the text
+  railLate: false,           // the side panel has news it held back while a Fix box had the keyboard
   skipping: new Set(),       // 待確認 items skipped whose answer has not come back (it waits for the AI's turn)
   setupSeq: 0,               // goes up with every click in 環境設定自檢: an older answer is not shown
   attach: [],                // files, links and pictures picked for 「八、補充資訊」, sent with the next sentence
@@ -194,7 +195,11 @@ function refreshDoc(id = S.sel, again = false) {
     if ('can_undo' in r && !S.busy && !aiBusy(id)) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
-    if (seen() !== before && !S.pickOpen) renderRail();   // an open Fix box is drawn again with what was typed
+    // while a Fix box has the keyboard (an input method may be picking a word) the panel waits for the next round;
+    // with the box open but the keyboard elsewhere it is drawn again, the box with what was typed
+    if ((seen() !== before || S.railLate) && !S.pickOpen) {
+      if (S.fixing && S.fixFocus) S.railLate = true; else { S.railLate = false; renderRail(); }
+    }
   }).catch(() => {}).finally(() => { if (S.refreshing && S.refreshing.p === p) S.refreshing = null; });
   S.refreshing = { id, p };
   return p;
@@ -2039,6 +2044,7 @@ async function confirmCheck(item) {
 // 修改 and 略過 on the 待確認 items, in the side panel or along the bottom (Vin 2026-10-19): 修改 opens a box for what
 // it should be, starting from the guess; 略過 takes the item off and nothing is learned
 function wireFix(el, check, redraw) {
+  if (S.fixing && !check.some((c) => c.label === S.fixing)) { S.fixing = ''; S.fixFocus = false; }   // handled elsewhere
   el.querySelectorAll('[data-fix]').forEach((b) => b.addEventListener('click', () => {
     const c = check[Number(b.dataset.fix)];
     S.fixing = c.label; S.fixText = c.who || c.person || c.meant || ''; S.fixFocus = true; S.fixPick = true;

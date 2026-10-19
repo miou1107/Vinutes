@@ -317,7 +317,7 @@ function renderSide() {
     ${S.picking ? `<div class="pickbar"><span>${esc(t('picked', S.picked.size))}</span>
       <button class="btn ghost" id="pickArchive"${S.picked.size ? '' : ' disabled'}>${esc(t(S.proj === ARCHIVED ? 'unarchive' : 'archive'))}</button>
       <button class="btn ghost danger" id="pickDelete"${S.picked.size ? '' : ' disabled'}>${esc(t('delete'))}</button></div>`
-      : '<div class="ver" id="ver"></div>'}`;
+      : usageEntry() + '<div class="ver" id="ver"></div>'}`;
   side.querySelector('.sidelist').scrollTop = scrolled;
   renderVersion();
   $('#pickBtn').addEventListener('click', () => { S.picking = !S.picking; S.picked = new Set(); renderSide(); });
@@ -480,7 +480,8 @@ async function doDelete() {
   if (open && gone.includes(open)) { clearTimeout(S.saveTimer); S.dirty = false; S.sel = null; S.d = null; }
   await loadList();
   if (stuck) { if (S.sheet === 'delete') renderDelete(); if (!S.sel) renderMain(); return; }
-  if (!S.sel) { const next = shownJobs()[0]; if (next) await select(next.id); else renderMain(); }
+  if (!S.sel && S.usage) loadUsage(U.month);          // deleted from 用量統計: it stays, with the new numbers
+  else if (!S.sel) { const next = shownJobs()[0]; if (next) await select(next.id); else renderMain(); }
   if (note) showAlert(note);                        // every meeting went, but a file beside one stayed
 }
 
@@ -562,6 +563,7 @@ async function loadList() {
 
 async function select(id) {
   if (!id) return;
+  S.usage = false;                                  // a meeting picked: 用量統計 closes
   if (S.sel && S.d) {
     await flush();
     if (S.dirty && S.giveUp !== id) {          // a second click on the same meeting leaves the unsaved text behind
@@ -669,6 +671,7 @@ async function openFirst() {
 
 function drawMain() {
   const main = $('#main');
+  if (S.usage) return drawUsage(main);              // 用量統計 (usage.js) in place of a meeting
   const job = S.jobs.find((j) => j.id === S.sel);
   if (!S.sel && !S.jobs.length) return drawFirst(main);
   if (!S.sel) { main.innerHTML = `<div class="state"><div class="sub">${esc(t('no_recording'))}</div></div>`; return; }
@@ -2117,6 +2120,7 @@ window.onEvent = (name, data) => {
   if (name === 'select' && (data.id !== S.sel || !S.d)) select(data.id);
   if (name === 'docfail' && docsMode()) { S.docFailed = true; renderMain(); }
   if (name === 'setup') openSetup();
+  if (name === 'usage') openUsage();
   if (name === 'language' && data) setLang(data.lang);
   if (name === 'player') {
     const p = S.player;
@@ -2714,6 +2718,7 @@ applyLang();
   try {
     const r = await call('ready');
     if (r.setup) openSetup();
+    if (r.usage) return openUsage();              // 用量統計 from the menu bar panel
     if (r.select) return select(r.select);
   } catch (e) { /* no meeting asked for */ }
   if (!S.sel && S.jobs.length) select(S.jobs[0].id);

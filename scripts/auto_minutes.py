@@ -50,6 +50,7 @@ SCRIPTS = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPTS.parent
 CLAUDE_TIMEOUT = 45 * 60
 from ai_runner import EXTRA_PATH  # noqa: E402  (where claude, codex and agy are installed)
+import usage  # noqa: E402
 BODY = '信件內文.txt'
 WORK = '整理'                   # the agent's folder inside the job
 DRAFT = '紀錄.md'               # the minutes as the agent writes them there; the program copies them out
@@ -219,6 +220,9 @@ def transcribe(job: Path, meta: dict):
     if not (job / '逐字稿.txt').read_text(encoding='utf-8').strip():
         raise Failed(t('no_speech'))
     log(job, f'transcribed in {time.time() - began:.0f}s')
+    length = re.search(r'audio (\d+(?::\d\d){1,2})', done.stdout)
+    usage.record('transcribe', s=round(time.time() - began, 1),
+                 audio=sum(int(n) * 60 ** i for i, n in enumerate(reversed(length[1].split(':')))) if length else None)
     meta['language'] = spoken_language(job)
     write_json(job / 'job.json', meta)
     activity(job, t('assistant'), t('log_transcribed'))
@@ -253,6 +257,7 @@ def tell_voices(job: Path):
         log(job, 'speakers: timed out')
         return
     log(job, (done.stdout + done.stderr).strip()[-500:] + f' ({time.time() - began:.0f}s)')
+    usage.record('speakers', s=round(time.time() - began, 1))
 
 
 def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
@@ -411,21 +416,24 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
     ai = ai_runner.chosen()
     # the agent works in its own folder and can write nothing else; the program copies the minutes out
     log(job, f'{ai} in {work}')
-    began = (job / 'log.txt').stat().st_size if (job / 'log.txt').is_file() else 0   # what this run says starts here
+    try:
+        done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
+                             task='write')
+    except subprocess.TimeoutExpired as err:
+        partial = err.stdout or b''                               # what it said before the time ran out
+        partial = partial.decode('utf-8', 'replace') if isinstance(partial, bytes) else partial
+        if partial:
+            with (job / 'log.txt').open('a', encoding='utf-8') as out:
+                out.write(partial if partial.endswith('\n') else partial + '\n')
+        raise Failed(t('write_timeout', n=CLAUDE_TIMEOUT // 60))
+    except SystemExit as err:
+        raise Failed(str(err))
+    said = done.stdout + done.stderr                              # what the AI said, as plain text
     with (job / 'log.txt').open('a', encoding='utf-8') as out:
-        try:
-            done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
-                                 stdout=out, stderr=subprocess.STDOUT)
-        except subprocess.TimeoutExpired:
-            raise Failed(t('write_timeout', n=CLAUDE_TIMEOUT // 60))
-        except SystemExit as err:
-            raise Failed(str(err))
+        out.write(said if said.endswith('\n') or not said else said + '\n')
     log(job, f'{ai} exited {done.returncode}')
     if done.returncode:
-        with (job / 'log.txt').open('rb') as said:                # not an earlier run's limit message
-            said.seek(began)
-            text = said.read().decode('utf-8', 'replace')[-3000:]
-        raise Failed(friendly(text,
+        raise Failed(friendly(said[-3000:],
                               t('write_error', ai=ai_runner.name(ai))))
 
 
@@ -709,6 +717,7 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
         result['sent_id'] = gmail_id.group(1)          # the window looks for bounces in this mail's thread
     result['sent_format'] = fmt
     write_json(job / 'result.json', result)
+    usage.mail(len(people))
     import minutes_app
     entry = minutes_app.Job(job)
     names = t('list_sep').join(minutes_app.name_of(entry, p) for p in people)
@@ -728,6 +737,7 @@ def main():
     job = Path(rest[0]).expanduser().resolve()
     if not (job / 'job.json').is_file():
         sys.exit(f'not a recording job folder: {job}')
+    os.environ['VINUTES_MEETING'] = job.name           # what this run and the scripts it starts use is this meeting's
     if '--send' in argv:
         fmt = value('--format') or 'gdoc'
         if fmt not in ('gdoc', 'word', 'pdf'):
@@ -743,6 +753,7 @@ def main():
 
 if __name__ == '__main__':
     import vlog
+    usage.begin()                                    # before this run writes a line the fill-in would read
     try:
         vlog.run(main)
     except subprocess.TimeoutExpired:

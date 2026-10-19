@@ -76,6 +76,7 @@ AUTH = {}
 
 sys.path.insert(0, str(Path(__file__).parent))
 from google_setup import access_token, company_domain, owner, same_company, sender_name  # noqa: E402
+import usage  # noqa: E402
 
 OWNER = owner()                 # settings.json owner or $MINUTES_OWNER; filled in by check_owner() when empty
 COMPANY = None                  # the signed-in account's company domain
@@ -85,6 +86,7 @@ SENDER_NAME = sender_name()     # settings.json sender_name or $MINUTES_SENDER_N
 def call(url, body=None):
     headers = {**AUTH, **({'Content-Type': 'application/json'} if body else {})}
     req = urllib.request.Request(url, data=json.dumps(body).encode() if body else None, headers=headers)
+    usage.google(url)
     return json.load(urllib.request.urlopen(req, timeout=120))
 
 

@@ -17,6 +17,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Prepares the email** to the attendees. Nothing is sent until you press Send.
 - **Files meetings by project and tag.** Each meeting belongs to a project and can carry tags. Pick a tag in the list to see only the meetings that have it.
 - **Keeps a brief for each project.** In Project settings you list the project's people with what each one does, its terms and a few lines of background. The AI reads the briefs before it writes the minutes, so names and who does what come out right. A name the minutes have and the brief doesn't waits under To confirm; Looks right adds the person to the brief.
+- **Shows what each month used.** Usage, in the meeting window's corner and in the menu-bar panel, shows by day or by project how many times the AI ran and its tokens, the Google requests, the emails sent, and how much disk the meetings and Vinutes itself take. Meetings recorded before Usage existed are filled in from their logs: runs and time, without tokens or Google requests.
 - **Keeps the list tidy.** Archive the meetings you no longer need to see, or delete them: the recording, transcript and minutes go to the Trash, and the Google Doc to Google Drive's trash. Select several at once, or right-click one.
 
 ## What it looks like
@@ -95,7 +96,7 @@ touch ~/.config/vin-meeting-minutes-zh/no-count
 
 ## Where your data lives
 
-Your settings, Google sign-in, glossary, project briefs and recordings are kept in `~/.config/vin-meeting-minutes-zh/`, never in this folder, so updating or reinstalling Vinutes leaves them alone. The folder is shared with the [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill, so you sign in to Google only once for both.
+Your settings, Google sign-in, glossary, project briefs, recordings and usage record are kept in `~/.config/vin-meeting-minutes-zh/`, never in this folder, so updating or reinstalling Vinutes leaves them alone. The folder is shared with the [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill, so you sign in to Google only once for both.
 
 ## What is in this repository
 

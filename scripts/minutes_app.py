@@ -43,6 +43,8 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py version <installed>               the app's version and the newest on GitHub (looked up once a day)
   minutes_app.py update                            git pull this folder, then recorder/install.sh in the background,
                                                    which quits the app, builds the new one and opens it
+  minutes_app.py usage [YYYY-MM]                   用量統計: what the month's meetings used, by day and by project
+                                                   (usage.py), with each meeting's disk and the setup's
 Commands that change a job wait for each other (a lock file per job), so a save never overlaps a rewrite;
 refresh, asked every few seconds, answers {"busy": true} instead of waiting.
 
@@ -505,6 +507,75 @@ def cmd_delete(job: Job):
             if 'HTTP 404' not in str(err):
                 sys.exit(google_says(err, t('delete_not_done')))
     out({'trash': [str(p) for p in beside_minutes(job)]})
+
+
+# --- 用量統計 ----------------------------------------------------------------------------------------------
+
+def size_of(path: Path) -> int:
+    """Bytes on disk of a file, or of everything in a folder (links not followed)."""
+    try:
+        if path.is_symlink() or path.is_file():
+            return path.lstat().st_size
+        return sum(f.lstat().st_size for f in path.rglob('*') if not f.is_dir() or f.is_symlink())
+    except OSError:
+        return 0
+
+
+def model_size(model: Path) -> int:
+    """The speech model's bytes: each file its snapshots name, wherever the link leads, counted once."""
+    real = set()
+    for f in model.glob('snapshots/*/**/*'):
+        try:
+            if f.is_file():
+                real.add(os.path.realpath(f))
+        except OSError:
+            pass
+    return sum(os.path.getsize(p) for p in real if os.path.isfile(p))
+
+
+def setup_disk() -> dict:
+    """The speech model and Vinutes' own Python environment and voice model; measured at most once an hour, since
+    the environment is thousands of files."""
+    import usage
+    path = usage.FOLDER / 'disk.json'
+    known = read_json(path)
+    try:
+        fresh_enough = now() - datetime.fromisoformat(known.get('at', '')) < timedelta(hours=1)
+    except ValueError:
+        fresh_enough = False
+    if fresh_enough and isinstance(known.get('speech'), int) and isinstance(known.get('program'), int):
+        return {'speech': known['speech'], 'program': known['program']}
+    import setup_check
+    found = {'speech': model_size(setup_check.hub()), 'program': size_of(CONFIG / 'venv') + size_of(CONFIG / 'models')}
+    try:
+        usage.FOLDER.mkdir(parents=True, exist_ok=True)
+        write_json(path, {'at': now().isoformat(timespec='seconds'), **found})
+    except OSError:
+        pass
+    return found
+
+
+def meeting_facts(job: Job) -> dict:
+    """What usage.summary needs of a meeting that still exists."""
+    started = job.started() or datetime.fromtimestamp((job.dir / 'job.json').stat().st_mtime).astimezone()
+    try:
+        length = (datetime.fromisoformat(job.meta.get('ended') or '') - started).total_seconds()
+        length = max(0, round(length - float(job.meta.get('paused_seconds') or 0)))
+    except (ValueError, TypeError):
+        length = 0
+    return {'id': job.id, 'date': f'{started:%Y-%m-%d}', 'title': job.result.get('title') or '',
+            'project': project_of(job), 'audio': length,
+            'disk': size_of(job.dir) + sum(size_of(p) for p in beside_minutes(job))}
+
+
+def cmd_usage(month: str):
+    import usage
+    if not re.match(r'^\d{4}-(0[1-9]|1[0-2])$', month or ''):
+        month = f'{now():%Y-%m}'
+    facts = [meeting_facts(j) for j in all_jobs()]
+    found = usage.summary(month, facts)
+    found['disk'] = {'meetings': sum(f['disk'] for f in facts), **setup_disk()}
+    out(found)
 
 
 # --- the app's version -------------------------------------------------------------------------
@@ -1915,7 +1986,7 @@ def ai_edit(job: Job, request: str, label: str, pictures: list[Path] = (), settl
     shown = picture_copies(pictures, work)
     prompt = edit_prompt(job.lang, request, [p.name for p in shown])
     try:
-        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env(), pictures=shown)
+        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env(), pictures=shown, task='edit')
     except subprocess.TimeoutExpired:
         sys.exit(t('ai_timeout', ai=ai))
     return ai_edit_done(job, done, work, md, opened, label, request, learned, ai, settle)
@@ -2524,6 +2595,8 @@ def main():
         return cmd_version(argv[1] if len(argv) > 1 else '')
     if cmd == 'update':
         return cmd_update()
+    if cmd == 'usage':                                # every meeting's, not one job's
+        return cmd_usage(argv[1] if len(argv) > 1 else '')
     if cmd == 'rename_project' and len(argv) == 3:  # every meeting of the project, not one job
         return cmd_rename_project(argv[1], argv[2])
     if cmd == 'brief' and len(argv) == 2:           # a project's brief: no meeting, nothing to wait for
@@ -2533,6 +2606,7 @@ def main():
     if len(argv) < 2:
         sys.exit(__doc__)
     job = Job(Path(argv[1]))
+    os.environ['VINUTES_MEETING'] = job.id           # what this command uses (AI, Google) is this meeting's
     rest = argv[2:]
     if cmd == 'locate':                              # only reads the Doc: no turn to wait for
         return cmd_locate(job, ' '.join(rest).strip())
@@ -2609,7 +2683,9 @@ def main():
 
 
 if __name__ == '__main__':
+    import usage
     import vlog
+    usage.begin()                                    # before this run writes a line the fill-in would read
     try:
         vlog.run(main)
     except subprocess.TimeoutExpired:

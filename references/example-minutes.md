@@ -13,6 +13,7 @@ audience: agent
 * 地點：會議室B
 * 主持人：陳怡君
 * 與會人員：陳怡君（Jessie）、王小明（Ming）、李志偉（David）
+* 簡報：[會員專區改版第二次討論](https://example.com/slides)
 * 會議資料：[會員專區改版時程表](https://example.com/schedule)
 
 ## 二、會議目的

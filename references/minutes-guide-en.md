@@ -129,9 +129,11 @@ Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Mark
 
 1. **## 1. Meeting Details** (bullets): Subject; Date as "Wednesday, October 15, 2026, 13:30–15:00"; Location (room
    or online platform, never meeting links, dial-in numbers or PINs); Chair; Attendees or organisations (see the
-   table above); Materials: slides, schedules, sheets used in the meeting, as clickable links
-   (`[Project schedule](address)`), from the invitation's attachments or files named in the meeting; leave the line
-   out when there are none.
+   table above); Slides: the deck shown in the meeting as "Slides: [deck title](address)", right under the attendees
+   so readers find it first, or "Slides: [__]" when slides were shown but the link can't be found, for the user to
+   fill in; Materials: schedules, sheets and other files used, as clickable links (`[Project schedule](address)`).
+   They come from the invitation's attachments or files named in the meeting; leave a line out when there is nothing
+   for it.
 2. **## 2. Purpose**: one paragraph: what it follows up from the last meeting, what this one had to settle, and
    what the result is the basis for.
 3. **## 3. Discussion Summary**: subsections by topic, `### (a) …`, `### (b) …`, 3–8 bullets each. Each bullet one

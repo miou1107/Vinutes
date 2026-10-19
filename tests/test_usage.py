@@ -357,9 +357,103 @@ class TranscribeAndMail(Ledger):
         os.environ['VINUTES_MEETING'] = job.name
         self.am.script = lambda name, *args, **kw: subprocess.CompletedProcess(
             [], 0, '確認碼: abc123\nSENT 18f0 | From: me | To: amy\n', '')
-        self.am.send(job, None, None, 'gdoc', False, 'abc123')
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):         # send prints what it sent, for the app
+            self.am.send(job, None, None, 'gdoc', False, 'abc123')
         [line] = [e for e in usage.events(usage.now().strftime('%Y-%m')) if e['kind'] == 'mail']
         self.assertEqual((line['meeting'], line['to']), ('20261019-170440', 2))
+
+
+OLD_LOG = """[16:10:00] TRANSCRIPT /x/逐字稿.txt (500 lines, language zh, audio 38:12, took 120s)
+[16:10:00] transcribed in 122s
+[16:10:40] SPEAKERS A 600s, B 400s (36s)
+[16:11:00] claude in /x/整理
+The minutes are in 會議紀錄.md.
+[16:13:18] claude exited 0
+[16:20:05] ask 主持人是 Amy: exit 0
+OK
+[09:15:30] ask formal: exit 1
+Claude AI usage limit reached|1760000000
+"""
+OLD_SCRIPTS_LOG = """[2026-10-16T16:19:50.000+08:00] minutes_app[111] start ask 20261016-153005
+[2026-10-16T16:19:55.000+08:00] minutes_app[999] start refresh 20261016-153005
+[2026-10-16T16:20:06.100+08:00] minutes_app[111] end ok, 16.1 s
+[2026-10-17T09:15:00.000+08:00] minutes_app[222] start quick 20261016-153005
+[2026-10-17T09:15:31.000+08:00] minutes_app[222] end failed, 31.0 s: quick 20261016-153005: Claude 用量已經用完
+"""
+
+
+class Fill(Ledger):
+    """Meetings recorded before the record began are filled in once from their logs: counts and seconds, never
+    tokens or Google requests, and nothing written after the record began."""
+
+    def setUp(self):
+        super().setUp()
+        self.logs = self.root / 'logs'
+        self.logs.mkdir()
+        (self.logs / 'scripts.log').write_text(OLD_SCRIPTS_LOG, encoding='utf-8')
+        self.saved_logs = os.environ.get('VINUTES_LOG_DIR')
+        os.environ['VINUTES_LOG_DIR'] = str(self.logs)
+
+    def tearDown(self):
+        os.environ['VINUTES_LOG_DIR'] = self.saved_logs
+        super().tearDown()
+
+    def kinds(self, found):
+        return [(e['kind'], e.get('task', '')) for e in found]
+
+    def test_an_old_meeting_is_filled_in_from_its_log(self):
+        self.meeting('20261016-153005', project='春季活動', log=OLD_LOG)
+        usage.begin()
+        found = usage.fill()
+        self.assertEqual(self.kinds(found), [('transcribe', ''), ('speakers', ''), ('ai', 'write'), ('ai', 'edit'),
+                                             ('ai', 'edit')])
+        transcribe, speakers, write, ask, formal = found
+        self.assertEqual((transcribe['audio'], transcribe['s'], transcribe['at'][:10]), (2292, 120, '2026-10-16'))
+        self.assertEqual(speakers['s'], 36)
+        self.assertEqual((write['ai'], write['s'], write['ok']), ('claude', 138, True))
+        self.assertEqual((ask['s'], ask['ok'], ask['at'][:19]), (16.1, True, '2026-10-16T16:20:05'))
+        self.assertEqual((formal['s'], formal['ok'], formal['at'][:10]), (31.0, False, '2026-10-17'))   # after midnight
+        self.assertTrue(all(e['filled'] and e['meeting'] == '20261016-153005' and e['project'] == '春季活動'
+                            and 'tokens' not in e for e in found))
+
+    def test_what_the_log_got_after_the_record_began_is_not_filled_in(self):
+        d = self.meeting('20261016-153005', log=OLD_LOG)
+        usage.begin()
+        with (d / 'log.txt').open('a', encoding='utf-8') as f:
+            f.write('[10:00:00] ask 改短一點: exit 0\n')           # counted live by the new code
+        self.assertEqual(len([e for e in usage.fill() if e['kind'] == 'ai']), 3)
+
+    def test_a_mail_sent_before_is_filled_in(self):
+        d = self.meeting('20261016-153005', log='')
+        (d / 'result.json').write_text(json.dumps({'sent_at': '2026-10-16T17:02:11',
+                                                   'mail': {'to': ['a@example.com', 'b@example.com', 'c@example.com']}}))
+        usage.begin()
+        [mail] = [e for e in usage.fill() if e['kind'] == 'mail']
+        self.assertEqual((mail['to'], mail['at'][:16]), (3, '2026-10-16T17:02'))
+
+    def test_a_meeting_whose_log_never_named_its_length_gets_it_from_its_times(self):
+        d = self.meeting('20261014-103500', log='[10:50:00] claude in /x/整理\n[10:51:00] claude exited 0\n')
+        (d / 'job.json').write_text(json.dumps({'started': '2026-10-14T10:35:00+08:00', 'ended': '2026-10-14T10:45:30+08:00',
+                                                'paused_seconds': 30}))
+        usage.begin()
+        [transcribe] = [e for e in usage.fill() if e['kind'] == 'transcribe']
+        self.assertEqual((transcribe['audio'], transcribe['at'][:16]), (600, '2026-10-14T10:35'))
+        self.assertNotIn('s', transcribe)
+
+    def test_the_fill_in_is_done_once(self):
+        d = self.meeting('20261016-153005', log=OLD_LOG)
+        usage.begin()
+        first = usage.fill()
+        (d / 'log.txt').write_text('')
+        self.assertEqual(usage.fill(), first)
+        self.assertEqual(usage.events('2026-10', 'filled.jsonl'), first)
+
+    def test_a_meeting_recorded_after_the_record_began_is_not_filled_in(self):
+        usage.begin()
+        self.meeting('20261020-090000', log=OLD_LOG)
+        self.assertEqual(usage.fill(), [])
 
 
 if __name__ == '__main__':

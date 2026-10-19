@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.7 (2026-10-19)
+
+- Typing Chinese with Zhuyin or another input method, the Enter that picks a word no longer sends what is in the box under the minutes. A second Enter while the first sentence is on its way doesn't send it twice either.
+- While the AI is changing the minutes, the box stays open. What you send meanwhile waits under To change and goes to the AI one after another, each answer showing as it comes in; ✕ takes a waiting one off. Opening another meeting or closing the window doesn't stop them. Before, the box was greyed out until the AI was done.
+- A screenshot pasted into the box (⌘V) shows small above it and goes to the AI with your sentence, so it can see what you mean. It no longer becomes an attachment in section 8 of the minutes; the picture button beside the box still adds pictures there.
+- Each item under To confirm has Fix and Skip beside Looks right. Fix opens a box that starts from the guess: what you type goes to the AI, the minutes change to it, and the right word is learned. Skip takes the item off and learns nothing. Before, a wrong guess could only be confirmed, which taught Vinutes the wrong word.
+- Under People, a voice's menu ends with Remove Speaker C (or whichever letter), for a voice that is no one: the recording split one person in two, or picked up a noise. Its lines in the transcript keep their words without a speaker, the To confirm items about it go too, and Undo brings it back.
+
 ## v0.4.6 (2026-10-19)
 
 - The minutes put the slides shown in a meeting in Meeting Details, right under the attendees, as Slides: [deck title](link), so readers find them first. When the AI can't find the link it writes Slides: [__], which shows under To fill in until someone pastes the link. Other files stay on their own Materials line.

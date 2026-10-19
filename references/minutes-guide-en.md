@@ -18,7 +18,8 @@ The prompt gives you the job folder (written `job` below), the recording's start
 1. Ask no questions. First read what exists in `job/參考/`: this guide, `使用者規則.md` (the user's own rules; they
    win over this guide, except that mails are never sent without the user and external minutes never keep internal
    discussion), `公司詞彙表.md` and `glossary.md` (known mis-hearings and correct names), `example-minutes-en.md`,
-   and `使用者設定.json` (`owner` is the user's own address, `our_company` is the user's company name).
+   `使用者設定.json` (`owner` is the user's own address, `our_company` is the user's company name), and
+   `專案小抄.md` (each project's people, terms and background, as the user confirmed them).
 2. Find the meeting: the program has already picked it in `job/行事曆.txt` (its headings are in Chinese).
    - 「這場會議」: the event the user is invited to that overlaps the recording most. Take its name, place, attendees
      and attachment names.
@@ -28,12 +29,19 @@ The prompt gives you the job folder (written `job` below), the recording's start
      booked by others). Use one only if the transcript is plainly about its subject; overlapping time is not enough.
    - 「今天稍早你參加過的會議」: for a discussion that ran on after a meeting, its attendees can be reused.
    - 「同一系列之前整理過的會議」: copy the meeting name and project from it.
-   When the calendar has no such meeting, name it from the transcript, leave the attendees as `[__]`, and fill
-   `next_meeting` only from what the transcript says clearly.
+   With `專案小抄.md`, decide first which project the meeting is: 「同一系列之前整理過的會議」 is surest, then
+   `最近的會議.json` and what the transcript is about. Write names, who does what and terms as that project's brief
+   has them, and turn its "the transcript often has" spellings back into the right ones. People in a brief belong to
+   the project; they are not this meeting's attendees: take attendees as below, spelled the brief's way, and never
+   list someone from the brief who does not show up in the transcript. Nothing from another project's brief goes
+   into these minutes.
+   When the calendar has no such meeting, or the meeting has no attendee list, name it from the transcript; the
+   attendees are the people who speak in the transcript or are named as present, and `[__]` only when that can't be
+   told. Fill `next_meeting` only from what the transcript says clearly.
    Then read `job/參考/最近的會議.json` (earlier meetings' names and projects): the same meeting (e.g. a fortnightly
    review) keeps exactly the same name and project; the app finds "previous meeting" and "next meeting" by them.
 3. Write the minutes from `job/逐字稿.txt` following the sections below and save them as `job/紀錄.md`. For background
-   use only `job/參考/舊紀錄/` (earlier minutes) and the calendar.
+   use only `job/參考/舊紀錄/` (earlier minutes), the calendar and the project's brief.
 4. Prepare the mail: recipients are the attendees in the 「這場會議」 section on the user's own company domain, plus
    the user; when no meeting matched or it lists nobody, only the user. People in the other sections are not
    recipients. Write the text in the tone of a short note to colleagues, with the line
@@ -67,7 +75,11 @@ The prompt gives you the job folder (written `job` below), the recording's start
      see when the user has filled the blank.
    - `check`: the guesses from "Uncertain information" below (who a speaker is, unsure words) plus the next meeting,
      each `text` under 12 words. For a mis-heard word also fill `heard` (as the transcript has it) and `meant` (what
-     you wrote instead); when the user clicks "Looks right" in the app, the pair goes into their glossary.
+     you wrote instead); when the user clicks "Looks right" in the app, the pair goes into the project's brief (or the
+     glossary when the meeting has no project). Each person the minutes name who is not in the project's brief (an
+     attendee, or someone given a task) gets one item:
+     `{"text": "New name: Grace", "person": "Grace", "role": "briefing contact"}`; `role` is what they do in
+     this meeting, a few words, or "". When the user clicks "Looks right", the person joins the project's brief.
    - `notes`: anything else the user should know, else [].
    - Without a mail, write `"mail": null`. If you cannot finish, write
      `{"status": "error", "error": "One sentence: which step failed and what the user should do"}`.

@@ -105,7 +105,7 @@ const S = {
   jobs: [], sel: null, q: '', proj: ALL,
   tag: ALL,                  // the list's 標籤 picker: ALL, or one tag
   tagAdding: false,          // 加標籤 became a box to type the tag in
-  pset: null,                // 專案設定: {name, move, adding, busy, err}
+  pset: null,                // 專案設定: {name, move, adding, busy, err, tab ('brief' | 'name'), brief}
   picking: false, picked: new Set(),   // 選取: the list shows a checkbox on each meeting; picked = the ones checked
   ctx: null,                 // the right-click menu: {ids, x, y}
   del: null,                 // the 刪除 sheet: {ids, busy, err}
@@ -814,16 +814,61 @@ async function sendTags(id, tags) {
   renderSide();
 }
 
-// 專案設定: rename the project (every meeting of it), or move this meeting to another project or a new one
+// 專案設定: the project's brief (專案小抄: its people with what they do, its terms, a few lines of background; Vin
+// 2026-10-19), and renaming the project (every meeting of it) or moving this meeting to another project or a new one
 const NEW_PROJECT = '\u2060new';
 
 function openProject() {
   const d = S.d;
   if (!d) return;
-  S.pset = { name: d.project || '', move: d.project || '', adding: false, typed: '', busy: false, err: '' };
+  const now = d.project || '';
+  S.pset = { name: now, move: now, adding: false, typed: '', busy: false, err: '', tab: now ? 'brief' : 'name', brief: null };
   S.sheet = 'project';
   placeDoc();
   renderProject();
+  if (now) loadBrief(now);
+}
+
+async function loadBrief(project) {
+  try {
+    const r = await call('brief', { project });
+    const m = S.pset;
+    if (m && S.d && (S.d.project || '') === project) {
+      m.brief = r.brief;                             // what the page showed: anything else added meanwhile is kept
+      m.seen = { people: r.brief.people.map((p) => p.name), terms: r.brief.terms.map((x) => x.word) };
+      if (S.sheet === 'project') renderProject();
+    }
+  } catch (e) {
+    if (S.pset) { S.pset.err = e.message; if (S.sheet === 'project') renderProject(); }
+  }
+}
+
+// one row of the brief: a new row's name or term can be typed, a kept one only has what it says about it
+function briefRows(m, key) {
+  const rows = m.brief[key];
+  const head = key === 'people' ? ['name', 'role', 'brief_name_ph', 'brief_role_ph', 30, 20]
+    : ['word', 'meaning', 'brief_word_ph', 'brief_meaning_ph', 30, 30];
+  if (!rows.length) return `<div class="bempty">${esc(t(key === 'people' ? 'brief_no_people' : 'brief_no_terms'))}</div>`;
+  return rows.map((r, i) => {
+    const heard = r.heard && r.heard.length ? `<small>${esc(t('heard_as', r.heard.join(t('list_sep'))))}</small>` : '';
+    const first = r.fresh
+      ? `<input class="pinput" id="b-${key}-${i}-a" data-k="${key}" data-i="${i}" data-f="${head[0]}" maxlength="${head[4]}" placeholder="${esc(t(head[2]))}" value="${esc(r[head[0]])}">`
+      : `<span>${esc(r[head[0]])}</span>`;
+    return `<div class="brow"><div class="bname">${first}${heard}</div>
+      <input class="pinput" id="b-${key}-${i}-b" data-k="${key}" data-i="${i}" data-f="${head[1]}" maxlength="${head[5]}" placeholder="${esc(t(head[3]))}" value="${esc(r[head[1]] || '')}">
+      <button class="bx" data-k="${key}" data-i="${i}" title="${esc(t('remove_tag', r[head[0]] || ''))}" aria-label="${esc(t('remove_tag', r[head[0]] || ''))}">×</button></div>`;
+  }).join('');
+}
+
+function briefHTML(m) {
+  const b = m.brief;
+  if (!b) return `<div class="bwait">${ICON.spin}</div>`;
+  return `<section class="bsec"><header><b>${esc(t('brief_people'))}</b><span class="n">${b.people.length}</span>
+      <button class="btn ghost" id="bAddP">${esc(t('brief_add_person'))}</button></header>${briefRows(m, 'people')}</section>
+    <section class="bsec"><header><b>${esc(t('brief_terms'))}</b><span class="n">${b.terms.length}</span>
+      <button class="btn ghost" id="bAddT">${esc(t('brief_add_term'))}</button></header>${briefRows(m, 'terms')}</section>
+    <section class="bsec"><header><b>${esc(t('brief_background'))}</b></header>
+      <textarea id="bBg" class="pinput bbg" maxlength="600" placeholder="${esc(t('brief_bg_ph'))}" aria-label="${esc(t('brief_background'))}">${esc(b.background)}</textarea></section>`;
 }
 
 function renderProject() {
@@ -832,20 +877,28 @@ function renderProject() {
   const now = d.project || '';
   const names = [...new Set(S.jobs.map((j) => j.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
   const count = S.jobs.filter((j) => j.project === now && now).length;
-  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm pset" role="dialog" aria-label="${esc(t('proj_settings'))}">
+  const brief = now && m.tab === 'brief';
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm pset${brief ? ' wide' : ''}" role="dialog" aria-label="${esc(t('proj_settings'))}">
     <h3>${esc(t('proj_settings'))}</h3>
     <div class="phead">${projectMark(now, true)}<div><div class="pname">${esc(now || t('proj_loose'))}</div>
-      ${now ? `<div class="pcount">${esc(t('proj_count', count))}</div>` : ''}</div></div>
-    ${now ? `<label class="plbl" for="pName">${esc(t('proj_name'))}</label>
+      ${now ? `<div class="pcount">${esc(t('proj_count', count))}</div>` : ''}</div>
+      ${now ? `<span class="seg ptab"><button id="pTabBrief" class="${brief ? 'on' : ''}">${esc(t('brief_tab'))}</button><button id="pTabName" class="${brief ? '' : 'on'}">${esc(t('name_tab'))}</button></span>` : ''}</div>
+    ${brief ? briefHTML(m) : `${now ? `<label class="plbl" for="pName">${esc(t('proj_name'))}</label>
       <input id="pName" class="pinput" maxlength="30" value="${esc(m.name)}">
       <p class="dnote small">${esc(t('proj_rename_note', count))}</p>` : ''}
     <label class="plbl" for="pMove">${esc(t('proj_of_meeting'))}</label>
     <select id="pMove" class="pinput">${[...names, '', NEW_PROJECT].map((p) => `<option value="${esc(p)}"${(m.adding ? p === NEW_PROJECT : p === m.move) ? ' selected' : ''}>${esc(p === NEW_PROJECT ? t('proj_new') : p || t('proj_loose'))}</option>`).join('')}</select>
-    ${m.adding ? `<input id="pNew" class="pinput" maxlength="30" placeholder="${esc(t('proj_new_ph'))}" value="${esc(m.typed)}">` : ''}
+    ${m.adding ? `<input id="pNew" class="pinput" maxlength="30" placeholder="${esc(t('proj_new_ph'))}" value="${esc(m.typed)}">` : ''}`}
     ${m.err ? `<p class="dnote err">${esc(m.err)}</p>` : ''}
     <div class="dfoot"><button class="btn ghost" id="pCancel"${m.busy ? ' disabled' : ''}>${esc(t('cancel'))}</button>
-      <button class="btn primary" id="pSave"${m.busy ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('save'))}</button></div>
+      <button class="btn primary" id="pSave"${m.busy || (brief && !m.brief) ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('save'))}</button></div>
   </div></div>`;
+  const tab = (to) => () => { m.tab = to; if (m.brief) m.err = ''; renderProject(); };
+  if ($('#pTabBrief')) $('#pTabBrief').addEventListener('click', tab('brief'));
+  if ($('#pTabName')) $('#pTabName').addEventListener('click', tab('name'));
+  $('#pCancel').addEventListener('click', closeSheet);
+  $('#pSave').addEventListener('click', saveSettings);
+  if (brief) return bindBrief(m);
   if ($('#pName')) $('#pName').addEventListener('input', (e) => { m.name = e.target.value; });
   $('#pMove').addEventListener('change', (e) => {
     m.adding = e.target.value === NEW_PROJECT;
@@ -854,8 +907,65 @@ function renderProject() {
     if (m.adding) $('#pNew').focus();
   });
   if ($('#pNew')) $('#pNew').addEventListener('input', (e) => { m.typed = e.target.value; });
-  $('#pCancel').addEventListener('click', closeSheet);
-  $('#pSave').addEventListener('click', saveProject);
+}
+
+function bindBrief(m) {
+  if (!m.brief) return;
+  const sheet = $('#sheet');
+  // typing changes the brief kept here; nothing is drawn again, so the cursor stays where it is
+  sheet.querySelectorAll('.brow input').forEach((el) => el.addEventListener('input', () => {
+    m.brief[el.dataset.k][Number(el.dataset.i)][el.dataset.f] = el.value;
+    m.briefDirty = true;
+  }));
+  sheet.querySelectorAll('.bx').forEach((b) => b.addEventListener('click', () => {
+    m.brief[b.dataset.k].splice(Number(b.dataset.i), 1);
+    m.briefDirty = true;
+    renderProject();
+  }));
+  const add = (key, row) => () => {
+    m.brief[key].push({ ...row, heard: [], fresh: true });
+    m.briefDirty = true;
+    renderProject();
+    const el = $(`#b-${key}-${m.brief[key].length - 1}-a`);
+    if (el) el.focus();
+  };
+  $('#bAddP').addEventListener('click', add('people', { name: '', role: '' }));
+  $('#bAddT').addEventListener('click', add('terms', { word: '', meaning: '' }));
+  $('#bBg').addEventListener('input', (e) => { m.brief.background = e.target.value; m.briefDirty = true; });
+}
+
+// 儲存 keeps both pages: the brief first (under the project's current name), then a new name or another project
+async function saveSettings() {
+  const m = S.pset, d = S.d;
+  if (!m || !d || m.busy) return;
+  if (m.brief && m.briefDirty && !(await saveBrief())) return;
+  const now = d.project || '';
+  const name = m.name.trim().replace(/\s+/g, ' ');
+  if ((now && !name) || (m.adding && !m.typed.trim())) m.tab = 'name';   // the error shows by the field it is about
+  if ((now && name !== now) || m.adding || m.move !== now) return saveProject();
+  closeSheet();
+}
+
+async function saveBrief() {
+  const m = S.pset, d = S.d;
+  const project = d.project || '';
+  const brief = {
+    people: m.brief.people.filter((p) => p.name.trim()).map((p) => ({ name: p.name, role: p.role || '' })),
+    terms: m.brief.terms.filter((x) => x.word.trim()).map((x) => ({ word: x.word, meaning: x.meaning || '' })),
+    background: m.brief.background || '',
+    seen: m.seen || { people: [], terms: [] },
+  };
+  m.busy = true; m.err = '';
+  renderProject();
+  try {
+    await call('saveBrief', { project, brief });
+    m.busy = false; m.briefDirty = false;
+    return true;
+  } catch (e) {
+    m.busy = false; m.err = e.message;
+    if (S.sheet === 'project') renderProject();
+    return false;
+  }
 }
 
 async function saveProject() {
@@ -1132,7 +1242,8 @@ function renderDocsRail(el) {
   el.className = 'rail';
   const body = tab === 'todo'
     ? (waiting ? todo.map((it, i) => `<button class="todo" data-t="${i}"><span class="kind red">${esc(t('to_fill'))}</span><b>${esc(it.label)}</b>${it.anchor && it.anchor !== it.label ? `<span>${esc(it.anchor)}</span>` : ''}</button>`).join('')
-        + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t('to_confirm'))}</span><div class="text">${esc(c.label)}</div>
+        + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t(c.person ? 'new_person' : 'to_confirm'))}</span>${c.person
+            ? `<div class="text"><b>${esc(c.person)}</b>${c.role ? `<span class="role">${esc(c.role)}</span>` : ''}</div>` : `<div class="text">${esc(c.label)}</div>`}
           <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`).join('')
       : `<div class="empty">${esc(t('nothing_to_handle'))}</div>`)
     : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
@@ -1652,8 +1763,11 @@ function renderLearned() {
         <div class="lrows">${learned.map((l, i) => {
           const keep = l.kind !== 'once';
           const where = t(keep && l.off ? 'learn_off' : { term: 'learn_term', pref: 'learn_pref', style: 'learn_pref', once: 'learn_once' }[l.kind]);
+          const place = keep && !l.off && l.where
+            ? `<span class="seg lseg">${['brief', 'glossary'].map((w) => `<button class="${l.where === w ? 'on' : ''}" data-mv="${i}" data-w="${w}">${esc(t(w === 'brief' ? 'learn_brief' : 'learn_term'))}</button>`).join('')}</span>`
+            : `<span class="tag${keep && !l.off ? '' : ' gray'}">${where}</span>`;
           return `<div class="lr${keep && l.off ? ' off' : ''}"><span class="lt">${esc(l.text)}</span>
-            <span class="tag${keep && !l.off ? '' : ' gray'}">${where}</span><span style="flex:1"></span>
+            ${place}<span style="flex:1"></span>
             ${keep ? `<button class="btn ghost" data-i="${i}" style="height:22px;padding:0 8px;font-size:11px">${esc(t(l.off ? 'learn_on_btn' : 'learn_off_btn'))}</button>` : ''}</div>`;
         }).join('')}</div></div>` : ''}`.trim();
   const rows = top.querySelector('.lrows');
@@ -1675,7 +1789,10 @@ function renderLearned() {
   if (more) more.addEventListener('click', () => { S.learnOpen = !S.learnOpen; if (!S.learnOpen) hideLater(); renderLearned(); });
   const undo = $('#undo');
   if (undo) undo.addEventListener('click', undoLast);
-  top.querySelectorAll('.learn .lr button').forEach((b) => b.addEventListener('click', () => toggleLearned(Number(b.dataset.i))));
+  top.querySelectorAll('.learn .lr button[data-i]').forEach((b) => b.addEventListener('click', () => toggleLearned(Number(b.dataset.i))));
+  top.querySelectorAll('.learn .lr button[data-mv]').forEach((b) => b.addEventListener('click', () => {
+    if (!b.classList.contains('on')) moveLearned(Number(b.dataset.mv), b.dataset.w);
+  }));
 }
 
 async function ask(text, quick) {
@@ -1718,6 +1835,15 @@ async function undoLast() {
   } finally {
     if (S.sel === id) { S.busy = false; if (docEl()) docEl().contentEditable = editable(); renderAsk(); renderFoot(); refreshLog(); }
   }
+}
+
+async function moveLearned(i, where) {
+  const l = S.learned[i];
+  try {
+    const r = await call('moveLearned', { id: S.sel, item: l.id, where });
+    S.learned[i] = r.learned;
+    renderAsk(); refreshLog();
+  } catch (e) { showAlert(e.message); }
 }
 
 async function toggleLearned(i) {

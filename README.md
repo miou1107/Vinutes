@@ -13,9 +13,10 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Writes the minutes with the AI you already use:** Claude Code, Codex or Antigravity. Each one runs in a sandbox that can only read and write that meeting's folder.
 - **Matches the recording to your Google Calendar** to fill in the title, time, place and attendees.
 - **Publishes a Google Doc** and keeps it in sync: your colleagues' edits and comments show up in the app, and when you edit in the app only the paragraphs you changed are updated, so their comments stay where they were.
-- **Learns from your corrections.** A misheard name you fix once goes into your glossary, and the next meeting gets it right.
+- **Learns from your corrections.** A misheard name you fix once goes into the project's brief (or your glossary, for a meeting without a project), and the next meeting gets it right.
 - **Prepares the email** to the attendees. Nothing is sent until you press Send.
 - **Files meetings by project and tag.** Each meeting belongs to a project and can carry tags. Pick a tag in the list to see only the meetings that have it.
+- **Keeps a brief for each project.** In Project settings you list the project's people with what each one does, its terms and a few lines of background. The AI reads the briefs before it writes the minutes, so names and who does what come out right. A name the minutes have and the brief doesn't waits under To confirm; Looks right adds the person to the brief.
 - **Keeps the list tidy.** Archive the meetings you no longer need to see, or delete them: the recording, transcript and minutes go to the Trash, and the Google Doc to Google Drive's trash. Select several at once, or right-click one.
 
 ## What it looks like
@@ -94,7 +95,7 @@ touch ~/.config/vin-meeting-minutes-zh/no-count
 
 ## Where your data lives
 
-Your settings, Google sign-in, glossary and recordings are kept in `~/.config/vin-meeting-minutes-zh/`, never in this folder, so updating or reinstalling Vinutes leaves them alone. The folder is shared with the [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill, so you sign in to Google only once for both.
+Your settings, Google sign-in, glossary, project briefs and recordings are kept in `~/.config/vin-meeting-minutes-zh/`, never in this folder, so updating or reinstalling Vinutes leaves them alone. The folder is shared with the [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill, so you sign in to Google only once for both.
 
 ## What is in this repository
 

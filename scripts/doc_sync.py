@@ -40,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import i18n  # noqa: E402
+import usage  # noqa: E402
 
 OBJ = '\ufffc'                  # stands for an inline image or any other Doc element that has no text
 DOCS = 'https://docs.googleapis.com/v1/documents/'
@@ -1123,6 +1124,7 @@ def call(url: str, body: dict | None = None, method: str | None = None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method or ('POST' if data else 'GET'),
                                  headers={**AUTH, **({'Content-Type': 'application/json'} if data else {})})
+    usage.google(url)
     try:
         raw = urllib.request.urlopen(req, timeout=60).read()
     except urllib.error.HTTPError as err:

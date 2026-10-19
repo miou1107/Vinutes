@@ -14,6 +14,8 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Matches the recording to your Google Calendar** to fill in the title, time, place and attendees.
 - **Publishes a Google Doc** and keeps it in sync: your colleagues' edits and comments show up in the app, and when you edit in the app only the paragraphs you changed are updated, so their comments stay where they were.
 - **Learns from your corrections.** A misheard name you fix once goes into the project's brief (or your glossary, for a meeting without a project), and the next meeting gets it right.
+- **Adds attachments to the minutes.** Add attachments, under the meeting's title, takes files, links and pictures, each with a note of its own. They are saved to Google Drive and listed in section 8 of the minutes, Supporting Materials.
+- **Hands the AI something to read.** Files, links and pictures added with ＋ and the picture button beside the box under the minutes go to the AI with your sentence and stay out of the minutes: PDF, Word, Excel, PowerPoint and text files, or a web page's link.
 - **Prepares the email** to the attendees. Nothing is sent until you press Send.
 - **Files meetings by project and tag.** Each meeting belongs to a project and can carry tags. Pick a tag in the list to see only the meetings that have it.
 - **Keeps a brief for each project.** In Project settings you list the project's people with what each one does, its terms and a few lines of background. The AI reads the briefs before it writes the minutes, so names and who does what come out right. A name the minutes have and the brief doesn't waits under To confirm; Looks right adds the person to the brief.

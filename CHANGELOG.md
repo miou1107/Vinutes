@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.11 (2026-10-19)
+
+- Add attachments, beside Tags under the meeting's title, opens a window for the files, links and pictures that go into section 8 of the minutes, Supporting Materials. Each one has a note of its own, which leads its line ("September traffic report from Amy: report.xlsx"); one without a note shows its name only. Beside the button are the attachments section 8 already holds, and a click opens one.
+- ＋ and the picture button beside the box under the minutes now hand files, links and pictures to the AI with your sentence, as a pasted screenshot already was; they no longer go into the minutes. The AI reads PDF, Word, Excel, PowerPoint and text files, and web pages; a Google Docs, Sheets or Slides link is read with your Google sign-in. A link that needs some other sign-in stops the request and says so.
+
 ## v0.4.10 (2026-10-19)
 
 - Update in the corner of the meeting list shows within an hour of a new version, no longer the next day: GitHub is asked about the newest version once an hour instead of once a day.

@@ -184,6 +184,8 @@ let STRINGS: [String: [String: String]] = [
         "panel.images": "Choose pictures to insert into the minutes",
         "paste.name": "Pasted picture",
         "panel.files": "Choose files to add to the minutes",
+        "panel.refs": "Choose files for the AI to read",
+        "panel.refImages": "Choose pictures for the AI to look at",
         "panel.add": "Add",
     ],
     "zh-TW": [
@@ -290,6 +292,8 @@ let STRINGS: [String: [String: String]] = [
         "panel.images": "選擇要插入會議記錄的圖片",
         "paste.name": "貼上的圖片",
         "panel.files": "選擇要加進會議記錄的檔案",
+        "panel.refs": "選擇要給 AI 參考的檔案",
+        "panel.refImages": "選擇要給 AI 參考的圖片",
         "panel.add": "加入",
     ],
 ]
@@ -1659,11 +1663,16 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             let token = shown.range(of: #"^[0-9a-f]{16}$"#, options: .regularExpression) != nil ? shown : ""
             app(["save", dir.path, file.path] + (token.isEmpty ? [] : [token]), done)
         case "ask", "quick":
-            // pictures pasted with the sentence, for the AI to look at: only ones this window saved or was handed
+            // pictures, files and links handed with the sentence, for the AI to look at: only files this window
+            // saved or was handed, links only http(s)
+            var extra: [String] = []
             let pictures = cmd == "ask" ? (args["pictures"] as? [String] ?? []).filter { picked.contains($0) } : []
-            guard !pictures.isEmpty, let data = try? JSONSerialization.data(withJSONObject: pictures),
-                  let json = String(data: data, encoding: .utf8) else { return app([cmd, dir.path, text], done) }
-            app([cmd, dir.path, text, "--pictures", json], done)
+            if !pictures.isEmpty, let data = try? JSONSerialization.data(withJSONObject: pictures),
+               let json = String(data: data, encoding: .utf8) { extra += ["--pictures", json] }
+            let refs = cmd == "ask" ? handed(args["refs"]) : []
+            if !refs.isEmpty, let data = try? JSONSerialization.data(withJSONObject: refs),
+               let json = String(data: data, encoding: .utf8) { extra += ["--refs", json] }
+            app([cmd, dir.path, text] + extra, done)
         case "unlearn", "relearn":
             app([cmd, dir.path, String((args["item"] as? NSNumber)?.intValue ?? 0)], done)
         case "moveLearned":
@@ -1684,7 +1693,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                 let kind = item["kind"] as? String ?? ""
                 guard ["ask", "quick", "correct"].contains(kind) else { continue }
                 items.append(["kind": kind, "text": item["text"] as? String ?? "", "item": item["item"] as? String ?? "",
-                              "pictures": (item["pictures"] as? [String] ?? []).filter { picked.contains($0) }])
+                              "pictures": (item["pictures"] as? [String] ?? []).filter { picked.contains($0) },
+                              "refs": handed(item["refs"])])
             }
             guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: items),
                   let json = String(data: data, encoding: .utf8) else { return done(true, [:]) }
@@ -1701,7 +1711,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         case "correct":
             app(["correct", dir.path, args["item"] as? String ?? "", text], done)
         case "pick":
-            pickFiles(images: args["kind"] as? String == "image", done)
+            pickFiles(kind: args["kind"] as? String ?? "file", done)
         case "pastePicture":
             pastedPictures(done)
         case "setupState":
@@ -1767,14 +1777,15 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             NSWorkspace.shared.open(url)
             done(true, [:])
         case "attach":
-            // files and pictures only from the open panel above; a link only http(s)
+            // files and pictures only from the open panel above; a link only http(s); each with its own 說明
             var items: [[String: String]] = []
             for item in args["items"] as? [[String: Any]] ?? [] {
                 let kind = item["kind"] as? String ?? ""
+                let note = String((item["note"] as? String ?? "").prefix(200))
                 if kind == "file" || kind == "image", let path = item["path"] as? String, picked.contains(path) {
-                    items.append(["kind": kind, "path": path])
+                    items.append(["kind": kind, "path": path, "note": note])
                 } else if kind == "link", let url = item["url"] as? String, url.hasPrefix("https://") || url.hasPrefix("http://") {
-                    items.append(["kind": kind, "url": url])
+                    items.append(["kind": kind, "url": url, "note": note])
                 }
             }
             guard !items.isEmpty, let data = try? JSONSerialization.data(withJSONObject: items),
@@ -1832,10 +1843,11 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             NSWorkspace.shared.open(dir)
             done(true, [:])
         case "link":
-            // only the minutes' own Google Doc opens from here
-            if let url = URL(string: args["url"] as? String ?? ""), url.scheme == "https",
-               ["docs.google.com", "drive.google.com"].contains(url.host ?? "") {
-                NSWorkspace.shared.open(url)
+            // the minutes' own Google Doc, or an item of 「八、補充資訊」 under 附件 (any web address there)
+            if let url = URL(string: args["url"] as? String ?? "") {
+                let web = ["https", "http"].contains(url.scheme ?? "")
+                let doc = url.scheme == "https" && ["docs.google.com", "drive.google.com"].contains(url.host ?? "")
+                if (args["attachment"] as? Bool ?? false) ? web : doc { NSWorkspace.shared.open(url) }
             }
             done(true, [:])
         case "audio":
@@ -2109,14 +2121,21 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         }
     }
 
-    /// The ＋ (上傳檔案) and picture buttons under the Doc: the files the user picks, as {path, name}.
-    func pickFiles(images: Bool, _ done: @escaping (Bool, Any) -> Void) {
+    /// The files the user picks, as {path, name}: for 加入會議附件 ("file", "image"), or for the AI to read with the
+    /// next sentence (the ＋ and picture buttons beside the box under the Doc: "ref", "refImage").
+    func pickFiles(kind: String, _ done: @escaping (Bool, Any) -> Void) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        if images { panel.allowedContentTypes = [.png, .jpeg, .gif, .heic, .webP, .tiff, .bmp] }
-        panel.message = images ? tr("panel.images") : tr("panel.files")
+        let pictures: [UTType] = [.png, .jpeg, .gif, .heic, .webP, .tiff, .bmp]
+        if kind == "image" || kind == "refImage" { panel.allowedContentTypes = pictures }
+        if kind == "ref" {        // what references.py can read: PDF, text, Word, Excel, PowerPoint, pictures
+            let office = ["md", "doc", "docx", "odt", "xlsx", "pptx"].compactMap { UTType(filenameExtension: $0) }
+            panel.allowedContentTypes = [.pdf, .plainText, .commaSeparatedText, .tabSeparatedText, .json, .rtf, .html]
+                + office + pictures
+        }
+        panel.message = tr(["image": "panel.images", "ref": "panel.refs", "refImage": "panel.refImages"][kind] ?? "panel.files")
         panel.prompt = tr("panel.add")
         panel.beginSheetModal(for: window) { [weak self] answer in
             guard answer == .OK else { return done(true, ["files": []]) }
@@ -2126,6 +2145,20 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             }
             done(true, ["files": files])
         }
+    }
+
+    /// Files and links handed to the AI with a sentence: a file only if the open panel gave it, a link only http(s).
+    func handed(_ raw: Any?) -> [[String: String]] {
+        var out: [[String: String]] = []
+        for item in raw as? [[String: Any]] ?? [] {
+            if item["kind"] as? String == "file", let path = item["path"] as? String, picked.contains(path) {
+                out.append(["kind": "file", "path": path])
+            } else if item["kind"] as? String == "link", let url = item["url"] as? String,
+                      url.hasPrefix("https://") || url.hasPrefix("http://") {
+                out.append(["kind": "link", "url": url])
+            }
+        }
+        return out
     }
 
     /// ⌘V in the box under the Doc: the pictures on the clipboard, as {path, name}, like the picture button's. Picture

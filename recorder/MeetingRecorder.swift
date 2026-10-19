@@ -1601,7 +1601,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach", "move", "tags", "people", "moveLearned"]
+                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1646,7 +1646,11 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             let token = shown.range(of: #"^[0-9a-f]{16}$"#, options: .regularExpression) != nil ? shown : ""
             app(["save", dir.path, file.path] + (token.isEmpty ? [] : [token]), done)
         case "ask", "quick":
-            app([cmd, dir.path, text], done)
+            // pictures pasted with the sentence, for the AI to look at: only ones this window saved or was handed
+            let pictures = cmd == "ask" ? (args["pictures"] as? [String] ?? []).filter { picked.contains($0) } : []
+            guard !pictures.isEmpty, let data = try? JSONSerialization.data(withJSONObject: pictures),
+                  let json = String(data: data, encoding: .utf8) else { return app([cmd, dir.path, text], done) }
+            app([cmd, dir.path, text, "--pictures", json], done)
         case "unlearn", "relearn":
             app([cmd, dir.path, String((args["item"] as? NSNumber)?.intValue ?? 0)], done)
         case "moveLearned":
@@ -1660,6 +1664,17 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["resolve", dir.path, args["comment"] as? String ?? ""], done)
         case "confirm":
             app(["confirm", dir.path, args["item"] as? String ?? ""], done)
+        case "dropVoice":
+            // 移除講者 X under 人員, or 復原: a voice letter only
+            let group = args["group"] as? String ?? ""
+            guard group.range(of: #"^[A-Z]$"#, options: .regularExpression) != nil else {
+                return done(false, ["message": tr("err.speakerName")])
+            }
+            app(["drop_voice", dir.path, group] + ((args["back"] as? Bool ?? false) ? ["back"] : []), done)
+        case "skip":
+            app(["skip", dir.path, args["item"] as? String ?? ""], done)
+        case "correct":
+            app(["correct", dir.path, args["item"] as? String ?? "", text], done)
         case "pick":
             pickFiles(images: args["kind"] as? String == "image", done)
         case "pastePicture":

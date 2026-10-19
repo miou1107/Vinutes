@@ -269,6 +269,8 @@ def name_of(data: dict, i: int, word: str = ZH['speaker']) -> str:
     lines = data.get('lines') or []
     g = lines[i] if i < len(lines) else ''
     info = (data.get('groups') or {}).get(g) or {}
+    if info.get('off'):                              # a voice taken off: the line has no speaker
+        return ''
     return info.get('name') or (f'{word} {g}' if g else '')
 
 
@@ -436,11 +438,30 @@ def guesses_into(job: Path, md: str, check) -> str:
     groups = load(job).get('groups') or {}
     given = {g.get('name') for g in groups.values() if g.get('name')}
     guesses = guessed(check)
-    picked = {g: n for g, n in guesses.items() if g in groups and not groups[g].get('name')
+    picked = {g: n for g, n in guesses.items() if g in groups and not groups[g].get('name') and not groups[g].get('off')
               and list(guesses.values()).count(n) == 1 and n not in given}
     for g, n in picked.items():
         md = name_voice(job, md, g, '', n)
     return md
+
+
+def take_off(job: Path, group_key: str, off: bool = True) -> dict:
+    """The user took a voice off (Vin 2026-10-19: 講者 C was the recording splitting one person in two, or a noise):
+    it is no one, its lines keep their words without a speaker, and a name it had is forgotten. `off=False` puts it
+    back as a 講者 X."""
+    data = load(job)
+    g = (data.get('groups') or {}).get(group_key)
+    if not g:
+        raise SystemExit(t('speaker_missing'))
+    if off and g.get('name'):
+        forget(g['name'], job=job.name)
+        g['name'], g['known'] = '', False
+    if off:
+        g['off'] = True
+    else:
+        g.pop('off', None)
+    (job / '講者.json').write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
+    return data
 
 
 def clear_name(job: Path, group_key: str) -> dict:

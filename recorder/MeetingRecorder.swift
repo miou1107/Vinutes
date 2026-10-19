@@ -1601,7 +1601,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach", "move", "tags", "people"]
+                                     "speaker", "attach", "move", "tags", "people", "moveLearned"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1649,6 +1649,11 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app([cmd, dir.path, text], done)
         case "unlearn", "relearn":
             app([cmd, dir.path, String((args["item"] as? NSNumber)?.intValue ?? 0)], done)
+        case "moveLearned":
+            // a learned word goes to the project's brief or to the glossary
+            let to = args["where"] as? String ?? ""
+            guard to == "brief" || to == "glossary" else { return done(false, ["message": tr("err.tryAgain")]) }
+            app(["move_learned", dir.path, String((args["item"] as? NSNumber)?.intValue ?? 0), to], done)
         case "reply":
             app(["reply", dir.path, args["comment"] as? String ?? "", text], done)
         case "resolve":
@@ -1769,6 +1774,15 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         case "renameProject":
             let old = args["old"] as? String ?? "", new = args["new"] as? String ?? ""
             app(["rename_project", old, new], done)
+        case "brief":
+            // a project's brief (專案小抄): its people with what they do, its terms, its background
+            app(["brief", args["project"] as? String ?? ""], done)
+        case "saveBrief":
+            // the brief as the user left it in 專案設定; anything that is not one would empty it
+            guard let brief = args["brief"] as? [String: Any], JSONSerialization.isValidJSONObject(brief),
+                  let data = try? JSONSerialization.data(withJSONObject: brief),
+                  let json = String(data: data, encoding: .utf8) else { return done(false, ["message": tr("err.tryAgain")]) }
+            app(["save_brief", args["project"] as? String ?? "", json], done)
         case "retry":
             // only a recording that failed starts over; a finished one keeps its Doc and its sent mail
             guard Job(dir: dir).step == "failed" else { return done(false, ["message": tr("err.alreadyDone")]) }

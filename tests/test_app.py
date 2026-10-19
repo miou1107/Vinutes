@@ -2960,3 +2960,201 @@ class ConnectAgents(unittest.TestCase):
         os.chmod(self.file, 0o640)
         self.ca.json_tool('Cursor', self.root, self.file, False)
         self.assertEqual(os.stat(self.file).st_mode & 0o777, 0o640)
+
+
+class ProjectBrief(unittest.TestCase):
+    """專案小抄 (Vin 2026-10-19): each project's people with what they do, its terms with the ways the transcript
+    mishears them, and a few lines of background. 確認無誤 on a new name or a word, and an edit the user keeps, write
+    into it; the AI that writes the next minutes reads every project's brief."""
+    job = Flows.job
+
+    def setUp(self):
+        import briefs
+        self.briefs = briefs
+        Flows.setUp(self)
+        self.result(project='官網改版')
+        self.files = (minutes_app.PROJECT_PEOPLE, briefs.BRIEFS, minutes_app.CONFIG / 'glossary.md')
+        for f in self.files:
+            f.unlink(missing_ok=True)
+
+    def tearDown(self):
+        for f in self.files:
+            f.unlink(missing_ok=True)
+        Flows.tearDown(self)
+
+    def result(self, **changes):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '新的人名：Grace', 'person': 'Grace', 'role': '說明會窗口'},
+                      {'text': '「凱文」推測是 Kevin', 'heard': '凱文', 'meant': 'Kevin'}]
+        r.update(changes)
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+
+    def glossary(self):
+        path = minutes_app.CONFIG / 'glossary.md'
+        return path.read_text(encoding='utf-8') if path.is_file() else ''
+
+    def test_the_brief_keeps_the_project_people_with_what_they_do(self):
+        b = self.briefs.save('官網改版', {
+            'people': [{'name': '陳怡君（Jessie）', 'role': '網站、目標頁'}, {'name': '李大華', 'role': '社群'},
+                       {'name': 'jessie', 'role': '重複的人'}],
+            'terms': [{'word': '#官網改版', 'meaning': '社群標籤'}, {'word': '', 'meaning': '沒有名詞的一列'}],
+            'background': '第一期到 12 月底，交成效報告。'})
+        self.assertEqual([(p['name'], p['role']) for p in b['people']], [('陳怡君（Jessie）', '網站、目標頁'), ('李大華', '社群')])
+        self.assertEqual([(t['word'], t['meaning']) for t in b['terms']], [('#官網改版', '社群標籤')])
+        self.assertEqual(b['background'], '第一期到 12 月底，交成效報告。')
+        self.assertEqual(minutes_app.project_people('官網改版'), ['陳怡君（Jessie）', '李大華'])   # the 人員 tab's list
+
+    def test_someone_taken_off_the_brief_leaves_the_project_list(self):
+        self.briefs.save('官網改版', {'people': [{'name': 'Amy'}, {'name': 'Ken'}]})
+        self.briefs.save('官網改版', {'people': [{'name': 'Ken'}]})
+        self.assertEqual(minutes_app.project_people('官網改版'), ['Ken'])
+
+    def test_the_people_tab_and_the_brief_show_the_same_list(self):
+        minutes_app.save_project_people('官網改版', ['Amy'])
+        self.assertEqual([p['name'] for p in self.briefs.load('官網改版')['people']], ['Amy'])
+
+    def test_confirming_a_new_name_puts_the_person_in_the_brief(self):
+        item = next(c for c in minutes_app.check_items(self.job()) if c.get('person'))
+        self.assertEqual((item['person'], item['role']), ('Grace', '說明會窗口'))
+        minutes_app.cmd_confirm(self.job(), '新的人名：Grace')
+        self.assertEqual([(p['name'], p['role']) for p in self.briefs.load('官網改版')['people']],
+                         [('Grace', '說明會窗口')])
+        self.assertNotIn('新的人名：Grace', [c['label'] for c in minutes_app.check_items(self.job())])
+
+    def test_a_confirmed_word_goes_into_the_project_brief(self):
+        minutes_app.save_project_people('官網改版', ['Kevin'])
+        minutes_app.cmd_confirm(self.job(), '「凱文」推測是 Kevin')
+        self.assertEqual(self.briefs.load('官網改版')['people'][0]['heard'], ['凱文'])   # Kevin is a person: on him
+        self.assertEqual(self.glossary(), '')
+        learned = self.outs[-1]['learned'][0]
+        self.assertEqual((learned['where'], learned['project']), ('brief', '官網改版'))
+
+    def test_a_learned_word_moves_to_the_glossary_and_back_and_can_be_taken_back(self):
+        minutes_app.cmd_confirm(self.job(), '「凱文」推測是 Kevin')
+        item_id = self.outs[-1]['learned'][0]['id']
+        self.assertEqual([t['word'] for t in self.briefs.load('官網改版')['terms']], ['Kevin'])   # no such person yet
+        minutes_app.cmd_move_learned(self.job(), item_id, 'glossary')
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])
+        self.assertIn('| 凱文 | Kevin |', self.glossary())
+        minutes_app.cmd_move_learned(self.job(), item_id, 'brief')
+        self.assertNotIn('凱文', self.glossary())
+        self.assertEqual(self.briefs.load('官網改版')['terms'][0]['heard'], ['凱文'])
+        minutes_app.cmd_unlearn(self.job(), item_id, True)
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])
+        minutes_app.cmd_unlearn(self.job(), item_id, False)
+        self.assertEqual(self.briefs.load('官網改版')['terms'][0]['heard'], ['凱文'])
+
+    def test_a_meeting_without_a_project_learns_into_the_glossary(self):
+        self.result(project='')
+        minutes_app.cmd_confirm(self.job(), '「凱文」推測是 Kevin')
+        self.assertIn('| 凱文 | Kevin |', self.glossary())
+        self.assertNotIn('where', self.outs[-1]['learned'][0])
+        self.assertNotIn('新的人名：Grace', [c['label'] for c in minutes_app.check_items(self.job())])   # nobody to add her to
+        self.assertEqual(self.briefs.projects(), [])
+
+    def test_a_renamed_project_keeps_its_brief(self):
+        self.briefs.save('官網改版', {'people': [{'name': 'Amy', 'role': '網站'}], 'background': '十二月底結案。'})
+        self.briefs.save('官網改版二期', {'people': [{'name': 'Ken', 'role': '社群'}], 'background': '先做目標頁。'})
+        minutes_app.cmd_rename_project('官網改版', '官網改版二期')
+        b = self.briefs.load('官網改版二期')
+        self.assertEqual([(p['name'], p['role']) for p in b['people']], [('Ken', '社群'), ('Amy', '網站')])
+        self.assertEqual(b['background'], '先做目標頁。\n十二月底結案。')
+        self.assertEqual(self.briefs.load('官網改版')['people'], [])
+
+    def test_the_ai_reads_every_brief_with_something_in_it(self):
+        self.briefs.save('官網改版', {'people': [{'name': 'Kevin'}], 'terms': [{'word': '目標頁', 'meaning': '雙周會簡報'}]})
+        self.briefs.add_heard('官網改版', '凱文', 'Kevin')
+        self.briefs.add_heard('官網改版', 'kevan', 'Kevin')
+        minutes_app.save_project_people('空專案', [])
+        md = self.briefs.markdown()
+        self.assertIn('## 官網改版', md)
+        self.assertIn('- Kevin（逐字稿常聽成：凱文、kevan）', md)
+        self.assertIn('- 目標頁：雙周會簡報', md)
+        self.assertNotIn('空專案', md)
+        self.assertEqual(self.briefs.markdown('空專案'), '')
+
+    def test_the_minutes_writer_gets_the_briefs_in_its_folder(self):
+        import auto_minutes
+        self.briefs.save('官網改版', {'people': [{'name': 'Amy', 'role': '網站'}]})
+        (self.job_dir / '逐字稿.txt').write_text('[00:01] 好，我們開始。\n', encoding='utf-8')
+        work = auto_minutes.gather(self.job_dir, {}, self.root / 'minutes')
+        self.assertIn('- Amy：網站', (work / '參考' / '專案小抄.md').read_text(encoding='utf-8'))
+        self.assertIn('專案小抄.md', auto_minutes.prompt(work, {}, self.root / 'minutes'))
+
+    def test_the_brief_commands_answer_and_refuse_a_broken_brief(self):
+        minutes_app.cmd_save_brief('官網改版', json.dumps({'people': [{'name': 'Amy'}]}))
+        self.assertEqual(self.outs[-1]['brief']['people'][0]['name'], 'Amy')
+        minutes_app.cmd_brief('官網改版')
+        self.assertEqual(self.outs[-1]['brief']['project'], '官網改版')
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_save_brief('官網改版', 'not json')
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_save_brief('', '{}')
+
+    def test_saving_keeps_what_was_learned_while_the_window_was_open(self):
+        self.briefs.save('官網改版', {'people': [{'name': 'Amy'}], 'terms': [{'word': 'POC', 'meaning': '試行'}]})
+        shown = self.briefs.load('官網改版')                               # the window opens
+        self.briefs.add_heard('官網改版', '愛咪', 'Amy')                   # the 15-second sync learns two words
+        self.briefs.add_heard('官網改版', '凱文', 'Kevin')
+        minutes_app.save_project_people('官網改版', ['Amy', 'Ken'])        # and someone is added in 人員
+        b = self.briefs.save('官網改版', {
+            'people': [{'name': 'Amy', 'role': '網站'}], 'terms': [{'word': 'POC', 'meaning': '試行'}], 'background': '',
+            'seen': {'people': [p['name'] for p in shown['people']], 'terms': [x['word'] for x in shown['terms']]}})
+        self.assertEqual([(p['name'], p['role'], p['heard']) for p in b['people']], [('Amy', '網站', ['愛咪']), ('Ken', '', [])])
+        self.assertEqual([(x['word'], x['heard']) for x in b['terms']], [('POC', []), ('Kevin', ['凱文'])])
+
+    def test_a_save_without_some_parts_leaves_them_as_they_are(self):
+        self.briefs.save('官網改版', {'people': [{'name': 'Amy'}], 'terms': [{'word': 'POC'}], 'background': '十二月底結案。'})
+        b = self.briefs.save('官網改版', {})
+        self.assertEqual(([p['name'] for p in b['people']], [x['word'] for x in b['terms']], b['background']),
+                         (['Amy'], ['POC'], '十二月底結案。'))
+
+    def test_a_word_taken_back_after_a_rename_comes_off_the_new_name(self):
+        minutes_app.cmd_confirm(self.job(), '「凱文」推測是 Kevin')
+        item_id = self.outs[-1]['learned'][0]['id']
+        minutes_app.cmd_rename_project('官網改版', '官網改版二期')
+        self.result(project='官網改版二期')
+        minutes_app.cmd_unlearn(self.job(), item_id, True)
+        self.assertEqual(self.briefs.load('官網改版二期')['terms'], [])
+        self.assertEqual(self.briefs.projects(), ['官網改版二期'])      # no empty brief under the old name
+        self.assertNotIn('## 官網改版\n', self.briefs.markdown())
+
+    def test_taking_a_word_back_leaves_a_term_the_user_made(self):
+        self.briefs.save('官網改版', {'terms': [{'word': 'POC'}]})
+        self.briefs.add_heard('官網改版', 'PO西', 'POC')
+        self.briefs.remove_heard('官網改版', 'PO西', 'POC')
+        self.assertEqual([(x['word'], x['heard']) for x in self.briefs.load('官網改版')['terms']], [('POC', [])])
+
+    def test_a_word_two_people_share_is_nobodys(self):
+        minutes_app.save_project_people('官網改版', ['王小明（PM）', '李大華（PM）'])
+        self.briefs.add_heard('官網改版', 'P M', 'PM')
+        b = self.briefs.load('官網改版')
+        self.assertEqual([p['heard'] for p in b['people']], [[], []])
+        self.assertEqual([(x['word'], x['heard']) for x in b['terms']], [('PM', ['P M'])])
+
+    def test_only_names_the_project_does_not_have_are_asked_about(self):
+        minutes_app.save_project_people('官網改版', ['Grace'])
+        self.result(check=[{'text': '新的人名：Grace', 'person': 'Grace'}, {'person': 'Leo', 'role': 'KOL'},
+                           {'text': '新的人名：x', 'person': ['Grace']}])
+        self.assertEqual([(c['label'], c['person'], c['role']) for c in minutes_app.check_items(self.job())],
+                         [('新的人名：Leo', 'Leo', 'KOL')])
+        self.result(project='', check=[{'person': 'Leo'}])          # no project: nobody to add her to
+        self.assertEqual(minutes_app.check_items(self.job()), [])
+
+    def test_a_broken_brief_file_is_set_aside_not_emptied(self):
+        self.briefs.BRIEFS.write_text('{"官網改版": ', encoding='utf-8')
+        self.briefs.add_heard('別的專案', '凱文', 'Kevin')
+        kept = list(self.briefs.BRIEFS.parent.glob('briefs.json.*.bad'))
+        self.assertEqual([f.read_text(encoding='utf-8') for f in kept], ['{"官網改版": '])
+        for f in kept:
+            f.unlink()
+
+    def test_four_windows_writing_at_once_lose_nothing(self):
+        code = ('import sys; sys.path.insert(0, sys.argv[1]); import briefs\n'
+                'for i in range(30): briefs.add_heard(sys.argv[2], f"h{i}", f"w{i}")')
+        scripts = str(Path(minutes_app.__file__).parent)
+        runs = [subprocess.Popen([sys.executable, '-c', code, scripts, f'P{n}'], env={**os.environ, 'MINUTES_HOME': HOME})
+                for n in range(4)]
+        self.assertEqual([r.wait() for r in runs], [0, 0, 0, 0])
+        self.assertEqual(sorted(self.briefs.projects()), ['P0', 'P1', 'P2', 'P3'])
+        self.assertEqual({len(self.briefs.load(f'P{n}')['terms']) for n in range(4)}, {30})

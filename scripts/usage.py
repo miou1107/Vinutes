@@ -206,10 +206,9 @@ def flush():
             path = FOLDER / 'google.json'
             hold = read_json(path)
             hour = now().strftime('%Y-%m-%dT%H')
+            done = []                                    # the hour that is over: its lines, written once it is gone
             if hold.get('hour') and hold['hour'] != hour:
-                for line in held(hold):
-                    write_line(line)
-                hold = {}
+                done, hold = held(hold), {}
             if not hold:
                 hold = {'hour': hour, 'at': now().isoformat(timespec='seconds'), 'counts': {}}
             for api, (n, sent) in COUNTS.items():
@@ -217,7 +216,9 @@ def flush():
                 count.update(project=name, n=count['n'] + n, bytes=count['bytes'] + sent)
             tmp = path.with_name(f'google.{os.getpid()}.tmp')
             tmp.write_text(json.dumps(hold, ensure_ascii=False), encoding='utf-8')
-            tmp.replace(path)
+            tmp.replace(path)                            # first, so a stop in between can't write an hour twice
+            for line in done:
+                write_line(line)
     except Exception:
         pass
     COUNTS.clear()
@@ -464,7 +465,7 @@ def summary(month: str, meetings: list[dict]) -> dict:
     months = {month, now().strftime('%Y-%m')} | {m['date'][:7] for m in meetings if m.get('date')}
     if FOLDER.is_dir():
         months |= {p.stem for p in FOLDER.glob('*.jsonl') if re.match(r'^\d{4}-\d\d$', p.stem)}
-    months |= {str(e.get('at', ''))[:7] for e in fill() if e.get('at')}
+    months |= {str(e.get('at', ''))[:7] for e in fill() + pending() if e.get('at')}
     return {'month': month, 'months': sorted(months), 'total': total,
             'days': sorted(days.values(), key=lambda d: d['date'], reverse=True),
             'projects': named + rest}

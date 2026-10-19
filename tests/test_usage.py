@@ -126,6 +126,15 @@ class GoogleHour(Ledger):
         self.assertEqual(line['n'], 5)
         self.assertEqual(usage.pending()[0]['n'], 1)
 
+    def test_a_month_that_only_has_waiting_requests_is_among_the_months(self):
+        os.environ['VINUTES_MEETING'] = '20261019-105319'
+        usage.google('https://docs.googleapis.com/v1/documents/abc')
+        usage.flush()
+        hold = json.loads((usage.FOLDER / 'google.json').read_text())
+        hold['at'] = '2026-07-30T23:10:00+08:00'
+        (usage.FOLDER / 'google.json').write_text(json.dumps(hold))
+        self.assertIn('2026-07', usage.summary('2026-10', [])['months'])
+
     def test_the_month_counts_what_still_waits(self):
         os.environ['VINUTES_MEETING'] = '20261019-105319'
         usage.google('https://docs.googleapis.com/v1/documents/abc')

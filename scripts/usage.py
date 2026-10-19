@@ -60,7 +60,7 @@ def project(mid: str) -> str:
     d = RECORDINGS / mid
     mine = read_json(d / '分類.json')
     name = mine['project'] if isinstance(mine.get('project'), str) else read_json(d / 'result.json').get('project')
-    return re.sub(r'\s+', ' ', str(name or '')).strip()[:30]
+    return ' '.join(str(name or '').split())[:30].strip()          # as minutes_app.one_line does
 
 
 def begin() -> dict:

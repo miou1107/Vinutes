@@ -180,7 +180,7 @@ def mail(recipients: int):
 STAMP = re.compile(r'^\[(\d\d):(\d\d):(\d\d)\] (.*)$')
 TRANSCRIPT = re.compile(r'^TRANSCRIPT .*\baudio (\d+(?::\d\d){1,2}), took (\d+)s\)')
 SPEAKERS = re.compile(r'^SPEAKERS .*\((\d+)s\)$')
-WRITE_START = re.compile(r'^(claude|codex|antigravity) in /')
+WRITE_START = re.compile(r'^(claude|codex|antigravity)(?: -p)? in /')            # 'claude -p in': before 10/15
 WRITE_END = re.compile(r'^(claude|codex|antigravity) exited (-?\d+)$')
 ASK = re.compile(r'^ask .*: exit (-?\d+)$')
 RUN_START = re.compile(r'^\[([^\]]+)\] minutes_app\[(\d+)\] start (?:ask|quick) (\d{8}-\d{6})')

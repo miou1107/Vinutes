@@ -518,6 +518,18 @@ def size_of(path: Path) -> int:
         return 0
 
 
+def model_size(model: Path) -> int:
+    """The speech model's bytes: each file its snapshots name, wherever the link leads, counted once."""
+    real = set()
+    for f in model.glob('snapshots/*/**/*'):
+        try:
+            if f.is_file():
+                real.add(os.path.realpath(f))
+        except OSError:
+            pass
+    return sum(os.path.getsize(p) for p in real if os.path.isfile(p))
+
+
 def setup_disk() -> dict:
     """The speech model and Vinutes' own Python environment and voice model; measured at most once an hour, since
     the environment is thousands of files."""
@@ -531,7 +543,7 @@ def setup_disk() -> dict:
     if fresh_enough and isinstance(known.get('speech'), int) and isinstance(known.get('program'), int):
         return {'speech': known['speech'], 'program': known['program']}
     import setup_check
-    found = {'speech': size_of(setup_check.hub()), 'program': size_of(CONFIG / 'venv') + size_of(CONFIG / 'models')}
+    found = {'speech': model_size(setup_check.hub()), 'program': size_of(CONFIG / 'venv') + size_of(CONFIG / 'models')}
     try:
         usage.FOLDER.mkdir(parents=True, exist_ok=True)
         write_json(path, {'at': now().isoformat(timespec='seconds'), **found})

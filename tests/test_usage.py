@@ -501,7 +501,7 @@ class Summary(Ledger):
         self.assertEqual((later['meetings'], later['edit'], later['limit']), (0, {'n': 1, 's': 20}, 1))
         self.assertEqual((day['meetings'], day['audio'], day['disk']), (1, 2419, 15_000_000))   # the transcript's length
         self.assertEqual((day['write'], day['edit']), ({'n': 1, 's': 137}, {'n': 1, 's': 15.7}))
-        self.assertEqual((day['tokens'], day['google'], day['mails']), (185000, 246, 2))
+        self.assertEqual((day['tokens'], day['google'], day['mails']), (185000, 246, 1))   # one mail, two recipients
         self.assertEqual(before['test'], {'n': 1, 's': 3})
 
     def test_each_project_holds_its_meetings_and_what_has_no_meeting_is_other(self):

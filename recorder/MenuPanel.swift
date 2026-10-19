@@ -1,8 +1,8 @@
 // The panel under the menu-bar icon (2026-10-18, after the prototype Vin picked): a large round button that
 // starts the recording (red, a white dot) and, while recording, stops it (white, red ring, a red square); under it
 // how long the recording runs with the level bars, and pause (no discard here: Vin was afraid of hitting it by
-// mistake; a wrong recording is deleted from the meeting list); the last three meetings; All meetings, Settings and
-// Quit in equal thirds; the version, with an update button when GitHub has a newer one. A recording started while
+// mistake; a wrong recording is deleted from the meeting list); the last three meetings; All meetings, Usage (用量統計,
+// Vin 2026-10-19), Settings and Quit in equal quarters; the version, with an update button when GitHub has a newer one. A recording started while
 // the AI is not set up shows a yellow note under the controls, with a button to the setup (Vin 2026-10-19).
 import AppKit
 
@@ -92,11 +92,13 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         root.addArrangedSubview(line())
         let foot = NSStackView()
         foot.orientation = .horizontal
-        foot.distribution = .fillEqually          // three equal thirds, whatever each label's length
+        foot.distribution = .fillEqually          // four equal quarters, whatever each label's length
         foot.spacing = 4
         foot.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 4, right: 6)
         foot.addArrangedSubview(FootButton(symbol: "list.bullet", title: tr("panel.all")) { [weak self] in
             self?.close(); self?.owner?.showAll() })
+        foot.addArrangedSubview(FootButton(symbol: "chart.bar", title: tr("panel.usage")) { [weak self] in
+            self?.close(); self?.owner?.showUsage() })
         foot.addArrangedSubview(FootButton(symbol: "gearshape", title: tr("menu.settings"), view: { [weak self] view in
             self?.showSettings(from: view) }))
         foot.addArrangedSubview(FootButton(symbol: "power", title: tr("panel.quit")) { [weak self] in

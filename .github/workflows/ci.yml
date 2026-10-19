@@ -29,6 +29,7 @@ jobs:
       - name: Meeting window scripts and installer parse
         run: |
           node --check recorder/app/app.js
+          node --check recorder/app/usage.js
           node --check recorder/app/strings.js
           # these two run inside the Google Doc as the body of an async function, so they are parsed that way
           for f in recorder/app/docblink.js recorder/app/docfind.js; do

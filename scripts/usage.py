@@ -330,7 +330,7 @@ def add(row: dict, e: dict):
     elif kind == 'google':
         row['google'] += int(e.get('n') or 0)
     elif kind == 'mail':
-        row['mails'] += int(e.get('to') or 0)
+        row['mails'] += 1                                # one mail, however many it went to
 
 
 def summary(month: str, meetings: list[dict]) -> dict:

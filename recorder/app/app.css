@@ -238,6 +238,19 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
         border-radius: 12px; border: 1px solid var(--green-bg); background: var(--field); font-size: 12px; color: var(--green); }
 .okc2:hover { background: var(--green-bg); }
 .okc2:disabled { opacity: 0.5; cursor: default; }
+/* 修改 and 略過 beside 確認無誤, and the box 修改 opens (Vin 2026-10-19) */
+.card.guess .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.card.guess .acts .okc2 { align-self: auto; }
+.fixb { all: unset; cursor: pointer; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px;
+        border: 1px solid var(--field-line); font-size: 12px; color: var(--text2); }
+.fixb:hover { background: var(--hover); }
+.fixb.ghost { border-color: transparent; color: var(--muted); }
+.fixb.blue { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+.fixb.blue:hover { filter: brightness(1.08); }
+.fix { display: flex; gap: 6px; }
+.fix input { flex: 1; min-width: 0; height: 26px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--field-line);
+             border-radius: 6px; background: var(--field); outline: none; font-size: 12.5px; }
+.fix input:focus { border-color: var(--blue); }
 .phead { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 2px; }
 .card.person { display: flex; flex-direction: column; gap: 8px; }
 .card.person.guess { border-color: var(--yellow-bg); }
@@ -337,6 +350,19 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .aurl { display: flex; gap: 8px; }
 .aurl input { flex: 1; min-width: 0; height: 30px; box-sizing: border-box; border: 1px solid var(--field-line); border-radius: 7px; padding: 0 9px;
               font-size: 12px; background: var(--field); color: inherit; outline: none; }
+/* pictures pasted for the AI, and the requests waiting while it works on one (Vin 2026-10-19) */
+#picBox:empty { display: none; }
+.picchip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 40px;
+         border-radius: 6px; overflow: hidden; border: 1px solid var(--blue-line); background: var(--panel); color: var(--muted); }
+.picchip img { width: 100%; height: 100%; object-fit: cover; }
+.picchip .ax { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: rgba(0,0,0,0.55); color: #ffffff; font-size: 10px; }
+.mini { flex: none; width: 28px; height: 20px; border-radius: 3px; object-fit: cover; border: 1px solid var(--line2); }
+.waits { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+.waits .wh { font-size: 11px; font-weight: 700; color: var(--muted); }
+.wr { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12.5px; }
+.wr .wn { flex: none; width: 18px; height: 18px; border-radius: 9px; background: var(--line); color: var(--muted); font-size: 11px;
+          display: flex; align-items: center; justify-content: center; }
+.wr .wt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .send { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 15px; background: var(--blue); }
 
 /* bottom: open items, the player, the buttons */
@@ -350,6 +376,13 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .chip.yellow { background: var(--yellow-bg); color: var(--yellow-ink); cursor: default; padding-right: 4px; }
 .okbtn { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9px; background: var(--field); }
 .okbtn:hover { background: var(--green-bg); }
+.okbtn.skip { font-size: 10px; color: var(--muted); }
+.okbtn.skip:hover { background: var(--hover); }
+.chip .cl { all: unset; cursor: pointer; }
+.chip .cl:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+.chip .cl:hover { text-decoration: underline; }
+.fixchip input { width: 140px; height: 18px; box-sizing: border-box; border: none; border-radius: 4px; padding: 0 6px;
+                 background: var(--field); color: var(--text); font-size: 12px; outline: none; }
 .player { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 8px 0 6px; border-radius: 10px; background: var(--field); border: 1px solid var(--line2); }
 .play { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 15px; background: var(--blue); }
 .player .tm { font-size: 12px; color: var(--text2); font-variant-numeric: tabular-nums; min-width: 40px; }
@@ -529,4 +562,8 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .mi:hover, .mi.on { background: var(--blue-bg); color: var(--blue); }
 .mi .gs { color: var(--yellow-label); font-size: 12px; }
 .mi.other { color: var(--blue); border-top: 1px solid var(--line); margin-top: 4px; border-radius: 0 0 6px 6px; }
+/* 移除講者 X: the voice is no one (Vin 2026-10-19) */
+.mi.drop { color: var(--red); border-top: 1px solid var(--line); margin-top: 4px; }
+.mi.drop:hover { background: var(--red-bg); }
+.pgone { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .silent { padding: 2px; }

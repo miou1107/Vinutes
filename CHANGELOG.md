@@ -1,12 +1,20 @@
 # Changelog
 
-## v0.4.7 (2026-10-19)
+## v0.4.8 (2026-10-19)
 
 - Usage (用量統計), in the meeting window above the version and in the menu-bar panel between All Meetings and Settings, shows a month by day or by project: meetings and minutes of audio, AI runs (write-ups and edits) with their minutes and tokens, Google requests, emails sent, and disk. A day with a run stopped by the AI's usage limit says so. A project opens to its meetings, and a meeting opens from there.
 - The disk tile shows the meetings, the speech-to-text model and Vinutes' own program apart, so it shows whether deleting old meetings frees much space.
 - Each AI is asked for a short report after it runs, so its tokens can be counted. The words the window shows and the meeting's log are the same as before.
 - Meetings recorded before this version are filled in once from their logs: AI runs and their minutes, minutes of audio and mail sent. Tokens and Google requests were not written down then; those days carry a Filled in tag.
 - What is counted stays on the Mac, in ~/.config/vin-meeting-minutes-zh/usage/, as meeting ids and numbers: no titles, names or addresses.
+
+## v0.4.7 (2026-10-19)
+
+- Typing Chinese with Zhuyin or another input method, the Enter that picks a word no longer sends what is in the box under the minutes. A second Enter while the first sentence is on its way doesn't send it twice either.
+- While the AI is changing the minutes, the box stays open. What you send meanwhile waits under To change and goes to the AI one after another, each answer showing as it comes in; ✕ takes a waiting one off. Opening another meeting or closing the window doesn't stop them. Before, the box was greyed out until the AI was done.
+- A screenshot pasted into the box (⌘V) shows small above it and goes to the AI with your sentence, so it can see what you mean. It no longer becomes an attachment in section 8 of the minutes; the picture button beside the box still adds pictures there.
+- Each item under To confirm has Fix and Skip beside Looks right. Fix opens a box that starts from the guess: what you type goes to the AI, the minutes change to it, and the right word is learned. Skip takes the item off and learns nothing. Before, a wrong guess could only be confirmed, which taught Vinutes the wrong word.
+- Under People, a voice's menu ends with Remove Speaker C (or whichever letter), for a voice that is no one: the recording split one person in two, or picked up a noise. Its lines in the transcript keep their words without a speaker, the To confirm items about it go too, and Undo brings it back.
 
 ## v0.4.6 (2026-10-19)
 

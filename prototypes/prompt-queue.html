@@ -1,0 +1,380 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>輸入框原型</title><style>
+/* Prototype for the prompt box and the to-confirm cards (2026-10-19). Colours and parts copied from recorder/app/app.css. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --panel: #f6f6f8; --rail: #fbfbfc; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field: #ffffff; --field-line: #cfcfd6;
+  --hover: #e0e0e6; --link: #2a6dd6; --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee;
+  --green: #1e7b34; --green-bg: #dff3e3; --red: #b42318; --red-bg: #fde2e1;
+  --yellow-bg: #fbefc6; --yellow-label: #8a6100;
+  --asis-bg: #fff6f5; --asis-line: #e6a29c; --asis-ink: #9b1c1c;
+  --tobe-bg: #f1f6ff; --tobe-line: #8fb0e6; --tobe-ink: #1c4f9e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e20; --panel: #232326; --rail: #222225; --line: #333338; --line2: #3a3a40;
+    --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field: #2c2c30; --field-line: #46464c;
+    --hover: #303036; --link: #7fb0ff; --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a;
+    --green: #5cc27a; --green-bg: #1f3a28; --red: #ff8a80; --red-bg: #4a2020;
+    --yellow-bg: #4a3c10; --yellow-label: #e9c46a;
+    --asis-bg: #2e2020; --asis-line: #7a3a36; --asis-ink: #ffb4ad;
+    --tobe-bg: #1c2638; --tobe-line: #3f5f94; --tobe-ink: #a9c6ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
+button { font: inherit; color: inherit; }
+input { font: inherit; color: var(--text); }
+main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+.lead { margin: 0 0 24px; color: var(--muted); }
+h2 { margin: 32px 0 10px; font-size: 16px; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: start; }
+.frame { border-radius: 12px; padding: 12px; }
+.frame.asis { background: var(--asis-bg); border: 2px dashed var(--asis-line); }
+.frame.tobe { background: var(--tobe-bg); border: 2px solid var(--tobe-line); }
+.flag { display: inline-block; margin-bottom: 10px; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.asis .flag { color: var(--asis-ink); background: var(--red-bg); }
+.tobe .flag { color: var(--tobe-ink); background: var(--blue-bg); border: 1px solid var(--blue-line); }
+.cap { margin: 10px 2px 0; color: var(--text2); }
+.screen { background: var(--bg); border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; }
+.doc { height: 64px; padding: 12px 24px; color: var(--faint); font-size: 12px; background: var(--bg); }
+.doc i { display: block; height: 8px; margin: 6px 0; border-radius: 4px; background: var(--line); }
+.defaults ul { margin: 0; padding-left: 20px; color: var(--text2); }
+.defaults li { margin: 4px 0; }
+
+/* the prompt box, as in app.css */
+.ask { padding: 10px 16px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.busy, .replyline { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.busy { color: var(--muted); }
+.replyline .asked { color: var(--muted); }
+.replyline .said { flex: 1; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.qk { all: unset; display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 13px; border: 1px solid var(--blue-line);
+      background: var(--blue-bg); font-size: 12px; color: var(--blue-ink); cursor: pointer; }
+.qk[disabled] { opacity: 0.5; cursor: default; }
+.prompt { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 6px; border: 1px solid var(--field-line); border-radius: 10px;
+          background: var(--field); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.prompt input { flex: 1; min-width: 0; margin-left: 4px; border: none; outline: none; background: transparent; font-size: 14px; }
+.prompt input:disabled { color: var(--faint); }
+.ib { all: unset; flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; color: var(--muted); cursor: pointer; }
+.ib:hover { background: var(--blue-bg); color: var(--blue); }
+.ib[disabled] { opacity: 0.4; cursor: default; background: none; }
+.model { all: unset; flex: none; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px;
+         font-size: 12.5px; font-weight: 600; background: var(--panel); }
+.model[disabled] { opacity: 0.5; }
+.sep { flex: none; width: 1px; height: 20px; background: var(--line2); margin: 0 2px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #d97757; }
+.send { all: unset; cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 15px; background: var(--blue); }
+.send[disabled] { opacity: 0.4; cursor: default; }
+.achips { display: flex; flex-wrap: wrap; gap: 6px; }
+.achips:empty { display: none; }
+.achip { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 320px; padding: 0 6px 0 9px; border-radius: 14px;
+         background: var(--blue-bg); border: 1px solid var(--blue-line); font-size: 12px; color: var(--blue-ink); }
+.achip .an { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax { all: unset; flex: none; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9px; font-size: 11px; }
+.ax:hover { background: var(--blue-line); }
+.spin { animation: rot 1s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* new: the requests waiting their turn */
+.waits { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+.waits .wh { font-size: 11px; font-weight: 700; color: var(--muted); }
+.wr { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12.5px; }
+.wr .wn { flex: none; width: 18px; height: 18px; border-radius: 9px; background: var(--line); color: var(--muted); font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.wr .wt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* new: a picture for Claude, shown small */
+.pchip { position: relative; display: inline-flex; width: 56px; height: 40px; border-radius: 6px; overflow: hidden; border: 1px solid var(--blue-line); background: var(--panel); }
+.pchip img { width: 100%; height: 100%; object-fit: cover; }
+.pchip .ax { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: rgba(0,0,0,0.55); color: #fff; font-size: 10px; }
+.mini { width: 28px; height: 20px; border-radius: 3px; object-fit: cover; border: 1px solid var(--line2); flex: none; }
+.demo { all: unset; cursor: pointer; margin-top: 8px; display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 13px;
+        border: 1px dashed var(--tobe-line); color: var(--tobe-ink); font-size: 12px; }
+
+/* the rail and its cards, as in app.css */
+.rail { width: 300px; max-width: 100%; background: var(--rail); border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; }
+.railhead { display: flex; gap: 4px; padding: 10px 10px 0; border-bottom: 1px solid var(--line); }
+.tab { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px 8px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--muted); }
+.tab.on { color: var(--link); font-weight: 600; border-bottom-color: var(--blue); }
+.tab b { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #f0b400; color: #fff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; }
+.railbody { padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; }
+.card { padding: 10px 12px; border-radius: 8px; background: var(--field); border: 1px solid var(--yellow-bg); display: flex; flex-direction: column; gap: 8px; transition: opacity .3s; }
+.card.gone { opacity: 0; }
+.kind { align-self: flex-start; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px; color: var(--yellow-label); background: var(--yellow-bg); }
+.card .text { font-size: 13px; }
+.acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.okc2, .btn2 { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; border-radius: 12px; font-size: 12px; }
+.okc2 { border: 1px solid var(--green-bg); background: var(--field); color: var(--green); }
+.okc2:hover { background: var(--green-bg); }
+.btn2 { border: 1px solid var(--field-line); color: var(--text2); }
+.btn2:hover { background: var(--hover); }
+.btn2.ghost { border-color: transparent; color: var(--muted); }
+.btn2.blue { background: var(--blue); border-color: var(--blue); color: #fff; }
+.fix { display: flex; gap: 6px; }
+.fix input { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); outline: none; font-size: 12.5px; }
+.fix input:focus { border-color: var(--blue); }
+.okline { font-size: 12px; color: var(--green); }
+.empty { color: var(--faint); font-size: 12px; text-align: center; padding: 24px 0; }
+/* the People tab's voice card, as in app.css */
+.vcard { padding: 10px 12px; border-radius: 8px; background: var(--field); border: 1px solid var(--yellow-bg); display: flex; flex-direction: column; gap: 8px; }
+.vtop { display: flex; align-items: center; gap: 8px; }
+.vtag { padding: 1px 8px; border-radius: 10px; border: 1px dashed #8b6fd6; color: #8b6fd6; font-size: 12px; font-weight: 700; }
+.vmin { color: var(--muted); font-size: 12px; }
+.vlisten { margin-left: auto; color: var(--link); font-size: 12px; }
+.vpick { display: flex; align-items: center; height: 32px; padding: 0 10px; border: 1px solid var(--field-line); border-radius: 8px; font-weight: 600; cursor: pointer; }
+.vpick span { margin-left: auto; color: var(--muted); font-size: 11px; }
+.vmenu { display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--field-line); border-radius: 8px; }
+.vmenu > div { padding: 7px 10px; border-radius: 6px; }
+.vmenu .vline { padding: 0; height: 1px; margin: 3px 6px; background: var(--line); }
+.vlink { color: var(--link); }
+.vdrop { color: var(--red); cursor: pointer; }
+.vdrop:hover { background: var(--red-bg); }
+.vgone { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+</style></head><body><main>
+
+<h1>輸入框與待確認卡片原型</h1>
+<p class="lead">左邊是目前的畫面，右邊是調整後的畫面。右邊的畫面可以直接操作。</p>
+
+<h2>連續送出修改要求</h2>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen"><div class="doc"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i></div>
+      <div class="ask">
+        <div class="busy" data-icon="spin"><span>Claude 正在修改⋯</span></div>
+        <div class="prompt"><button class="model" disabled><i class="dot"></i>Claude</button><span class="sep"></span>
+          <button class="ib" disabled data-icon="plus"></button><button class="ib" disabled data-icon="image"></button>
+          <input disabled placeholder="跟 Claude 說要改什麼，例如：主持人是王小明"><button class="send" disabled data-icon="up"></button></div>
+        <div class="quick" data-quick="off"></div>
+      </div></div>
+    <p class="cap">Claude 修改時，輸入框和下方按鈕都無法使用，只能等 Claude 改完。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen"><div class="doc"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i></div>
+      <div class="ask">
+        <div id="qTop" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div class="prompt"><button class="model"><i class="dot"></i>Claude</button><span class="sep"></span>
+          <button class="ib" data-icon="plus"></button><button class="ib" data-icon="image"></button>
+          <input id="qIn" placeholder="跟 Claude 說要改什麼，例如：主持人是王小明"><button class="send" id="qGo" data-icon="up"></button></div>
+        <div class="quick" data-quick="on" id="qQuick"></div>
+      </div></div>
+    <p class="cap">Claude 修改時仍可送出。新的要求排進「待修改」，前一則改完，Claude 會接著改下一則。</p>
+  </div>
+</div>
+
+<h2>貼上截圖給 Claude 參考</h2>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen"><div class="doc"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i></div>
+      <div class="ask">
+        <div class="achips"><span class="achip"><span data-icon="image"></span><span class="an">貼上的圖片 2026-10-19 17.04.12.png</span><button class="ax">✕</button></span></div>
+        <div class="prompt"><button class="model"><i class="dot"></i>Claude</button><span class="sep"></span>
+          <button class="ib" data-icon="plus"></button><button class="ib" data-icon="image"></button>
+          <input placeholder="寫一句這是什麼、誰提供的，例如：Amy 提供的 9 月流量報表"><button class="send" data-icon="up"></button></div>
+        <div class="quick" data-quick="on"></div>
+      </div></div>
+    <p class="cap">⌘V 貼上的截圖會變成附件，送出後存進雲端硬碟，再寫進「八、補充資訊」。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen"><div class="doc"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i></div>
+      <div class="ask">
+        <div id="pTop" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div class="achips" id="pChips"></div>
+        <div class="prompt"><button class="model"><i class="dot"></i>Claude</button><span class="sep"></span>
+          <button class="ib" data-icon="plus"></button><button class="ib" title="插入圖片" data-icon="image"></button>
+          <input id="pIn" placeholder="跟 Claude 說要改什麼，例如：主持人是王小明"><button class="send" id="pGo" data-icon="up"></button></div>
+        <div class="quick" data-quick="on"></div>
+      </div></div>
+    <button class="demo" id="pDemo">放一張範例截圖</button>
+    <p class="cap">⌘V 貼上的截圖只給 Claude 參考，不會放進會議記錄。要放進「八、補充資訊」的圖片，用輸入框左邊的圖片按鈕加入。</p>
+  </div>
+</div>
+
+<h2>待確認項目有錯或不想處理</h2>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="rail"><div class="railhead"><span class="tab on">待處理<b>3</b></span><span class="tab">人員</span><span class="tab">紀錄</span></div>
+      <div class="railbody" id="asisCards"></div></div>
+    <p class="cap">每張卡片只有「確認無誤」可以按。推論有誤時，卡片會一直留在待處理。推論有誤卻按了確認無誤，錯誤的對照會寫進詞彙表，之後 Claude 整理會議記錄也會沿用。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="rail"><div class="railhead"><span class="tab on">待處理<b id="cN">3</b></span><span class="tab">人員</span><span class="tab">紀錄</span></div>
+      <div class="railbody" id="cards"></div></div>
+    <p class="cap">推論有誤時按「修改」，填入正確的內容。會議記錄會一起改正，詞彙表記下的也是正確的對照。不想處理就按「略過」，卡片收起，會議記錄維持原樣。</p>
+  </div>
+</div>
+
+<h2>移除誤判出來的講者</h2>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="rail"><div class="railhead"><span class="tab">待處理</span><span class="tab on">人員</span><span class="tab">紀錄</span></div>
+      <div class="railbody"><div class="vcard"><div class="vtop"><span class="vtag">講者 C</span><span class="vmin">1 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
+        <div class="vpick">選擇是誰<span>▾</span></div>
+        <div class="vmenu"><div>Vin</div><div>主管（營運處處長 Pitt）</div><div class="vline"></div><div class="vlink">其他人⋯</div></div></div></div></div>
+    <p class="cap">選單裡只有人名。講者 C 是誤判出來的聲音時，這張卡片無法移除，會一直留在人員分頁。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="rail"><div class="railhead"><span class="tab">待處理</span><span class="tab on">人員</span><span class="tab">紀錄</span></div>
+      <div class="railbody" id="voices"></div></div>
+    <p class="cap">選單最下面多了「移除講者 C」。移除後卡片收起，逐字稿裡那幾句保留原文，只是不標講者。按「復原」，這張卡片會回到人員分頁。</p>
+  </div>
+</div>
+
+<section class="defaults"><h2>預設做法</h2><ul>
+  <li>待修改的要求，Claude 會一則一則改，每改完一則就顯示改了什麼。</li>
+  <li>切換到別場會議時，待修改的要求仍會繼續改完。</li>
+  <li>Codex、Antigravity 也看得到貼上的截圖。</li>
+  <li>略過的項目記在「紀錄」分頁，之後不會再出現在待處理。</li>
+  <li>講者 C 其實是 Vin 或 Pitt 時，選他的名字即可，兩個聲音會算成同一個人。</li>
+  <li>移除講者時，待確認裡關於這個講者的項目一併收起。</li>
+</ul></section>
+
+</main><script>
+const ICON = {
+  plus: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  image: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-8 8"/></svg>',
+  up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  spin: '<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a64d8" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>',
+  done: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1e7b34" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16 9.8"/></svg>',
+  check: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+};
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// the Enter that picks a word in Zhuyin is not a send (WebKit: keyCode 229)
+const inputMethod = (e) => e.isComposing || e.keyCode === 229;
+const QUICK = ['精簡摘要', '完整詳盡', '正式嚴謹', '視覺呈現', '對外版本'];
+document.querySelectorAll('[data-icon]').forEach((el) => { el.insertAdjacentHTML('afterbegin', ICON[el.dataset.icon]); });
+document.querySelectorAll('[data-quick]').forEach((el) => {
+  el.innerHTML = QUICK.map((q) => `<button class="qk"${el.dataset.quick === 'off' ? ' disabled' : ''}>${q}</button>`).join('');
+});
+const SAID = { '主持人是王小明': '主持人填入王小明', '講者 B 是陳大文': '講者 B 改成陳大文' };
+const replyLine = (asked, said, pic) => `<div class="replyline">${ICON.done}${pic ? `<img class="mini" src="${pic}" alt="">` : ''}
+  <span class="asked">「${esc(asked)}」</span><span class="said">${esc(said)}</span>
+  <button class="btn2 ghost" style="height:22px;padding:0 8px;font-size:11px">復原</button></div>`;
+
+// 1. requests sent while Claude works wait their turn
+const Q = { now: '主持人是王小明', waiting: ['講者 B 是陳大文'], last: null };
+function drawQ() {
+  const top = $('#qTop');
+  top.innerHTML = `${Q.last ? replyLine(Q.last, SAID[Q.last] || '已照要求修改') : ''}
+    ${Q.now ? `<div class="busy">${ICON.spin}<span>Claude 正在修改「${esc(Q.now)}」⋯</span></div>` : ''}
+    ${Q.waiting.length ? `<div class="waits"><span class="wh">待修改 ${Q.waiting.length}</span>${Q.waiting.map((w, i) =>
+      `<div class="wr"><span class="wn">${i + 1}</span><span class="wt">${esc(w)}</span><button class="ax" data-i="${i}" title="移除">✕</button></div>`).join('')}</div>` : ''}`;
+  top.querySelectorAll('.ax[data-i]').forEach((b) => b.addEventListener('click', () => { Q.waiting.splice(Number(b.dataset.i), 1); drawQ(); }));
+}
+function nextQ() {
+  setTimeout(() => {
+    Q.last = Q.now;
+    Q.now = Q.waiting.shift() || '';
+    drawQ();
+    if (Q.now) nextQ();
+  }, 6000);
+}
+function sendQ(text) {
+  if (!text) return;
+  if (Q.now) Q.waiting.push(text); else { Q.now = text; nextQ(); }
+  $('#qIn').value = '';
+  drawQ();
+}
+$('#qIn').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inputMethod(e)) sendQ($('#qIn').value.trim()); });
+$('#qGo').addEventListener('click', () => sendQ($('#qIn').value.trim()));
+$('#qQuick').querySelectorAll('.qk').forEach((b) => b.addEventListener('click', () => sendQ(b.textContent)));
+drawQ(); nextQ();
+
+// 2. a pasted picture goes to Claude with the sentence, not into the minutes
+const P = { pics: [], busy: '', busyPic: '', last: null };
+function drawP() {
+  $('#pChips').innerHTML = P.pics.map((src, i) => `<span class="pchip"><img src="${src}" alt=""><button class="ax" data-i="${i}" title="移除">✕</button></span>`).join('');
+  $('#pChips').querySelectorAll('.ax').forEach((b) => b.addEventListener('click', () => { P.pics.splice(Number(b.dataset.i), 1); drawP(); }));
+  $('#pTop').innerHTML = `${P.last ? replyLine(P.last.asked, '已照截圖標示的地方修改', P.last.pic) : ''}
+    ${P.busy ? `<div class="busy">${ICON.spin}${P.busyPic ? `<img class="mini" src="${P.busyPic}" alt="">` : ''}<span>Claude 正在修改「${esc(P.busy)}」⋯</span></div>` : ''}`;
+}
+function sendP() {
+  const text = $('#pIn').value.trim();
+  if (!text || P.busy) return;
+  P.busy = text; P.busyPic = P.pics[0] || ''; P.pics = []; $('#pIn').value = '';
+  drawP();
+  setTimeout(() => { P.last = { asked: P.busy, pic: P.busyPic }; P.busy = ''; P.busyPic = ''; drawP(); }, 4000);
+}
+$('#pIn').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inputMethod(e)) sendP(); });
+$('#pGo').addEventListener('click', sendP);
+$('#pIn').addEventListener('paste', (e) => {
+  const file = [...(e.clipboardData || {}).items || []].find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!file) return;
+  e.preventDefault();
+  const r = new FileReader();
+  r.onload = () => { P.pics.push(r.result); drawP(); };
+  r.readAsDataURL(file.getAsFile());
+});
+$('#pDemo').addEventListener('click', () => {
+  const c = document.createElement('canvas'); c.width = 280; c.height = 200;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 280, 200);
+  g.fillStyle = '#c9ccd4'; [30, 60, 90, 150, 175].forEach((y, i) => g.fillRect(20, y, [220, 240, 160, 230, 190][i], 10));
+  g.strokeStyle = '#e5322d'; g.lineWidth = 4; g.strokeRect(12, 110, 256, 30);
+  g.fillStyle = '#e5322d'; g.fillRect(20, 120, 200, 10);
+  P.pics.push(c.toDataURL()); drawP(); $('#pIn').focus();
+});
+drawP();
+
+// 3. a guess that is wrong can be fixed, one not worth handling can be skipped
+const CARDS = [
+  { text: '講者 B 推測是主管，請補姓名', meant: '', ph: '姓名' },
+  { text: '「王曉明」推測是王小明', meant: '王小明' },
+  { text: '「Q 三」推測是 Q3', meant: 'Q3' },
+];
+$('#asisCards').innerHTML = CARDS.map((c) => `<div class="card"><span class="kind">待確認</span><div class="text">${esc(c.text)}</div>
+  <div class="acts"><button class="okc2">${ICON.check}確認無誤</button></div></div>`).join('');
+const live = CARDS.map((c) => ({ ...c, mode: '' }));
+function drawCards() {
+  const left = live.filter((c) => c.mode !== 'gone');
+  $('#cN').textContent = left.filter((c) => c.mode !== 'fixed').length;
+  $('#cards').innerHTML = left.length ? left.map((c) => {
+    const i = live.indexOf(c);
+    const acts = c.mode === 'fixed' ? `<div class="okline">已改成「${esc(c.fixed)}」</div>`
+      : c.mode === 'edit' ? `<div class="fix"><input data-i="${i}" value="${esc(c.meant)}" placeholder="${esc(c.ph || '正確的內容')}">
+          <button class="btn2 blue" data-save="${i}">儲存</button><button class="btn2 ghost" data-cancel="${i}">取消</button></div>`
+      : `<div class="acts"><button class="okc2" data-ok="${i}">${ICON.check}確認無誤</button>
+          <button class="btn2" data-edit="${i}">修改</button><button class="btn2 ghost" data-skip="${i}">略過</button></div>`;
+    return `<div class="card" id="card${i}"><span class="kind">待確認</span><div class="text">${esc(c.text)}</div>${acts}</div>`;
+  }).join('') : '<div class="empty">沒有要補充或確認的項目</div>';
+  const go = (i) => { const el = $(`#card${i}`); el.classList.add('gone'); setTimeout(() => { live[i].mode = 'gone'; drawCards(); }, 300); };
+  $('#cards').querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.ok))));
+  $('#cards').querySelectorAll('[data-skip]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.skip))));
+  $('#cards').querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => {
+    live[Number(b.dataset.edit)].mode = 'edit'; drawCards();
+    const box = $(`#card${b.dataset.edit} input`); box.focus(); box.select();
+  }));
+  $('#cards').querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', () => { live[Number(b.dataset.cancel)].mode = ''; drawCards(); }));
+  const save = (i) => {
+    const v = $(`#card${i} input`).value.trim();
+    if (!v) return;
+    Object.assign(live[i], { mode: 'fixed', fixed: v }); drawCards();
+    setTimeout(() => go(i), 1500);
+  };
+  $('#cards').querySelectorAll('[data-save]').forEach((b) => b.addEventListener('click', () => save(Number(b.dataset.save))));
+  $('#cards').querySelectorAll('.fix input').forEach((x) => x.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !inputMethod(e)) save(Number(x.dataset.i));
+    if (e.key === 'Escape') { live[Number(x.dataset.i)].mode = ''; drawCards(); }
+  }));
+}
+drawCards();
+
+// 4. a voice that is nobody (the recording split one person in two, or a noise) can be taken off
+const V = { open: true, removed: false };
+function drawVoices() {
+  $('#voices').innerHTML = V.removed
+    ? `<div class="vgone">已移除：講者 C<button class="btn2 ghost" id="vBack">復原</button></div>`
+    : `<div class="vcard"><div class="vtop"><span class="vtag">講者 C</span><span class="vmin">1 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
+        <div class="vpick" id="vPick">選擇是誰<span>▾</span></div>
+        ${V.open ? `<div class="vmenu"><div>Vin</div><div>主管（營運處處長 Pitt）</div><div class="vline"></div><div class="vlink">其他人⋯</div>
+          <div class="vline"></div><div class="vdrop" id="vDrop">移除講者 C</div></div>` : ''}</div>`;
+  const back = $('#vBack');
+  if (back) back.addEventListener('click', () => { V.removed = false; V.open = false; drawVoices(); });
+  const pick = $('#vPick');
+  if (pick) pick.addEventListener('click', () => { V.open = !V.open; drawVoices(); });
+  const drop = $('#vDrop');
+  if (drop) drop.addEventListener('click', () => { V.removed = true; drawVoices(); });
+}
+drawVoices();
+</script></body></html>

@@ -32,11 +32,12 @@ The prompt gives you the job folder (written `job` below), the recording's start
    With `專案小抄.md`, decide first which project the meeting is: 「同一系列之前整理過的會議」 is surest, then
    `最近的會議.json` and what the transcript is about. Write names, who does what and terms as that project's brief
    has them, and turn its "the transcript often has" spellings back into the right ones. People in a brief belong to
-   the project; they are not this meeting's attendees: take attendees from the calendar, and without a list there
-   leave them as `[__]` as below, never filled from the brief. Nothing from another project's brief goes into these
-   minutes.
-   When the calendar has no such meeting, name it from the transcript, leave the attendees as `[__]`, and fill
-   `next_meeting` only from what the transcript says clearly.
+   the project; they are not this meeting's attendees: take attendees as below, spelled the brief's way, and never
+   list someone from the brief who does not show up in the transcript. Nothing from another project's brief goes
+   into these minutes.
+   When the calendar has no such meeting, or the meeting has no attendee list, name it from the transcript; the
+   attendees are the people who speak in the transcript or are named as present, and `[__]` only when that can't be
+   told. Fill `next_meeting` only from what the transcript says clearly.
    Then read `job/參考/最近的會議.json` (earlier meetings' names and projects): the same meeting (e.g. a fortnightly
    review) keeps exactly the same name and project; the app finds "previous meeting" and "next meeting" by them.
 3. Write the minutes from `job/逐字稿.txt` following the sections below and save them as `job/紀錄.md`. For background

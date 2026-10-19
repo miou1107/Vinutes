@@ -14,6 +14,7 @@ audience: agent
 * Location: Meeting Room B
 * Chair: Jessie Chen
 * Attendees: Jessie Chen, Ming Wang, David Lee
+* Slides: [Member area redesign, second discussion](https://example.com/slides)
 * Materials: [Member area schedule](https://example.com/schedule)
 
 ## 2. Purpose

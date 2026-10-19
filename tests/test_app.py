@@ -2599,8 +2599,9 @@ class People(unittest.TestCase):
 
 
 class MeetingPeople(unittest.TestCase):
-    """人員: a meeting's list starts from the invitation, the project and the minutes; adding, naming a voice and
-    taking someone off go into the minutes' 與會人員 line and the project's list at once (Vin 2026-10-17)."""
+    """人員: a meeting's list starts from the invitation and the minutes; adding, naming a voice and taking someone off
+    go into the minutes' 與會人員 line. Adding and naming also put the person in the project's list (its brief);
+    taking someone off a meeting leaves the brief alone (Vin 2026-10-17, 10-19)."""
 
     job = Flows.job
 
@@ -2630,10 +2631,10 @@ class MeetingPeople(unittest.TestCase):
         minutes_app.save_project_people('週會專案', ['Lily', 'amy'])
         self.assertEqual(minutes_app.meeting_people(self.job()), ['Leo', 'Amy', 'Kai'])   # 以當場會議邀請的人為主
 
-    def test_with_no_invitation_the_project_list_comes_in(self):
+    def test_with_no_invitation_the_minutes_say_who_was_there_not_the_project_list(self):
         (self.job_dir / '行事曆.json').write_text('{}')
         minutes_app.save_project_people('週會專案', ['Lily', 'amy'])
-        self.assertEqual(minutes_app.meeting_people(self.job()), ['Lily', 'amy', 'Kai'])
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Amy', 'Kai'])   # Lily is the project's, not here
 
     def test_group_addresses_are_no_people(self):
         (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [{'email': 'rd-team@example.com'},
@@ -2669,12 +2670,12 @@ class MeetingPeople(unittest.TestCase):
         self.assertIn('與會人員：Leo、Amy、Kai、Mia', md)
         self.assertEqual(minutes_app.project_people('週會專案'), ['Mia'])
 
-    def test_taking_someone_off_leaves_the_project_list_and_frees_their_voice(self):
+    def test_taking_someone_off_a_meeting_frees_their_voice_and_keeps_them_in_the_brief(self):
         minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
         minutes_app.cmd_people(self.job(), 'remove', 'mia')
         md = self.md_path.read_text(encoding='utf-8')
         self.assertIn('與會人員：Leo、Amy、Kai\n', md)
-        self.assertEqual(minutes_app.project_people('週會專案'), [])
+        self.assertEqual(minutes_app.project_people('週會專案'), ['Mia'])   # she wasn't at this one; still the project's
         self.assertEqual([v['name'] for v in minutes_app.voices_view(self.job())], ['', ''])
         self.assertNotIn('Mia', minutes_app.meeting_people(self.job()))   # she doesn't come back by herself
         self.assertEqual(minutes_app.speakers_shown(self.job())['B'], '')

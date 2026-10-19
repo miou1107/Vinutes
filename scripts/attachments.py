@@ -35,6 +35,8 @@ WIDEST_PT = 400                                  # a picture in the Doc is never
 LONGEST_PX = 4000                                # the Doc refuses pictures over 25 megapixels or 50 MB
 ALL_DRIVES = 'supportsAllDrives=true'            # a Doc on a shared drive keeps its folder there too
 
+NOTE_MOST = 100                                  # characters of one item's 說明
+
 NO_ITEMS = t('attach_no_items')
 NO_DOC = t('attach_no_doc')
 OFFLINE = t('attach_offline')
@@ -59,9 +61,14 @@ def drive_trouble(err) -> str:
     return FAILED if re.match(r'HTTP \d+', text) else text
 
 
+def clean_note(text) -> str:
+    """An item's 說明 as one line: what it is and who gave it."""
+    return ' '.join(str(text or '').split())[:NOTE_MOST]
+
+
 def items_from(raw: str) -> list[dict]:
-    """What the window sent: [{kind: file|image, path}] and [{kind: link, url}], checked before anything is
-    uploaded, so a bad one leaves nothing half done."""
+    """What the window sent: [{kind: file|image, path, note}] and [{kind: link, url, note}], checked before anything
+    is uploaded, so a bad one leaves nothing half done. `note` is the item's own 說明, and may be empty."""
     try:
         items = json.loads(raw)
     except ValueError:
@@ -75,12 +82,12 @@ def items_from(raw: str) -> list[dict]:
             path = Path(str(it.get('path', ''))).expanduser()
             if not path.is_file():
                 raise SystemExit(t('attach_no_file', name=path.name or t('attach_no_name')))
-            checked.append({'kind': kind, 'path': path, 'name': path.name})
+            checked.append({'kind': kind, 'path': path, 'name': path.name, 'note': clean_note(it.get('note'))})
         elif kind == 'link':
             url = str(it.get('url', '')).strip()
             if not re.match(r'https?://\S+$', url):
                 raise SystemExit(t('attach_bad_url'))
-            checked.append({'kind': 'link', 'url': url, 'name': url})
+            checked.append({'kind': 'link', 'url': url, 'name': url, 'note': clean_note(it.get('note'))})
     if not checked:
         raise SystemExit(NO_ITEMS)
     return checked
@@ -113,6 +120,8 @@ def call(url: str, body=None, method: str | None = None, ctype: str = 'applicati
     if want == 'location':
         return resp.headers.get('Location', '')
     raw = resp.read()
+    if want == 'bytes':
+        return raw
     return json.loads(raw) if raw else {}
 
 
@@ -263,15 +272,41 @@ def link_target(url: str) -> str:
 
 
 def lines_for(items: list[dict], note: str, lang: str = 'zh-TW') -> list[str]:
-    """One list item per file, link or picture; a picture's own paragraph follows its line."""
+    """One list item per file, link or picture, led by its own 說明 (or `note`, for every item without one); a
+    picture's own paragraph follows its line."""
     colon = ': ' if lang == 'en' else '：'
-    lead = f'{doc_sync.escape_lead(link_text(note.strip()))}{colon}' if note.strip() else ''
     out = []
     for it in items:
+        said = (it.get('note') or note).strip()
+        lead = f'{doc_sync.escape_lead(link_text(said))}{colon}' if said else ''
         out.append(f'- {lead}[{link_text(it["name"])}]({link_target(it["link"])})')
         if it['kind'] == 'image' and it.get('local'):
             out.append(f'![{link_text(it["name"])}]({link_target(it["local"])})')
     return out
+
+
+ITEM = re.compile(r'^[-*]\s+(?:(?P<note>.*?)(?:：|:\s*))?\[(?P<name>(?:\\.|[^\\\]])+)\]\((?P<link>[^)\s]+)\)\s*$')
+
+
+def listed(md: str) -> list[dict]:
+    """What 「八、補充資訊」 holds now, for the 附件 row above the minutes: {name, link, note, kind} for each line
+    that is a link, written by 加入會議附件 or typed in the Doc."""
+    rows = md.split('\n')
+    head = next((i for i, r in enumerate(rows) if LAST.match(r)), None)
+    found = []
+    for row in rows[head + 1:] if head is not None else []:
+        if re.match(r'#{1,2}\s', row):
+            break
+        m = ITEM.match(row.strip())
+        link = m and m['link']                      # as written: the window opens it as it is
+        if not m or not re.match(r'https?://', link):
+            continue
+        name = re.sub(r'\\(.)', r'\1', m['name'])
+        kind = ('link' if not link.startswith('https://drive.google.com/')
+                else 'image' if Path(name).suffix.lower() in PICTURES else 'file')
+        found.append({'name': name, 'link': link, 'note': re.sub(r'\\(.)', r'\1', (m['note'] or '').strip()),
+                      'kind': kind})
+    return found
 
 
 def add_lines(md: str, lines: list[str], lang: str = '') -> str:

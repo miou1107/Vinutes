@@ -1,0 +1,331 @@
+<title>Vinutes 會議附件</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one page, a short lead, then the window as it is today and the window after the change, stacked. */
+:root {
+  --bg: #f3f3f6; --win: #ffffff; --panel: #f6f6f8; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field: #ffffff; --field-line: #cfcfd6;
+  --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee; --link: #2a6dd6;
+  --green-bg: #dff3e3; --green-ink: #14532d; --h1: #1f3a68; --hover: #e0e0e6;
+  --asis: #b42318; --asis-bg: #fdecea; --asis-line: #f1b5af;
+  --tobe: #0a64d8; --tobe-bg: #eaf2ff; --tobe-line: #a9c4ef;
+  --claude: #b85a22; --claude-bg: #fbeee5; --claude-line: #efc9ad;
+  --note: #6b4d00; --note-bg: #fff6dd; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.18);
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --link: #7fb0ff;
+  --green-bg: #1f3a28; --green-ink: #b6e8c4; --h1: #9db8e8; --hover: #303036;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --claude: #f0a878; --claude-bg: #3d2a1d; --claude-line: #6b4630;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --link: #7fb0ff;
+  --green-bg: #1f3a28; --green-ink: #b6e8c4; --h1: #9db8e8; --hover: #303036;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --claude: #f0a878; --claude-bg: #3d2a1d; --claude-line: #6b4630;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px; }
+.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 22px; margin: 0; text-wrap: balance; }
+.lead { margin: 6px 0 0; color: var(--text2); max-width: 62ch; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* the two states: red frame = today, blue frame = after the change */
+.state { border: 2px solid; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.state.asis { border-color: var(--asis-line); background: var(--asis-bg); }
+.state.tobe { border-color: var(--tobe-line); background: var(--tobe-bg); }
+.tag { align-self: flex-start; font-size: 13px; font-weight: 700; padding: 3px 12px; border-radius: 999px; color: var(--on-accent); }
+.asis .tag { background: var(--asis); } .tobe .tag { background: var(--tobe); }
+.cap { margin: 0; color: var(--text2); }
+.hint { margin: 0; font-size: 13px; color: var(--note); background: var(--note-bg); border-radius: 8px; padding: 6px 10px; align-self: flex-start; }
+
+/* the Vinutes window */
+.win { background: var(--win); border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; position: relative; min-width: 0; }
+.bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.crumb { color: var(--link); } .crumb b { color: var(--text); font-weight: 600; }
+.sent { margin-left: auto; color: var(--green-ink); background: var(--green-bg); font-size: 12px; padding: 2px 10px; border-radius: 999px; }
+.row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; min-width: 0; }
+.lbl { color: var(--muted); font-size: 13px; }
+.sep { width: 1px; height: 18px; background: var(--line2); margin: 0 6px; }
+.pill { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line2); background: var(--panel);
+  border-radius: 999px; padding: 2px 12px; font-size: 13px; }
+button.pill:hover { background: var(--hover); }
+.pill.primary { border-color: var(--blue-line); background: var(--blue-bg); color: var(--blue-ink); font-weight: 600; }
+.fchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line2); border-radius: 8px; padding: 2px 10px;
+  font-size: 13px; max-width: 220px; min-width: 0; }
+.fchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrap { position: relative; }
+.menu { position: absolute; z-index: 5; background: var(--win); border: 1px solid var(--line2); border-radius: 10px; box-shadow: var(--shadow);
+  padding: 6px; min-width: 160px; display: flex; flex-direction: column; }
+.menu button { background: none; border: 0; text-align: left; padding: 7px 10px; border-radius: 6px; }
+.menu button:hover { background: var(--hover); }
+.menu.down { top: calc(100% + 6px); left: 0; } .menu.up { bottom: calc(100% + 6px); left: 0; }
+
+/* the minutes */
+.doc { background: var(--panel); padding: 18px; }
+.paper { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 22px 28px; max-width: 680px; margin: 0 auto; }
+.paper h3 { color: var(--h1); font-size: 16px; margin: 0 0 6px; }
+.paper ul { margin: 0 0 16px; padding-left: 20px; }
+.paper a { color: var(--link); }
+.paper .fresh { animation: glow 2.4s ease-out; border-radius: 4px; }
+@keyframes glow { from { background: var(--note-bg); } to { background: transparent; } }
+.board { margin: 6px 0 10px; height: 110px; max-width: 240px; border-radius: 6px; border: 1px solid var(--line2);
+  background: repeating-linear-gradient(0deg, var(--panel), var(--panel) 18px, var(--line) 19px); display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.empty8 { color: var(--faint); font-size: 13px; margin: 0; }
+
+/* the box under the Doc */
+.ask { padding: 10px 14px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.forc { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.forc .who { font-size: 12px; font-weight: 600; color: var(--claude); background: var(--claude-bg); border: 1px solid var(--claude-line);
+  border-radius: 999px; padding: 1px 10px; }
+.cchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--claude-line); border-radius: 8px; padding: 2px 10px; font-size: 13px; max-width: 220px; }
+.cchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.x { border: 0; background: none; color: var(--faint); padding: 0 2px; line-height: 1; }
+.box { display: flex; align-items: center; gap: 8px; border: 1px solid var(--field-line); background: var(--field); border-radius: 12px; padding: 6px 8px; min-width: 0; }
+.model { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 2px 8px; border-radius: 8px; background: var(--panel); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--claude); }
+.ib { border: 0; background: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); flex: none; }
+button.ib:hover { background: var(--hover); }
+.ib svg { width: 18px; height: 18px; }
+.box input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font: inherit; padding: 4px; }
+.box input:focus-visible { outline: none; }
+.send { width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--blue); color: var(--on-accent); display: grid; place-items: center; flex: none; }
+.send svg { width: 16px; height: 16px; }
+.status { font-size: 13px; color: var(--claude); margin: 0; }
+.ph { color: var(--faint); flex: 1; min-width: 0; padding: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.callout { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 6px; white-space: nowrap; }
+.callout.to8 { color: var(--blue-ink); background: var(--blue-bg); border: 1px solid var(--blue-line); }
+.callout.toc { color: var(--claude); background: var(--claude-bg); border: 1px solid var(--claude-line); }
+.sim { border: 1px dashed var(--note); background: var(--note-bg); color: var(--note); font-size: 12px; border-radius: 8px; padding: 2px 10px; }
+
+/* the sheet */
+.veil { position: absolute; inset: 0; background: rgba(0,0,0,0.35); display: grid; place-items: start center; padding: 40px 16px; z-index: 10; }
+.sheet { background: var(--win); border: 1px solid var(--line2); border-radius: 12px; box-shadow: var(--shadow); width: min(560px, 100%);
+  padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.sheet h2 { font-size: 16px; margin: 0; }
+.items { display: flex; flex-direction: column; gap: 10px; }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.item .name { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; }
+.item .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item input { grid-column: 1 / -1; border: 1px solid var(--field-line); background: var(--field); color: var(--text); border-radius: 8px; padding: 6px 10px; font: inherit; min-width: 0; }
+.more { display: flex; gap: 8px; flex-wrap: wrap; }
+.foot { display: flex; justify-content: flex-end; gap: 8px; }
+.btn { border: 1px solid var(--line2); background: var(--panel); border-radius: 8px; padding: 5px 16px; }
+.btn.go { background: var(--blue); border-color: var(--blue); color: var(--on-accent); font-weight: 600; }
+.ico { width: 16px; height: 16px; flex: none; color: var(--muted); }
+@media (max-width: 560px) { .paper { padding: 16px; } .model .n { display: none; } }
+@media (prefers-reduced-motion: reduce) { .paper .fresh { animation: none; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Vinutes 會議附件</h1>
+    <p class="lead">要放進會議紀錄的檔案，改從「加入會議附件」放進去，每個檔案可以各寫一句說明。用輸入框的 ＋、圖片按鈕或 ⌘V 放上來的東西，只給 Claude 參考，不會寫進會議紀錄。</p>
+  </header>
+
+  <section class="state asis" aria-label="目前的畫面">
+    <span class="tag">目前的畫面</span>
+    <div class="win">
+      <div class="ask">
+        <div class="forc">
+          <span class="fchip"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg><span>10月各通路業績.xlsx</span></span>
+          <span class="callout to8">寫進第八節</span>
+          <span class="fchip"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 7"/></svg><span>會議室D白板.png</span></span>
+          <span class="callout toc">只給 Claude 參考</span>
+        </div>
+        <div class="box">
+          <span class="model"><span class="dot"></span><span class="n">Claude</span></span>
+          <span class="ib" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span>
+          <span class="ib" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 7"/></svg></span>
+          <span class="ph">寫一句這是什麼、誰提供的，例如：Amy 提供的 9 月流量報表</span>
+          <span class="send" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
+        </div>
+      </div>
+    </div>
+    <p class="cap">按 ＋ 或圖片按鈕放上來的檔案會寫進第八節，按 ⌘V 貼上的圖只給 Claude 參考。這兩種東西在輸入框上方看起來一樣，送出前無法分辨。</p>
+  </section>
+
+  <section class="state tobe" aria-label="調整後的畫面">
+    <span class="tag">調整後的畫面</span>
+    <p class="hint">先按「＋ 加入會議附件」，再按「＋ 上傳檔案」放兩個檔案。接著按輸入框的圖片按鈕放一張照片，就能比較兩邊的差別。</p>
+    <div class="win" id="win">
+      <div class="bar">
+        <span class="crumb">產品週會 › 10/19 <b>（10 月進度）</b></span>
+        <span class="sent">已寄出 2 人</span>
+      </div>
+      <div class="row">
+        <span class="lbl">標籤</span>
+        <span class="pill">＋ 加標籤</span>
+        <span class="sep" aria-hidden="true"></span>
+        <span class="lbl">附件</span>
+        <span id="attList" style="display:contents"></span>
+        <div class="wrap">
+          <button class="pill primary" id="attBtn">＋ 加入會議附件</button>
+        </div>
+      </div>
+      <div class="doc">
+        <div class="paper">
+          <h3>七、待辦事項</h3>
+          <ul>
+            <li>王小明：10/24 前整理 10 月成效</li>
+            <li>Amy：10/31 前回覆第一期預算</li>
+          </ul>
+          <h3>八、補充資訊</h3>
+          <ul id="sec8"></ul>
+          <p class="empty8" id="empty8">還沒有附件</p>
+        </div>
+      </div>
+      <div class="ask">
+        <div class="forc" id="forc" hidden>
+          <span class="who">給 Claude 參考</span>
+          <span id="cList" style="display:contents"></span>
+        </div>
+        <p class="status" id="status" hidden></p>
+        <div class="box">
+          <span class="model"><span class="dot"></span><span class="n">Claude</span></span>
+          <div class="wrap">
+            <button class="ib" id="cPlus" title="給 Claude 參考的檔案或超連結" aria-label="給 Claude 參考的檔案或超連結" aria-haspopup="menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+            <div class="menu up" id="cMenu" role="menu" hidden>
+              <button role="menuitem" data-k="file">上傳檔案</button>
+              <button role="menuitem" data-k="link">貼上超連結</button>
+            </div>
+          </div>
+          <button class="ib" id="cImg" title="給 Claude 參考的圖片" aria-label="給 Claude 參考的圖片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 7"/></svg></button>
+          <input id="cText" aria-label="跟 Claude 說要改什麼" placeholder="跟 Claude 說要改什麼，例如：主持人是王小明">
+          <button class="send" id="cSend" aria-label="送出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        </div>
+        <div class="more"><button class="sim" id="cPaste">模擬按 ⌘V 貼上截圖</button></div>
+      </div>
+
+      <div class="veil" id="veil" hidden>
+        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle">
+          <h2 id="shTitle">加入會議附件</h2>
+          <div class="items" id="items"></div>
+          <div class="more">
+            <button class="pill" data-add="file">＋ 上傳檔案</button>
+            <button class="pill" data-add="link">＋ 貼上超連結</button>
+            <button class="pill" data-add="image">＋ 插入圖片</button>
+          </div>
+          <div class="foot">
+            <button class="btn" id="shCancel">取消</button>
+            <button class="btn go" id="shAdd">加入</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="hint">原型省略了 Mac 的選檔視窗，按「上傳檔案」會直接帶入範例檔案。</p>
+  </section>
+</div>
+
+<script>
+const ICONS = {
+  file: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>',
+  link: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
+  image: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 7"/></svg>'
+};
+// example files, handed out in turn by each button
+const SAMPLES = {
+  file: ['10月各通路業績.xlsx', '第一期提案.pdf', '9月成效.pptx'],
+  link: ['https://example.com/report', 'https://example.com/plan'],
+  image: ['會議室D白板.jpg', '9月流量截圖.png']
+};
+const used = { file: 0, link: 0, image: 0 };
+const cUsed = { file: 0, link: 0, image: 0 };
+const $ = (s) => document.querySelector(s);
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let picked = [];           // in the sheet, not added yet
+const attached = [];       // in the minutes
+let forClaude = [];        // above the box
+
+const next = (kind, counter) => SAMPLES[kind][counter[kind]++ % SAMPLES[kind].length];
+
+function openSheet() {
+  picked = [];
+  drawSheet();
+  $('#veil').hidden = false;
+  const first = $('#items input'); if (first) first.focus();
+}
+function drawSheet() {
+  $('#items').innerHTML = picked.map((p, i) => `<div class="item">
+      <div class="name">${ICONS[p.kind]}<span title="${esc(p.name)}">${esc(p.name)}</span></div>
+      <button class="x" data-rm="${i}" aria-label="移除 ${esc(p.name)}">✕</button>
+      <input id="note${i}" data-i="${i}" value="${esc(p.note)}" aria-label="${esc(p.name)} 的說明" placeholder="${i === 0 ? '說明，例如：Amy 提供的 9 月流量報表' : '說明'}">
+    </div>`).join('');
+  $('#items').querySelectorAll('input').forEach((el) => el.addEventListener('input', () => { picked[+el.dataset.i].note = el.value; }));
+  $('#items').querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => { picked.splice(+b.dataset.rm, 1); drawSheet(); }));
+}
+const closeSheet = () => { $('#veil').hidden = true; };
+
+function addToMinutes() {
+  if (!picked.length) return closeSheet();
+  const fresh = picked.map((p) => ({ ...p, note: p.note.trim() }));
+  attached.push(...fresh);
+  fresh.forEach((p) => {
+    const li = document.createElement('li');
+    li.className = 'fresh';
+    li.innerHTML = `${p.note ? esc(p.note) + '：' : ''}<a href="#" onclick="return false">${esc(p.name)}</a>` +
+      (p.kind === 'image' ? `<div class="board">${esc(p.name)}</div>` : '');
+    $('#sec8').appendChild(li);
+  });
+  $('#empty8').hidden = true;
+  $('#attList').innerHTML = attached.map((p) => `<span class="fchip" title="${esc(p.name)}">${ICONS[p.kind]}<span>${esc(p.name)}</span></span>`).join('');
+  closeSheet();
+}
+
+function drawClaude() {
+  $('#forc').hidden = !forClaude.length;
+  $('#cList').innerHTML = forClaude.map((p, i) => `<span class="cchip" title="${esc(p.name)}">${ICONS[p.kind]}<span>${esc(p.name)}</span><button class="x" data-c="${i}" aria-label="移除 ${esc(p.name)}">✕</button></span>`).join('');
+  $('#cList').querySelectorAll('[data-c]').forEach((b) => b.addEventListener('click', () => { forClaude.splice(+b.dataset.c, 1); drawClaude(); }));
+}
+function forC(kind) { forClaude.push({ kind, name: next(kind, cUsed) }); drawClaude(); $('#status').hidden = true; }
+
+function closeMenus() { $('#cMenu').hidden = true; }
+function toggle(menu, btn) {
+  const open = menu.hidden; closeMenus(); menu.hidden = !open; if (btn) btn.setAttribute('aria-expanded', String(open));
+}
+
+$('#attBtn').addEventListener('click', openSheet);
+document.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => {
+  const k = b.dataset.add;
+  picked.push({ kind: k, name: next(k, used), note: '' });
+  if (k === 'file') picked.push({ kind: k, name: next(k, used), note: '' });
+  drawSheet();
+}));
+$('#shCancel').addEventListener('click', closeSheet);
+$('#shAdd').addEventListener('click', addToMinutes);
+$('#veil').addEventListener('click', (e) => { if (e.target.id === 'veil') closeSheet(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSheet(); closeMenus(); } });
+
+$('#cPlus').addEventListener('click', (e) => { e.stopPropagation(); toggle($('#cMenu')); });
+$('#cMenu').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { closeMenus(); forC(b.dataset.k); }));
+$('#cImg').addEventListener('click', () => forC('image'));
+$('#cPaste').addEventListener('click', () => forC('image'));
+document.addEventListener('click', (e) => { if (!e.target.closest('.wrap')) closeMenus(); });
+
+function send() {
+  const text = $('#cText').value.trim() || (forClaude.length ? '照白板補上待辦事項' : '');
+  if (!text) return;
+  const seen = forClaude.map((p) => p.name).join('、');
+  $('#status').textContent = `Claude 正在修改「${text}」⋯` + (seen ? `　參考：${seen}` : '');
+  $('#status').hidden = false;
+  forClaude = []; drawClaude(); $('#cText').value = '';
+}
+$('#cSend').addEventListener('click', send);
+$('#cText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) send(); });
+</script>

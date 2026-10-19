@@ -194,7 +194,7 @@ function refreshDoc(id = S.sel, again = false) {
     if ('can_undo' in r && !S.busy && !aiBusy(id)) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
-    if (seen() !== before && !S.pickOpen && !S.fixing) renderRail();
+    if (seen() !== before && !S.pickOpen) renderRail();   // an open Fix box is drawn again with what was typed
   }).catch(() => {}).finally(() => { if (S.refreshing && S.refreshing.p === p) S.refreshing = null; });
   S.refreshing = { id, p };
   return p;
@@ -513,7 +513,7 @@ function markPlaying() {
   });
 }
 
-// the list's corner: the version, and 版本更新 when GitHub has a newer one (looked up once a day); a recording
+// the list's corner: the version, and 版本更新 when GitHub has a newer one (looked up once an hour); a recording
 // has to end first, since updating closes the app
 function renderVersion() {
   const el = $('#ver');

@@ -4,7 +4,7 @@
 
 - Usage (用量統計), in the meeting window above the version and in the menu-bar panel between All Meetings and Settings, shows a month by day or by project: meetings and minutes of audio, AI runs (write-ups and edits) with their minutes and tokens, Google requests, emails sent, and disk. A day with a run stopped by the AI's usage limit says so. A project opens to its meetings, and a meeting opens from there.
 - The disk tile shows the meetings, the speech-to-text model and Vinutes' own program apart, so it shows whether deleting old meetings frees much space.
-- Each AI is asked for a short report after it runs, so its tokens can be counted. The words the window shows and the meeting's log are the same as before.
+- Each AI is asked for a short report after it runs, so its tokens can be counted. The words the window shows and the meeting's log are the same as before; when the AI reports an error, the log also keeps its report.
 - Meetings recorded before this version are filled in once from their logs: AI runs and their minutes, minutes of audio and mail sent. Tokens and Google requests were not written down then; those days carry a Filled in tag.
 - What is counted stays on the Mac, in ~/.config/vin-meeting-minutes-zh/usage/, as meeting ids, project names and numbers: no meeting titles, people's names or addresses.
 

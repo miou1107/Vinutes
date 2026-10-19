@@ -306,3 +306,108 @@ def fill() -> list[dict]:
     except OSError:
         pass
     return found
+
+
+# --- one month, by day and by project -----------------------------------------------------------------------------
+
+def blank() -> dict:
+    return {'meetings': 0, 'audio': 0, 'write': {'n': 0, 's': 0}, 'edit': {'n': 0, 's': 0}, 'test': {'n': 0, 's': 0},
+            'tokens': 0, 'google': 0, 'mails': 0, 'disk': 0, 'limit': 0, 'failed': 0, 'filled': False}
+
+
+def add(row: dict, e: dict):
+    """One record into a row of the table."""
+    row['filled'] = row['filled'] or bool(e.get('filled'))
+    kind = e.get('kind')
+    if kind == 'ai':
+        run = row.get(e.get('task'), row['edit'])
+        run['n'] += 1
+        run['s'] = round(run['s'] + float(e.get('s') or 0), 1)
+        tokens = e.get('tokens') if isinstance(e.get('tokens'), dict) else {}
+        row['tokens'] += sum(int(tokens.get(k) or 0) for k in ('in', 'cached', 'out'))
+        row['limit'] += 1 if e.get('limit') else 0
+        row['failed'] += 0 if e.get('ok', True) else 1
+    elif kind == 'google':
+        row['google'] += int(e.get('n') or 0)
+    elif kind == 'mail':
+        row['mails'] += int(e.get('to') or 0)
+
+
+def summary(month: str, meetings: list[dict]) -> dict:
+    """The month (YYYY-MM): its total, one row per day, one per project with its meetings, and the months there
+    are. `meetings`: what minutes_app knows of each meeting that still exists: id, date, title, project, disk
+    (bytes), audio (seconds, from its start and end). A meeting counts on the day it was recorded, with its disk;
+    everything else on the day it happened. Its project is the one it has now; a deleted meeting's is the one it had."""
+    found = [e for e in events(month) + [e for e in fill() if str(e.get('at', '')).startswith(month)]
+             if isinstance(e, dict)]
+    facts = {m['id']: m for m in meetings}
+    audio, last_project = {}, {}
+    for e in found:
+        mid = e.get('meeting') or ''
+        if e.get('kind') == 'transcribe' and mid and e.get('audio') is not None:
+            audio[mid] = int(e['audio'])
+        if mid and mid not in facts:
+            last_project[mid] = e.get('project') or ''
+    recorded = {mid: f'{mid[:4]}-{mid[4:6]}-{mid[6:8]}' for mid in set(facts) | set(audio) | set(last_project)
+                if MEETING_ID.match(mid)}
+    recorded = {mid: day for mid, day in recorded.items() if day.startswith(month)}
+    filled_meetings = {e.get('meeting') for e in found if e.get('filled')}
+
+    def project_of(mid: str):
+        if not mid:
+            return None                                  # 其他: setup, nothing tied to a meeting
+        return facts[mid]['project'] if mid in facts else last_project.get(mid, '')
+
+    days: dict[str, dict] = {}
+    projects: dict = {}
+    items: dict[str, dict] = {}
+
+    def item(mid: str) -> dict:
+        if mid not in items:
+            fact = facts.get(mid, {})
+            items[mid] = {**blank(), 'id': mid, 'date': fact.get('date') or recorded.get(mid) or
+                          f'{mid[:4]}-{mid[4:6]}-{mid[6:8]}', 'title': fact.get('title') or '', 'exists': mid in facts}
+            projects.setdefault(project_of(mid), {**blank(), 'name': project_of(mid), 'items': []})['items'].append(items[mid])
+        return items[mid]
+
+    for mid, day in recorded.items():
+        length = audio.get(mid, (facts.get(mid) or {}).get('audio') or 0)
+        size = (facts.get(mid) or {}).get('disk') or 0
+        for row in (days.setdefault(day, {**blank(), 'date': day}), item(mid)):
+            row['meetings'] += 1
+            row['audio'] += length
+            row['disk'] += size
+            row['filled'] = row['filled'] or mid in filled_meetings
+        group = projects[project_of(mid)]
+        group['meetings'] += 1
+        group['audio'] += length
+        group['disk'] += size
+        group['filled'] = group['filled'] or mid in filled_meetings
+    for e in found:
+        if e.get('kind') in ('transcribe', 'speakers'):
+            continue                                     # counted with the meeting above
+        day = str(e.get('at', ''))[:10]
+        add(days.setdefault(day, {**blank(), 'date': day}), e)
+        mid = e.get('meeting') or ''
+        if mid:
+            add(item(mid), e)
+        add(projects.setdefault(project_of(mid), {**blank(), 'name': project_of(mid), 'items': []}), e)
+
+    total = blank()
+    for row in days.values():
+        for key in ('meetings', 'audio', 'tokens', 'google', 'mails', 'disk', 'limit', 'failed'):
+            total[key] += row[key]
+        for key in ('write', 'edit', 'test'):
+            total[key] = {'n': total[key]['n'] + row[key]['n'], 's': round(total[key]['s'] + row[key]['s'], 1)}
+        total['filled'] = total['filled'] or row['filled']
+    for group in projects.values():
+        group['items'].sort(key=lambda r: r['id'], reverse=True)
+    named = sorted((p for p in projects.values() if p['name']), key=lambda p: p['name'])
+    rest = [projects[k] for k in ('', None) if k in projects]
+    months = {month, now().strftime('%Y-%m')} | {m['date'][:7] for m in meetings if m.get('date')}
+    if FOLDER.is_dir():
+        months |= {p.stem for p in FOLDER.glob('*.jsonl') if re.match(r'^\d{4}-\d\d$', p.stem)}
+    months |= {str(e.get('at', ''))[:7] for e in fill() if e.get('at')}
+    return {'month': month, 'months': sorted(months), 'total': total,
+            'days': sorted(days.values(), key=lambda d: d['date'], reverse=True),
+            'projects': named + rest}

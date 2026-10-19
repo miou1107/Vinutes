@@ -456,5 +456,137 @@ class Fill(Ledger):
         self.assertEqual(usage.fill(), [])
 
 
+M1, M2 = '20261019-105319', '20261016-153005'
+
+
+class Summary(Ledger):
+    """usage.summary: one month by day and by project, from the record, the fill-in and what minutes_app knows of
+    each meeting that still exists (date, title, project, disk)."""
+
+    def put(self, *lines, name='2026-10.jsonl'):
+        usage.FOLDER.mkdir(parents=True, exist_ok=True)
+        with (usage.FOLDER / name).open('a', encoding='utf-8') as f:
+            for line in lines:
+                f.write(json.dumps({'meeting': '', 'project': '', **line}, ensure_ascii=False) + '\n')
+
+    def setUp(self):
+        super().setUp()
+        usage.begin()                                    # no meeting existed yet: nothing to fill in
+        self.put({'at': '2026-10-19T11:36:00+08:00', 'kind': 'transcribe', 'meeting': M1, 'project': '春季活動',
+                  's': 151, 'audio': 2419},
+                 {'at': '2026-10-19T11:39:16+08:00', 'kind': 'ai', 'meeting': M1, 'task': 'write', 'ai': 'claude',
+                  's': 137, 'ok': True, 'limit': False, 'tokens': {'in': 30000, 'cached': 100000, 'out': 4000}},
+                 {'at': '2026-10-19T11:51:22+08:00', 'kind': 'ai', 'meeting': M1, 'task': 'edit', 'ai': 'claude',
+                  's': 15.7, 'ok': True, 'limit': False, 'tokens': {'in': 50000, 'cached': 0, 'out': 1000}},
+                 {'at': '2026-10-19T12:00:00+08:00', 'kind': 'google', 'meeting': M1, 'api': 'docs', 'n': 240},
+                 {'at': '2026-10-19T12:00:01+08:00', 'kind': 'google', 'meeting': M1, 'api': 'drive', 'n': 6, 'bytes': 2048},
+                 {'at': '2026-10-19T12:05:00+08:00', 'kind': 'mail', 'meeting': M1, 'to': 2},
+                 {'at': '2026-10-20T09:00:00+08:00', 'kind': 'ai', 'meeting': M1, 'task': 'edit', 'ai': 'claude',
+                  's': 20, 'ok': False, 'limit': True},
+                 {'at': '2026-10-18T08:00:00+08:00', 'kind': 'ai', 'task': 'test', 'ai': 'claude', 's': 3, 'ok': True,
+                  'limit': False})
+        self.facts = [{'id': M1, 'date': '2026-10-19', 'title': '週會', 'project': '春季活動', 'disk': 15_000_000,
+                       'audio': 2400}]
+
+    def test_each_day_has_what_happened_on_it_newest_first(self):
+        days = usage.summary('2026-10', self.facts)['days']
+        self.assertEqual([d['date'] for d in days], ['2026-10-20', '2026-10-19', '2026-10-18'])
+        later, day, before = days
+        self.assertEqual((later['meetings'], later['edit'], later['limit']), (0, {'n': 1, 's': 20}, 1))
+        self.assertEqual((day['meetings'], day['audio'], day['disk']), (1, 2419, 15_000_000))   # the transcript's length
+        self.assertEqual((day['write'], day['edit']), ({'n': 1, 's': 137}, {'n': 1, 's': 15.7}))
+        self.assertEqual((day['tokens'], day['google'], day['mails']), (185000, 246, 2))
+        self.assertEqual(before['test'], {'n': 1, 's': 3})
+
+    def test_each_project_holds_its_meetings_and_what_has_no_meeting_is_other(self):
+        projects = usage.summary('2026-10', self.facts)['projects']
+        self.assertEqual([p['name'] for p in projects], ['春季活動', None])
+        spring, other = projects
+        self.assertEqual((spring['meetings'], spring['edit'], spring['tokens']), (1, {'n': 2, 's': 35.7}, 185000))
+        [item] = spring['items']
+        self.assertEqual((item['id'], item['title'], item['date'], item['exists']), (M1, '週會', '2026-10-19', True))
+        self.assertEqual(other['test'], {'n': 1, 's': 3})
+
+    def test_the_month_total_is_every_row_together(self):
+        found = usage.summary('2026-10', self.facts)
+        total = found['total']
+        for key in ('meetings', 'audio', 'tokens', 'google', 'mails', 'limit'):
+            self.assertEqual(total[key], sum(d[key] for d in found['days']), key)
+            self.assertEqual(total[key], sum(p[key] for p in found['projects']), key)
+        self.assertEqual(total['edit'], {'n': 2, 's': 35.7})
+
+    def test_a_deleted_meeting_keeps_its_usage_under_the_project_it_had(self):
+        self.put({'at': '2026-10-16T16:10:00+08:00', 'kind': 'transcribe', 'meeting': M2, 'project': '官網改版',
+                  's': 120, 'audio': 3000})
+        found = usage.summary('2026-10', self.facts)
+        [gone] = [p for p in found['projects'] if p['name'] == '官網改版']
+        self.assertEqual((gone['meetings'], gone['audio'], gone['disk'], gone['items'][0]['exists']), (1, 3000, 0, False))
+        [day] = [d for d in found['days'] if d['date'] == '2026-10-16']
+        self.assertEqual(day['meetings'], 1)
+
+    def test_a_meeting_moved_to_another_project_counts_under_the_new_one(self):
+        moved = [{**self.facts[0], 'project': ''}]
+        self.assertEqual([p['name'] for p in usage.summary('2026-10', moved)['projects']], ['', None])
+
+    def test_days_and_projects_filled_in_are_marked(self):
+        self.put({'at': '2026-10-14T10:51:00+08:00', 'kind': 'ai', 'meeting': '20261014-103500', 'task': 'write',
+                  'ai': 'claude', 's': 60, 'ok': True, 'limit': False, 'filled': True}, name='filled.jsonl')
+        found = usage.summary('2026-10', self.facts + [{'id': '20261014-103500', 'date': '2026-10-14', 'title': '',
+                                                        'project': '', 'disk': 400_000, 'audio': 60}])
+        [day] = [d for d in found['days'] if d['date'] == '2026-10-14']
+        self.assertTrue(day['filled'])
+        self.assertEqual((day['meetings'], day['audio']), (1, 60))      # its length from job.json: no transcript line
+        self.assertFalse(next(d for d in found['days'] if d['date'] == '2026-10-19')['filled'])
+        self.assertTrue(next(p for p in found['projects'] if p['name'] == '')['filled'])
+
+    def test_a_month_with_nothing_still_has_its_place_among_the_months(self):
+        found = usage.summary('2026-09', self.facts)
+        self.assertEqual((found['days'], found['projects'], found['total']['meetings']), ([], [], 0))
+        self.assertIn('2026-09', found['months'])                   # the one asked for, though it has nothing
+        self.assertIn('2026-10', found['months'])
+        self.assertIn(usage.now().strftime('%Y-%m'), found['months'])
+        self.assertEqual(found['months'], sorted(set(found['months'])))
+
+
+class UsageCommand(Ledger):
+    """minutes_app.py usage <month>: the summary with each meeting's disk (its folder and the files beside its
+    minutes) and the disk of the setup (speech model, Python environment)."""
+
+    def setUp(self):
+        super().setUp()
+        import minutes_app
+        self.app = minutes_app
+        self.saved_app = minutes_app.RECORDINGS, minutes_app.out
+        minutes_app.RECORDINGS = usage.RECORDINGS
+        self.outs = []
+        minutes_app.out = self.outs.append
+
+    def tearDown(self):
+        self.app.RECORDINGS, self.app.out = self.saved_app
+        super().tearDown()
+
+    def test_each_meeting_counts_its_folder_and_the_files_beside_its_minutes(self):
+        d = self.meeting(M1, project='春季活動')
+        (d / 'job.json').write_text(json.dumps({'started': '2026-10-19T10:53:19+08:00', 'ended': '2026-10-19T11:33:38+08:00'}))
+        (d / '錄音.m4a').write_bytes(b'a' * 1000)
+        md = self.root / '週會_會議紀錄.md'
+        md.write_text('# 週會\n', encoding='utf-8')
+        (self.root / '週會_逐字稿.txt').write_text('x' * 50, encoding='utf-8')
+        (d / 'result.json').write_text(json.dumps({'title': '週會', 'project': '春季活動', 'minutes_md': str(md)}))
+        folder = sum(f.stat().st_size for f in d.rglob('*') if f.is_file())
+        self.app.cmd_usage('2026-10')
+        [found] = self.outs
+        [day] = found['days']
+        self.assertEqual(day['disk'], folder + md.stat().st_size + 50)
+        self.assertEqual(day['audio'], 2419)                                 # no transcript yet: from its times
+        self.assertEqual(found['disk']['meetings'], day['disk'])
+        self.assertEqual(set(found['disk']), {'meetings', 'speech', 'program'})
+        self.assertEqual(found['projects'][0]['items'][0]['title'], '週會')
+
+    def test_a_month_that_is_not_one_becomes_this_month(self):
+        self.app.cmd_usage('../../x')
+        self.assertEqual(self.outs[0]['month'], usage.now().strftime('%Y-%m'))
+
+
 if __name__ == '__main__':
     unittest.main()

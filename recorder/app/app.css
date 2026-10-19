@@ -352,10 +352,10 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
               font-size: 12px; background: var(--field); color: inherit; outline: none; }
 /* pictures pasted for the AI, and the requests waiting while it works on one (Vin 2026-10-19) */
 #picBox:empty { display: none; }
-.pchip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 40px;
+.picchip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 40px;
          border-radius: 6px; overflow: hidden; border: 1px solid var(--blue-line); background: var(--panel); color: var(--muted); }
-.pchip img { width: 100%; height: 100%; object-fit: cover; }
-.pchip .ax { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: rgba(0,0,0,0.55); color: #ffffff; font-size: 10px; }
+.picchip img { width: 100%; height: 100%; object-fit: cover; }
+.picchip .ax { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; background: rgba(0,0,0,0.55); color: #ffffff; font-size: 10px; }
 .mini { flex: none; width: 28px; height: 20px; border-radius: 3px; object-fit: cover; border: 1px solid var(--line2); }
 .waits { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
 .waits .wh { font-size: 11px; font-weight: 700; color: var(--muted); }
@@ -378,7 +378,8 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .okbtn:hover { background: var(--green-bg); }
 .okbtn.skip { font-size: 10px; color: var(--muted); }
 .okbtn.skip:hover { background: var(--hover); }
-.chip .cl { cursor: pointer; }
+.chip .cl { all: unset; cursor: pointer; }
+.chip .cl:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
 .chip .cl:hover { text-decoration: underline; }
 .fixchip input { width: 140px; height: 18px; box-sizing: border-box; border: none; border-radius: 4px; padding: 0 6px;
                  background: var(--field); color: var(--text); font-size: 12px; outline: none; }

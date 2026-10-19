@@ -18,6 +18,7 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py skip <job> <item>                 the user leaves a guess as it is: the card goes, nothing learned
   minutes_app.py drop_voice <job> <letter> [back]  移除講者 X under 人員 (a voice that is no one), or put it back
   minutes_app.py correct <job> <item> <right>      the user puts a guess right: Claude changes the minutes to it
+  minutes_app.py ask_many <job> <json>             requests still waiting when the window closed, one after another
   minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」 (attachments.py)
   minutes_app.py log <job>                         the activity log, newest first
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
@@ -1978,8 +1979,7 @@ def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, r
         sys.exit(friendly(done.stdout + done.stderr, t('ai_error', ai=ai)))
     new = (work / '紀錄.md').read_text(encoding='utf-8') if (work / '紀錄.md').is_file() else md
     note = (work / '說明.txt').read_text(encoding='utf-8').strip().split('\n')[0][:60] if (work / '說明.txt').is_file() else ''
-    if new.strip() == md.strip():
-        learned += settle() if settle else []
+    if new.strip() == md.strip():                 # nothing changed: a correction stays on its card to try again
         answer(job, fresh(), html=md != opened, reply=note or t('ai_nothing'), changed=False, learned=learned)
         return
     if not re.search(r'(?m)^#{1,3} ', new) or len(new) < len(md) * 0.15:
@@ -2163,6 +2163,30 @@ def cmd_correct(job: Job, label: str, right: str):
     ai_edit(job, request, label, settle=settle)
 
 
+def cmd_ask_many(job: Job, raw: str):
+    """What was still waiting under 待修改 when the window closed (each {kind: ask | quick | correct, text, item,
+    pictures}), done in order in this one process, which holds the meeting's turn; one that cannot be done is
+    passed over and the rest still go."""
+    try:
+        items = [x for x in json.loads(raw) if isinstance(x, dict)]
+    except ValueError:
+        items = []
+    for x in items:
+        job = Job(job.dir)                           # each one starts from the minutes the one before left
+        kind, text = x.get('kind'), str(x.get('text') or '').strip()
+        try:
+            if kind == 'correct':
+                cmd_correct(job, str(x.get('item') or ''), text)
+            elif kind == 'quick' and QUICK_NAMES.get(text, text) in QUICK['en']:
+                key = QUICK_NAMES.get(text, text)
+                ai_edit(job, QUICK[job.lang][key], key)
+            elif kind == 'ask' and text:
+                pictures = [Path(p) for p in x.get('pictures') or [] if isinstance(p, str)]
+                ai_edit(job, text, text, pictures)
+        except SystemExit as err:
+            job.log(me(), str(err.code or ''))
+
+
 # --- open ------------------------------------------------------------------------------------
 
 def transcript(job: Job) -> list[dict]:
@@ -2205,14 +2229,21 @@ def cmd_drop_voice(job: Job, group: str, back: bool = False):
     the minutes gave it is no longer its, and the 待確認 items about it are put aside; the minutes stay as they are."""
     speakers.take_off(job.dir, group, not back)
     who = f'{t("speaker")} {group}'
+    kept = job.state.setdefault('voices_off', {})    # what removing put aside, for 復原 to bring back
     if not back:
+        about = re.compile(ABOUT_VOICE.format(re.escape(group)), re.I)
+        aside = [c['label'] for c in check_items(job) if c.get('speaker') == group or about.match(c['label'])]
+        kept[group] = {'aside': aside, 'name': speaker_map(job).get(group, '')}
         data = read_json(job.dir / MEETING_PEOPLE)
         data['speakers'] = {g: n for g, n in speaker_map(job).items() if g != group}
         write_json(job.dir / MEETING_PEOPLE, data)
-        about = re.compile(ABOUT_VOICE.format(re.escape(group)), re.I)
-        aside = [c['label'] for c in check_items(job) if c.get('speaker') == group or about.match(c['label'])]
         job.state.setdefault('skipped', []).extend(aside)
-        job.save_state()
+    elif group in kept:
+        was = kept.pop(group)
+        job.state['skipped'] = [x for x in job.state.get('skipped', []) if x not in was.get('aside', [])]
+        if was.get('name'):
+            save_speaker(job, group, was['name'])
+    job.save_state()
     job.log(me(), t('log_voice_back' if back else 'log_voice_off', who=who), 'speaker')
     answer(job, fresh(), transcript=transcript(job), voices=voices_view(job), voices_off=voices_off(job),
            voice_names=speakers.known_names(), people=meeting_people(job), speakers=speakers_shown(job),
@@ -2427,8 +2458,8 @@ def cmd_locate(job: Job, words: str):
 
 TURN: list = []
 CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'move_learned', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
-           'people', 'speaker', 'note', 'replace', 'skip', 'correct', 'drop_voice'}
-NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace', 'correct'}
+           'people', 'speaker', 'note', 'replace', 'skip', 'correct', 'drop_voice', 'ask_many'}
+NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace', 'correct', 'ask_many'}
 
 
 def wait_for_turn(job: Job):
@@ -2530,6 +2561,8 @@ def main():
         cmd_resolve(job, rest[0])
     elif cmd == 'confirm' and rest:
         cmd_confirm(job, ' '.join(rest))
+    elif cmd == 'ask_many' and rest:
+        cmd_ask_many(job, rest[0])
     elif cmd == 'drop_voice' and rest:
         cmd_drop_voice(job, rest[0], len(rest) > 1 and rest[1] == 'back')
     elif cmd == 'skip' and rest:

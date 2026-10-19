@@ -3313,11 +3313,18 @@ class AskTheAi(unittest.TestCase):
         self.assertIn('C 是 Amy，有與會', prompt)
         self.assertNotIn('講者 C 只有附和，未列與會', self.labels())
 
-    def test_a_correction_the_ai_leaves_undone_keeps_the_card_and_learns_nothing(self):
+    def test_a_correction_with_nothing_to_change_still_takes_the_card_off(self):
+        # Vin 2026-10-19: he pressed 修改 and sent, the AI found the minutes already right, and the card stayed
         minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', 'Threads App')   # the minutes come back unchanged
-        self.assertIn('「Fresh」推測是 Threads', self.labels())
+        self.assertNotIn('「Fresh」推測是 Threads', self.labels())
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])                     # nothing changed: nothing learned
+
+    def test_a_sentence_typed_as_the_fix_is_not_learned_as_the_word(self):
+        # 「又有好好玩」 was learned as 「這一段不是又有好好玩，是「悠遊好好玩」這個是…」 (2026-10-19)
+        self.change = lambda md: md.replace('Threads 與', 'Threads App 與')
+        minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', '這一段不是 Fresh，是「Threads App」這個網站')
+        self.assertNotIn('「Fresh」推測是 Threads', self.labels())
         self.assertEqual(self.briefs.load('官網改版')['terms'], [])
-        self.assertIn('「Fresh」推測是 Threads', [c['label'] for c in self.outs[-1]['check']])
 
     def test_a_new_name_put_right_goes_into_the_brief_with_its_role(self):
         r = json.loads((self.job_dir / 'result.json').read_text())
@@ -3340,6 +3347,16 @@ class AskTheAi(unittest.TestCase):
         self.assertIn('12 萬元', md)
         self.assertIn('Threads App 與', md)
         self.assertNotIn('「Fresh」推測是 Threads', self.labels())
+
+    def test_a_question_about_a_voice_put_right_with_a_name_names_the_voice(self):
+        named = []
+        minutes_app.cmd_speaker = lambda job, group, name, line='': named.append((group, name))
+        (self.job_dir / '講者.json').write_text(json.dumps({'groups': {'C': {'name': '', 'seconds': 40}}, 'lines': []}))
+        minutes_app.cmd_correct(self.job(), '講者 C 只有附和，未列與會', 'Amy')
+        self.assertEqual(named, [('C', 'Amy')])
+        self.assertEqual(self.calls, [])
+        minutes_app.cmd_correct(self.job(), '講者 C 只有附和，未列與會', 'C 其實是會議室的雜音，不是人')
+        self.assertEqual(len(self.calls), 1)                       # a sentence goes to the AI
 
     def test_a_voice_guess_put_right_names_the_voice(self):
         named = []
@@ -3409,6 +3426,17 @@ class VoiceOff(unittest.TestCase):
             speakers.forget = saved
         self.assertEqual(forgot, ['Kai'])
         self.assertEqual(minutes_app.transcript(self.job())[1]['who'], '')
+
+    def test_a_question_about_a_voice_goes_once_the_voice_is_named(self):
+        # 講者 B 推測是主管，請補姓名 stayed under 待處理 after 講者 B was named under 人員 (Vin 2026-10-19)
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = ['講者 B 推測是主管，請補姓名', '講者 C 只有附和，未列與會']
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        data = json.loads((self.job_dir / '講者.json').read_text(encoding='utf-8'))
+        data['groups']['B']['name'] = '主管（營運處處長 Pitt）'
+        (self.job_dir / '講者.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        items = minutes_app.check_items(self.job())
+        self.assertEqual([(c['label'], c.get('voice')) for c in items], [('講者 C 只有附和，未列與會', 'C')])
 
     def test_an_unknown_voice_is_refused(self):
         with self.assertRaises(SystemExit):

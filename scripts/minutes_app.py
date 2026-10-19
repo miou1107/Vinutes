@@ -28,6 +28,9 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py tags <job> <tags JSON>            the meeting's tags, as the user left them
   minutes_app.py rename_project <old> <new>        every meeting of a project, archived ones too, gets the new name;
                                                    a name already in use puts the two projects together
+  minutes_app.py brief <project>                   the project's brief (專案小抄, briefs.py): people, terms, background
+  minutes_app.py save_brief <project> <brief JSON> the brief as the user left it in 專案設定
+  minutes_app.py move_learned <job> <id> <brief|glossary>  a learned word goes to the project's brief or the glossary
   minutes_app.py delete <job>                      刪除: the Doc and the meeting's Drive folder (only its own files
                                                    when another meeting shares the folder) go to Google's trash;
                                                    answers {"trash": [...]}, the files beside the minutes, which the
@@ -50,7 +53,8 @@ Files in the job folder, next to what auto_minutes.py writes:
   封存.json         there when the meeting is archived: {"at"}
   分類.json         the project and tags as the user set them: {"project", "tags", "dropped"}; without "project"
                     the one Claude named in result.json counts. Never in result.json: the mail step rewrites that.
-What is learned goes to $MINUTES_HOME/glossary.md (words) and notes.md (wording), which the next minutes read.
+What is learned goes to the project's brief (words, when the meeting has a project; briefs.py), else
+$MINUTES_HOME/glossary.md, and to notes.md (wording); the next minutes read all three.
 """
 from __future__ import annotations
 
@@ -67,8 +71,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import briefs  # noqa: E402
 import doc_sync  # noqa: E402
 import speakers  # noqa: E402
+from briefs import add_name, same_name  # noqa: E402
 from google_setup import CONFIG, owner, sender_name  # noqa: E402
 from i18n import t  # noqa: E402
 from strings import EN, ZH  # noqa: E402
@@ -418,15 +424,23 @@ def cmd_rename_project(old: str, new: str):
     moved = [job for job in all_jobs() if project_of(job) == old]
     for job in moved:
         save_sorting(job, project=new)
-    names = project_people(new)                       # the people go with the name; two projects become one list
-    for n in project_people(old):
-        names = add_name(names, n)
-    data = read_json(PROJECT_PEOPLE)
-    if old in data:
-        data.pop(old)
-        data[new] = names
-        write_json(PROJECT_PEOPLE, data)
+    briefs.rename(old, new)                          # the people and the brief go with the name; two become one
     out({'project': new, 'count': len(moved)})
+
+
+def cmd_brief(project: str):
+    out({'brief': briefs.load(one_line(project, 30))})
+
+
+def cmd_save_brief(project: str, raw: str):
+    project = one_line(project, 30)
+    try:
+        brief = json.loads(raw)
+    except ValueError:
+        brief = None
+    if not project or not isinstance(brief, dict):
+        sys.exit(t('bad_brief'))
+    out({'brief': briefs.save(project, brief)})
 
 
 # --- archive and delete ------------------------------------------------------------------------
@@ -608,40 +622,16 @@ def attendees(md: str) -> list[str]:
 # 與會人員 line; voices that were given a name join it. What the user adds, confirms or takes off is kept in the
 # meeting's 人員.json and in the project's list (people.json, one list per project, Vin 2026-10-17); nobody leaves a
 # project's list by themselves.
-PROJECT_PEOPLE = CONFIG / 'people.json'
+PROJECT_PEOPLE = briefs.PEOPLE                    # the project's people are also its brief's (專案小抄)
 MEETING_PEOPLE = '人員.json'
 
 
-def name_keys(name: str) -> set[str]:
-    """陳怡君（Jessie） -> {陳怡君（jessie）, 陳怡君, jessie}: the ways the same person is written in minutes."""
-    whole = name.strip().casefold()
-    keys = {whole}
-    found = re.match(r'^(.*?)\s*[（(]\s*(.*?)\s*[）)]\s*$', whole)
-    if found:
-        keys |= {k for k in found.groups() if k}
-    return keys
-
-
-def same_name(a: str, b: str) -> bool:
-    return bool(name_keys(a) & name_keys(b))
-
-
-def add_name(names: list[str], name: str) -> list[str]:
-    name = one_line(name, 30)
-    return names if not name or any(same_name(n, name) for n in names) else names + [name]
-
-
 def project_people(project: str) -> list[str]:
-    data = read_json(PROJECT_PEOPLE)
-    return [n for n in data.get(project) or [] if isinstance(n, str)] if project else []
+    return briefs.people_of(project)
 
 
 def save_project_people(project: str, names: list[str]):
-    if not project:
-        return
-    data = read_json(PROJECT_PEOPLE)
-    data[project] = names
-    write_json(PROJECT_PEOPLE, data)
+    briefs.save_people(project, names)
 
 
 def invited(job: Job) -> list[str]:
@@ -785,7 +775,16 @@ def check_items(job: Job) -> list[dict]:
     done = set(job.state.get('confirmed', []))
     plains = [] if job.missing or not job.md_path else [b.plain for b in doc_sync.parse(job.md)[1]]
     items = []
+    project = project_of(job)
+    listed = project_people(project)
     for raw in job.result.get('check') or []:
+        person = role = ''
+        if isinstance(raw, dict) and 'person' in raw:   # 新的人名: only for a meeting with a project,
+            person = one_line(raw['person'], 30) if isinstance(raw['person'], str) else ''
+            role = one_line(raw.get('role'), 20) if isinstance(raw.get('role'), str) else ''
+            if not project or not person or any(same_name(n, person) for n in listed):   # and not someone it has
+                continue
+            raw = {**raw, 'text': raw.get('text') or t('new_person_label', name=person)}
         if isinstance(raw, dict):
             text, heard, meant = raw.get('text', ''), raw.get('heard', ''), raw.get('meant', '')
         else:
@@ -795,6 +794,8 @@ def check_items(job: Job) -> list[dict]:
                 heard, meant = m.group(1).strip(), m.group(2).strip()
         if text and text not in done:
             item = {'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)}
+            if person and not NOT_A_NAME.search(person):     # a name the project's brief does not have yet
+                item.update(person=person, role=role, find=find_words(plains, person, text))
             who = SPEAKER_GUESS.match(text)
             name = who.group(3).strip() if who else ''
             if who and 0 < len(name) <= 30 and not NOT_A_NAME.search(name):
@@ -1398,7 +1399,17 @@ def remove_line(path: Path, line: str):
 
 
 def remember(job: Job, kind: str, before: str, after: str, source: str) -> dict:
-    """Write one lesson where the next minutes will read it, and keep it so the user can take it back."""
+    """Write one lesson where the next minutes will read it, and keep it so the user can take it back. A word goes
+    into the project's brief when the meeting has a project (Vin 2026-10-19), else into the glossary."""
+    project = project_of(job) if kind == 'term' else ''
+    if project:
+        briefs.add_heard(project, before, after)
+        learned = job.state.setdefault('learned', [])
+        item = {'id': len(learned) + 1, 'kind': kind, 'text': lesson_text(kind, before, after), 'where': 'brief',
+                'project': project, 'heard': before, 'meant': after, 'source': source, 'off': False}
+        learned.append(item)
+        job.log(ai_name(), t('log_learned_brief', text=item['text'], project=project))
+        return item
     if kind == 'term':
         path, line, section = CONFIG / 'glossary.md', glossary_line(before, after), None
         if source == 'edit':
@@ -1413,13 +1424,30 @@ def remember(job: Job, kind: str, before: str, after: str, source: str) -> dict:
     learned = job.state.setdefault('learned', [])
     item = {'id': len(learned) + 1, 'kind': kind, 'text': lesson_text(kind, before, after), 'file': str(path),
             'line': line, 'section': section, 'off': False}
+    if kind == 'term':
+        item.update(where='glossary', heard=before, meant=after, source=source)
     learned.append(item)
     job.log(ai_name(), t('log_learned_term' if kind == 'term' else 'log_learned_pref', text=item['text']))
     return item
 
 
 def public(item: dict) -> dict:
-    return {k: item[k] for k in ('id', 'kind', 'text', 'off')}
+    shown = {k: item[k] for k in ('id', 'kind', 'text', 'off')}
+    if item.get('project') and item.get('kind') == 'term':   # the window offers 專案小抄 or 詞彙表 for it
+        shown.update(where=item.get('where', 'glossary'), project=item['project'])
+    return shown
+
+
+def keep_learned(job: Job, item: dict, on: bool):
+    """Write a lesson where it says it goes, or take it out of there. A project renamed since: the meeting's own."""
+    if item.get('where') == 'brief':
+        if item['project'] not in briefs.projects() and project_of(job):
+            item['project'] = project_of(job)
+        (briefs.add_heard if on else briefs.remove_heard)(item['project'], item['heard'], item['meant'])
+    elif on:
+        add_line(Path(item['file']), item['line'], item.get('section'))
+    else:
+        remove_line(Path(item['file']), item['line'])
 
 
 def cmd_learn(job: Job, quiet: bool = False, where: str = '', log: bool = True) -> list[dict]:
@@ -1471,17 +1499,36 @@ def cmd_learn(job: Job, quiet: bool = False, where: str = '', log: bool = True) 
 def cmd_unlearn(job: Job, item_id: int, off: bool):
     for item in job.state.get('learned', []):
         if item['id'] == item_id:
-            if off:
-                remove_line(Path(item['file']), item['line'])
-                job.log(me(), t('log_unlearn', text=item['text']))
-            else:
-                add_line(Path(item['file']), item['line'], item.get('section'))
-                job.log(me(), t('log_relearn', text=item['text']))
+            keep_learned(job, item, not off)
+            job.log(me(), t('log_unlearn' if off else 'log_relearn', text=item['text']))
             item['off'] = off
             job.save_state()
             out({'learned': public(item)})
             return
     sys.exit(t('item_missing'))
+
+
+def cmd_move_learned(job: Job, item_id: int, where: str):
+    """A learned word goes to the project's brief or to the glossary instead (the two choices under 看過你的修改)."""
+    item = next((i for i in job.state.get('learned', []) if i['id'] == item_id), None)
+    if item and item.get('kind') == 'term' and not item.get('project'):   # learned before the meeting had a project
+        item['project'] = project_of(job)
+    if not item or item.get('kind') != 'term' or not item.get('project') or where not in ('brief', 'glossary'):
+        sys.exit(t('item_missing'))
+    if item.get('where', 'glossary') != where:
+        if not item['off']:
+            keep_learned(job, item, False)
+        item['where'] = where
+        if where == 'glossary':
+            line = glossary_line(item['heard'], item['meant'])
+            item.update(file=str(CONFIG / 'glossary.md'), section=None,
+                        line=line.replace('在錄音程式確認', '在錄音程式預覽改的') if item.get('source') == 'edit' else line)
+        if not item['off']:
+            keep_learned(job, item, True)
+        job.log(me(), t('log_learned_brief' if where == 'brief' else 'log_learned_term', text=item['text'],
+                         project=item['project']))
+        job.save_state()
+    out({'learned': public(item)})
 
 
 # --- pushing an edit -------------------------------------------------------------------------
@@ -1849,6 +1896,9 @@ def ai_edit(job: Job, request: str, label: str):
                       (CONFIG / 'glossary.md', '公司詞彙表.md')):
         if src.is_file():
             shutil.copy(src, work / name)
+    brief = briefs.markdown(project_of(job), job.lang) if project_of(job) else ''
+    if brief:
+        (work / briefs.FILE_NAME).write_text(brief, encoding='utf-8')
     prompt = edit_prompt(job.lang, request)
     try:
         done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env())
@@ -1871,7 +1921,8 @@ def edit_prompt(lang: str, request: str) -> str:
             '- Edit 紀錄.md directly and change only what the request is about; leave every other paragraph exactly as it is.\n'
             '- Keep the layout: headings with #, ##, ###, lists with - or 1., tables with |.\n'
             '- Do not add anything the request does not say; write [__] for anything uncertain.\n'
-            '- Follow 使用者規則.md (the user\'s rules) and 公司詞彙表.md (the company glossary) if present; read 逐字稿.txt '
+            '- Follow 使用者規則.md (the user\'s rules), 公司詞彙表.md (the company glossary) and 專案小抄.md (the '
+            'project\'s people and terms) if present; read 逐字稿.txt '
             '(the transcript) when you need what was actually said.\n'
             f'- When done, write in 說明.txt {reply}.\n'
             '- If the request cannot be done, leave 紀錄.md alone and write the reason in 說明.txt.\n'
@@ -1885,7 +1936,7 @@ def edit_prompt(lang: str, request: str) -> str:
         '- 直接修改 紀錄.md，只改要求提到的地方，其他段落一個字都不要動。\n'
         '- 保留原本的格式：標題用 #、##、###，條列用 - 或 1.，表格用 |。\n'
         '- 要求裡沒有說的事不要自己補，不確定的資訊寫 [__]。\n'
-        '- 用語照 使用者規則.md 與 公司詞彙表.md（有的話）；需要原話時看 逐字稿.txt。\n'
+        '- 用語照 使用者規則.md、公司詞彙表.md 與 專案小抄.md（有的話）；需要原話時看 逐字稿.txt。\n'
         f'- 改完在 說明.txt 寫{reply}。\n'
         '- 這個要求做不到時不要改 紀錄.md，在 說明.txt 寫做不到的原因。\n'
         '這個模式不能執行指令也不能連網，只能讀寫這個資料夾裡的檔案。')
@@ -2015,6 +2066,10 @@ def cmd_confirm(job: Job, label: str):
     job.state.setdefault('confirmed', []).append(label)
     job.log(me(), t('log_confirmed', label=label))
     learned = []
+    who = item.get('person') or item.get('who')
+    if who and project_of(job):                       # 新的人名 or 講者 B 推測是…: the person is the project's
+        briefs.add_person(project_of(job), who, item.get('role', ''))
+        job.log(me(), t('log_brief_person', name=who, project=project_of(job)))
     heard, meant = item['heard'], item['meant']
     tidy = all(0 < len(w) <= 30 and not re.search(r'[|\n\r]', w) for w in (heard, meant))
     if tidy and heard != meant and heard in label and meant in label:
@@ -2258,7 +2313,7 @@ def cmd_locate(job: Job, words: str):
 
 
 TURN: list = []
-CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
+CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'move_learned', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
            'people', 'speaker', 'note', 'replace'}
 NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace'}
 
@@ -2304,6 +2359,10 @@ def main():
         return cmd_update()
     if cmd == 'rename_project' and len(argv) == 3:  # every meeting of the project, not one job
         return cmd_rename_project(argv[1], argv[2])
+    if cmd == 'brief' and len(argv) == 2:           # a project's brief: no meeting, nothing to wait for
+        return cmd_brief(argv[1])
+    if cmd == 'save_brief' and len(argv) == 3:
+        return cmd_save_brief(argv[1], argv[2])
     if len(argv) < 2:
         sys.exit(__doc__)
     job = Job(Path(argv[1]))
@@ -2340,6 +2399,8 @@ def main():
         out({'learned': cmd_learn(job)})
     elif cmd in ('unlearn', 'relearn') and rest:
         cmd_unlearn(job, int(rest[0]), cmd == 'unlearn')
+    elif cmd == 'move_learned' and len(rest) == 2 and rest[0].isdigit():
+        cmd_move_learned(job, int(rest[0]), rest[1])
     elif cmd == 'ask' and rest:
         ai_edit(job, ' '.join(rest).strip(), ' '.join(rest).strip())
     elif cmd == 'quick' and rest and QUICK_NAMES.get(rest[0], rest[0]) in QUICK['en']:

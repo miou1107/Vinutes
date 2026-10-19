@@ -8,12 +8,17 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
                                                    (shown: the token of the preview the user was editing)
   minutes_app.py learn <job>                       what the user changed by hand since the last time -> glossary / notes
   minutes_app.py unlearn <job> <id> | relearn <job> <id>
-  minutes_app.py ask <job> <request>               Claude changes the minutes as asked (restricted, file tools only)
+  minutes_app.py ask <job> <request> [--pictures <json>]  Claude changes the minutes as asked (restricted, file tools
+                                                   only), looking at the pictures pasted with it
   minutes_app.py quick <job> <name>                the same with a preset request (精簡摘要, 完整詳盡, ...)
   minutes_app.py undo <job>                        back to the minutes before the last Claude change
   minutes_app.py reply <job> <comment id> <text>   answer a comment on the Google Doc
   minutes_app.py resolve <job> <comment id>        mark a comment resolved
   minutes_app.py confirm <job> <item>              the user checked one of Claude's guesses (待確認)
+  minutes_app.py skip <job> <item>                 the user leaves a guess as it is: the card goes, nothing learned
+  minutes_app.py drop_voice <job> <letter> [back]  移除講者 X under 人員 (a voice that is no one), or put it back
+  minutes_app.py correct <job> <item> <right>      the user puts a guess right: Claude changes the minutes to it
+  minutes_app.py ask_many <job> <json>             requests still waiting when the window closed, one after another
   minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」 (attachments.py)
   minutes_app.py log <job>                         the activity log, newest first
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
@@ -769,7 +774,7 @@ def cmd_people(job: Job, action: str, name: str, group: str = ''):
 def check_items(job: Job) -> list[dict]:
     """Claude's guesses the user has not confirmed yet. Word guesses carry what was heard and what is meant; a
     guess about a voice carries the voice (speaker), the name and what it said the person does (role)."""
-    done = set(job.state.get('confirmed', []))
+    done = {*job.state.get('confirmed', []), *job.state.get('skipped', []), *job.state.get('corrected', [])}
     plains = [] if job.missing or not job.md_path else [b.plain for b in doc_sync.parse(job.md)[1]]
     items = []
     project = project_of(job)
@@ -1869,7 +1874,10 @@ def cmd_replace(job: Job, old: str, new: str):
 
 # --- Claude changes the minutes --------------------------------------------------------------
 
-def ai_edit(job: Job, request: str, label: str):
+def ai_edit(job: Job, request: str, label: str, pictures: list[Path] = (), settle=None):
+    """The AI changes the minutes as asked. `pictures`: what the user pasted with the sentence, for the AI to look
+    at, never into the minutes. `settle`: run once the change is in (a 待確認 card put right), returns what it
+    learned."""
     sys.path.insert(0, str(SCRIPTS))
     import ai_runner
     from auto_minutes import env
@@ -1896,17 +1904,34 @@ def ai_edit(job: Job, request: str, label: str):
     brief = briefs.markdown(project_of(job), job.lang) if project_of(job) else ''
     if brief:
         (work / briefs.FILE_NAME).write_text(brief, encoding='utf-8')
-    prompt = edit_prompt(job.lang, request)
+    shown = picture_copies(pictures, work)
+    prompt = edit_prompt(job.lang, request, [p.name for p in shown])
     try:
-        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env())
+        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env(), pictures=shown)
     except subprocess.TimeoutExpired:
         sys.exit(t('ai_timeout', ai=ai))
-    return ai_edit_done(job, done, work, md, opened, label, request, learned, ai)
+    return ai_edit_done(job, done, work, md, opened, label, request, learned, ai, settle)
 
 
-def edit_prompt(lang: str, request: str) -> str:
+def picture_copies(pictures: list[Path], work: Path) -> list[Path]:
+    """The pasted pictures in the AI's folder as screenshot-1.png, …: a kind it can open, a size it can read."""
+    import tempfile
+    import attachments
+    shown = []
+    scratch = Path(tempfile.mkdtemp(prefix='pictures-'))
+    try:
+        for n, src in enumerate(pictures, 1):
+            ready = attachments.doc_ready_picture(Path(src), scratch)
+            shown.append(work / f'screenshot-{n}{ready.suffix.lower()}')
+            shutil.copy(ready, shown[-1])
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    return shown
+
+
+def edit_prompt(lang: str, request: str, pictures: list[str] = ()) -> str:
     """What the AI is told for one change. The minutes keep their language; the one line it writes back to the
-    user (說明.txt) is in the app's language."""
+    user (說明.txt) is in the app's language. `pictures`: the screenshots in the folder that came with the request."""
     from i18n import ui_lang
     if lang == 'en':
         reply = ('one sentence in English, under 20 words, saying what you changed, e.g. "Filled in the chair: Amy Chen"'
@@ -1914,7 +1939,9 @@ def edit_prompt(lang: str, request: str) -> str:
         return (
             'You are helping the user change a set of meeting minutes: 紀錄.md in this folder.\n'
             f'The user\'s request: {request}\n'
-            'Rules:\n'
+            + (f'The user attached screenshots: {", ".join(pictures)}. Open them first: what they mark is the place '
+               'to change. The screenshots themselves do not go into 紀錄.md.\n' if pictures else '')
+            + 'Rules:\n'
             '- Edit 紀錄.md directly and change only what the request is about; leave every other paragraph exactly as it is.\n'
             '- Keep the layout: headings with #, ##, ###, lists with - or 1., tables with |.\n'
             '- Do not add anything the request does not say; write [__] for anything uncertain.\n'
@@ -1929,7 +1956,9 @@ def edit_prompt(lang: str, request: str) -> str:
     return (
         '你在幫使用者修改一份會議紀錄，紀錄是這個資料夾裡的 紀錄.md。\n'
         f'使用者的要求：{request}\n'
-        '規則：\n'
+        + (f'使用者附了截圖：{"、".join(pictures)}。先打開來看，截圖上標示的就是要改的地方；截圖本身不要放進 紀錄.md。\n'
+           if pictures else '')
+        + '規則：\n'
         '- 直接修改 紀錄.md，只改要求提到的地方，其他段落一個字都不要動。\n'
         '- 保留原本的格式：標題用 #、##、###，條列用 - 或 1.，表格用 |。\n'
         '- 要求裡沒有說的事不要自己補，不確定的資訊寫 [__]。\n'
@@ -1939,7 +1968,8 @@ def edit_prompt(lang: str, request: str) -> str:
         '這個模式不能執行指令也不能連網，只能讀寫這個資料夾裡的檔案。')
 
 
-def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, request: str, learned: list, ai: str):
+def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, request: str, learned: list, ai: str,
+                 settle=None):
     """The AI's change, checked and saved (or why it was not)."""
     import ai_runner
     with (job.dir / 'log.txt').open('a', encoding='utf-8') as f:
@@ -1949,7 +1979,7 @@ def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, r
         sys.exit(friendly(done.stdout + done.stderr, t('ai_error', ai=ai)))
     new = (work / '紀錄.md').read_text(encoding='utf-8') if (work / '紀錄.md').is_file() else md
     note = (work / '說明.txt').read_text(encoding='utf-8').strip().split('\n')[0][:60] if (work / '說明.txt').is_file() else ''
-    if new.strip() == md.strip():
+    if new.strip() == md.strip():                 # nothing changed: a correction stays on its card to try again
         answer(job, fresh(), html=md != opened, reply=note or t('ai_nothing'), changed=False, learned=learned)
         return
     if not re.search(r'(?m)^#{1,3} ', new) or len(new) < len(md) * 0.15:
@@ -1970,8 +2000,11 @@ def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, r
         reply, result['warning'] = result['warning'], ''
         answer(job, result, reply=reply, changed=False, learned=learned)
         return
-    job.log(ai, t('log_quick', label=t(f'quick_{label}')) if label in QUICK['en'] else
-            t('log_asked', text=cut_words(request)))
+    if settle:                                       # the user's correction: logged as theirs by settle()
+        learned += settle()
+    else:
+        job.log(ai, t('log_quick', label=t(f'quick_{label}')) if label in QUICK['en'] else
+                t('log_asked', text=cut_words(request)))
     job.save_state()
     said = (note or t('ai_done')) + (t('ai_saved_doc') if not result['held'] else '')
     answer(job, result, html=True, reply=said, changed=True, learned=learned)
@@ -2075,6 +2108,85 @@ def cmd_confirm(job: Job, label: str):
     out({'check': check_items(job), 'learned': learned})
 
 
+def cmd_skip(job: Job, label: str):
+    """A guess the user does not want to handle: the card goes, the minutes stay as they are, nothing is learned."""
+    if not any(c['label'] == label for c in check_items(job)):
+        sys.exit(t('check_missing'))
+    job.state.setdefault('skipped', []).append(label)
+    job.log(me(), t('log_skipped', label=label))
+    job.save_state()
+    out({'check': check_items(job)})
+
+
+# what the AI is told when the user puts a guess right, in the minutes' language
+CORRECT = {
+    'zh-TW': {'heard': '逐字稿的「{heard}」在會議記錄裡寫成「{meant}」，正確的是「{right}」。把指這個的「{meant}」都改成'
+                       '「{right}」，其他地方不要動。',
+              'word': '會議記錄裡的「{meant}」有誤，正確的是「{right}」。把指這個的「{meant}」都改成「{right}」，其他地方不要動。',
+              'note': '這一項待確認的內容有誤：「{label}」。正確的是：{right}。照這個修改會議記錄。'},
+    'en': {'heard': 'The transcript\'s “{heard}” is “{meant}” in the minutes, but it is “{right}”. Change “{meant}” to '
+                    '“{right}” wherever it means this, and nothing else.',
+           'word': 'The minutes have “{meant}”, which is wrong: it is “{right}”. Change “{meant}” to “{right}” wherever '
+                   'it means this, and nothing else.',
+           'note': 'This item to confirm is wrong: “{label}”. What is right: {right}. Change the minutes to match.'},
+}
+
+
+def cmd_correct(job: Job, label: str, right: str):
+    """A guess the user put right (修改). A voice gets the name, as in 人員; anything else goes to the AI with the
+    right word. Once the minutes have it the card goes, and the right word is learned the way 確認無誤 learns a
+    guess; if the AI cannot make the change, the card stays."""
+    right = one_line(right, 60)
+    item = next((c for c in check_items(job) if c['label'] == label), None)
+    if not item:
+        sys.exit(t('check_missing'))
+    if not right:
+        sys.exit(t('correct_empty'))
+    if item.get('speaker'):                          # 講者 B 推測是 Kai: the voice is named, the guess settled there
+        return cmd_speaker(job, item['speaker'], right)
+    meant = item.get('person') or item['meant']
+    words = CORRECT.get(job.lang, CORRECT['zh-TW'])
+    kind = 'heard' if item['heard'] and meant else 'word' if meant else 'note'
+    request = words[kind].format(heard=item['heard'], meant=meant, right=right, label=label)
+
+    def settle() -> list:
+        job.state.setdefault('corrected', []).append(label)
+        job.log(me(), t('log_corrected', label=label, right=right))
+        if item.get('person') and project_of(job):    # 新的人名 put right: the right name goes in the brief
+            briefs.add_person(project_of(job), right, item.get('role', ''))
+            job.log(me(), t('log_brief_person', name=right, project=project_of(job)))
+        heard = item['heard']
+        tidy = heard and heard != right and 0 < len(heard) <= 30 and not re.search(r'[|\n\r]', heard)
+        learned = [public(remember(job, 'term', heard, right, 'confirm'))] if tidy else []
+        job.save_state()
+        return learned
+    ai_edit(job, request, label, settle=settle)
+
+
+def cmd_ask_many(job: Job, raw: str):
+    """What was still waiting under 待修改 when the window closed (each {kind: ask | quick | correct, text, item,
+    pictures}), done in order in this one process, which holds the meeting's turn; one that cannot be done is
+    passed over and the rest still go."""
+    try:
+        items = [x for x in json.loads(raw) if isinstance(x, dict)]
+    except ValueError:
+        items = []
+    for x in items:
+        job = Job(job.dir)                           # each one starts from the minutes the one before left
+        kind, text = x.get('kind'), str(x.get('text') or '').strip()
+        try:
+            if kind == 'correct':
+                cmd_correct(job, str(x.get('item') or ''), text)
+            elif kind == 'quick' and QUICK_NAMES.get(text, text) in QUICK['en']:
+                key = QUICK_NAMES.get(text, text)
+                ai_edit(job, QUICK[job.lang][key], key)
+            elif kind == 'ask' and text:
+                pictures = [Path(p) for p in x.get('pictures') or [] if isinstance(p, str)]
+                ai_edit(job, text, text, pictures)
+        except SystemExit as err:
+            job.log(me(), str(err.code or ''))
+
+
 # --- open ------------------------------------------------------------------------------------
 
 def transcript(job: Job) -> list[dict]:
@@ -2100,7 +2212,42 @@ def voices_view(job: Job) -> list[dict]:
     data = speakers.load(job.dir)
     return [{'group': k, 'name': g.get('name') or '', 'label': g.get('name') or f'{t("speaker")} {k}',
              'minutes': max(1, round(g.get('seconds', 0) / 60)), 'sample': g.get('sample') or [0, 0]}
-            for k, g in (data.get('groups') or {}).items()]
+            for k, g in (data.get('groups') or {}).items() if not g.get('off')]
+
+
+def voices_off(job: Job) -> list[dict]:
+    """The voices the user took off, listed under 人員 with 復原."""
+    groups = speakers.load(job.dir).get('groups') or {}
+    return [{'group': k, 'label': f'{t("speaker")} {k}'} for k, g in groups.items() if g.get('off')]
+
+
+ABOUT_VOICE = r'^\s*(?:講者|Speaker)\s*{}(?![A-Za-z])'    # a 待確認 line about one voice: 講者 C 只有附和…
+
+
+def cmd_drop_voice(job: Job, group: str, back: bool = False):
+    """移除講者 X under 人員, or 復原 (Vin 2026-10-19). Taken off, the voice is no one: its menu and card go, the name
+    the minutes gave it is no longer its, and the 待確認 items about it are put aside; the minutes stay as they are."""
+    speakers.take_off(job.dir, group, not back)
+    who = f'{t("speaker")} {group}'
+    kept = job.state.setdefault('voices_off', {})    # what removing put aside, for 復原 to bring back
+    if not back:
+        about = re.compile(ABOUT_VOICE.format(re.escape(group)), re.I)
+        aside = [c['label'] for c in check_items(job) if c.get('speaker') == group or about.match(c['label'])]
+        kept[group] = {'aside': aside, 'name': speaker_map(job).get(group, '')}
+        data = read_json(job.dir / MEETING_PEOPLE)
+        data['speakers'] = {g: n for g, n in speaker_map(job).items() if g != group}
+        write_json(job.dir / MEETING_PEOPLE, data)
+        job.state.setdefault('skipped', []).extend(aside)
+    elif group in kept:
+        was = kept.pop(group)
+        job.state['skipped'] = [x for x in job.state.get('skipped', []) if x not in was.get('aside', [])]
+        if was.get('name'):
+            save_speaker(job, group, was['name'])
+    job.save_state()
+    job.log(me(), t('log_voice_back' if back else 'log_voice_off', who=who), 'speaker')
+    answer(job, fresh(), transcript=transcript(job), voices=voices_view(job), voices_off=voices_off(job),
+           voice_names=speakers.known_names(), people=meeting_people(job), speakers=speakers_shown(job),
+           silent=silent_people(job), log=job.log_entries()[:200])
 
 
 def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
@@ -2181,8 +2328,8 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'log': job.log_entries()[:200], 'mail': mail_defaults(job),
             'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
                      'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
-            'transcript': transcript(job), 'voices': voices_view(job), 'voice_names': speakers.known_names(),
-            'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(),
+            'transcript': transcript(job), 'voices': voices_view(job), 'voices_off': voices_off(job),
+            'voice_names': speakers.known_names(), 'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(),
             'speakers': speakers_shown(job), 'silent': silent_people(job),
             'attach_files': len(linked_files(job, md)), **ai_choice(),
             'audio': str(audio) if audio.is_file() else '',
@@ -2311,8 +2458,8 @@ def cmd_locate(job: Job, words: str):
 
 TURN: list = []
 CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'move_learned', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
-           'people', 'speaker', 'note', 'replace'}
-NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace'}
+           'people', 'speaker', 'note', 'replace', 'skip', 'correct', 'drop_voice', 'ask_many'}
+NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace', 'correct', 'ask_many'}
 
 
 def wait_for_turn(job: Job):
@@ -2399,7 +2546,10 @@ def main():
     elif cmd == 'move_learned' and len(rest) == 2 and rest[0].isdigit():
         cmd_move_learned(job, int(rest[0]), rest[1])
     elif cmd == 'ask' and rest:
-        ai_edit(job, ' '.join(rest).strip(), ' '.join(rest).strip())
+        pictures = []
+        if len(rest) >= 3 and rest[-2] == '--pictures':   # what the user pasted with the sentence (the app checks them)
+            pictures, rest = [Path(p) for p in json.loads(rest[-1]) if isinstance(p, str)], rest[:-2]
+        ai_edit(job, ' '.join(rest).strip(), ' '.join(rest).strip(), pictures)
     elif cmd == 'quick' and rest and QUICK_NAMES.get(rest[0], rest[0]) in QUICK['en']:
         key = QUICK_NAMES.get(rest[0], rest[0])
         ai_edit(job, QUICK[job.lang][key], key)
@@ -2411,6 +2561,14 @@ def main():
         cmd_resolve(job, rest[0])
     elif cmd == 'confirm' and rest:
         cmd_confirm(job, ' '.join(rest))
+    elif cmd == 'ask_many' and rest:
+        cmd_ask_many(job, rest[0])
+    elif cmd == 'drop_voice' and rest:
+        cmd_drop_voice(job, rest[0], len(rest) > 1 and rest[1] == 'back')
+    elif cmd == 'skip' and rest:
+        cmd_skip(job, ' '.join(rest))
+    elif cmd == 'correct' and len(rest) == 2:
+        cmd_correct(job, rest[0], rest[1])
     elif cmd == 'attach' and len(rest) >= 2:
         cmd_attach(job, rest[0], rest[1])
     elif cmd == 'people' and len(rest) >= 2:

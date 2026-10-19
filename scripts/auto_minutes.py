@@ -419,7 +419,12 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
     try:
         done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
                              task='write')
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as err:
+        partial = err.stdout or b''                               # what it said before the time ran out
+        partial = partial.decode('utf-8', 'replace') if isinstance(partial, bytes) else partial
+        if partial:
+            with (job / 'log.txt').open('a', encoding='utf-8') as out:
+                out.write(partial if partial.endswith('\n') else partial + '\n')
         raise Failed(t('write_timeout', n=CLAUDE_TIMEOUT // 60))
     except SystemExit as err:
         raise Failed(str(err))

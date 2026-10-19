@@ -6,7 +6,7 @@
 - The disk tile shows the meetings, the speech-to-text model and Vinutes' own program apart, so it shows whether deleting old meetings frees much space.
 - Each AI is asked for a short report after it runs, so its tokens can be counted. The words the window shows and the meeting's log are the same as before.
 - Meetings recorded before this version are filled in once from their logs: AI runs and their minutes, minutes of audio and mail sent. Tokens and Google requests were not written down then; those days carry a Filled in tag.
-- What is counted stays on the Mac, in ~/.config/vin-meeting-minutes-zh/usage/, as meeting ids and numbers: no titles, names or addresses.
+- What is counted stays on the Mac, in ~/.config/vin-meeting-minutes-zh/usage/, as meeting ids, project names and numbers: no meeting titles, people's names or addresses.
 
 ## v0.4.7 (2026-10-19)
 

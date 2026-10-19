@@ -480,7 +480,8 @@ async function doDelete() {
   if (open && gone.includes(open)) { clearTimeout(S.saveTimer); S.dirty = false; S.sel = null; S.d = null; }
   await loadList();
   if (stuck) { if (S.sheet === 'delete') renderDelete(); if (!S.sel) renderMain(); return; }
-  if (!S.sel) { const next = shownJobs()[0]; if (next) await select(next.id); else renderMain(); }
+  if (!S.sel && S.usage) loadUsage(U.month);          // deleted from 用量統計: it stays, with the new numbers
+  else if (!S.sel) { const next = shownJobs()[0]; if (next) await select(next.id); else renderMain(); }
   if (note) showAlert(note);                        // every meeting went, but a file beside one stayed
 }
 

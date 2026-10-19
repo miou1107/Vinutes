@@ -95,12 +95,43 @@ class Google(Ledger):
         usage.google('https://gmail.googleapis.com/gmail/v1/users/me/messages/send')
         usage.google('https://www.googleapis.com/calendar/v3/users/me/calendarList')
         usage.flush()
-        usage.flush()                                            # a second flush has nothing left to write
-        lines = {e['api']: e for e in usage.events(usage.now().strftime('%Y-%m'))}
+        usage.flush()                                            # a second flush has nothing left to add
+        lines = {e['api']: e for e in usage.events(usage.now().strftime('%Y-%m')) + usage.pending()}
         self.assertEqual(sorted(lines), ['calendar', 'docs', 'drive', 'gmail'])
         self.assertEqual(lines['docs']['n'], 3)
         self.assertEqual(lines['drive']['bytes'], 2048)
         self.assertNotIn('bytes', lines['docs'])
+
+
+class GoogleHour(Ledger):
+    """The window refreshes every 15 seconds, each time in a new process: requests wait in usage/google.json and
+    become one line per meeting and API per hour, so the record does not grow by a line a refresh."""
+
+    def test_many_processes_in_one_hour_make_one_line(self):
+        os.environ['VINUTES_MEETING'] = '20261019-105319'
+        for n in (3, 2):                                         # two refreshes, two processes
+            for _ in range(n):
+                usage.google('https://docs.googleapis.com/v1/documents/abc')
+            usage.flush()
+        month = usage.now().strftime('%Y-%m')
+        self.assertEqual([e for e in usage.events(month) if e['kind'] == 'google'], [])
+        [waiting] = usage.pending()
+        self.assertEqual((waiting['meeting'], waiting['api'], waiting['n']), ('20261019-105319', 'docs', 5))
+        hold = json.loads((usage.FOLDER / 'google.json').read_text())
+        hold['hour'] = '2000-01-01T00'                           # an hour later: the next flush writes the line
+        (usage.FOLDER / 'google.json').write_text(json.dumps(hold))
+        usage.google('https://docs.googleapis.com/v1/documents/abc')
+        usage.flush()
+        [line] = [e for e in usage.events(hold['at'][:7]) if e['kind'] == 'google']
+        self.assertEqual(line['n'], 5)
+        self.assertEqual(usage.pending()[0]['n'], 1)
+
+    def test_the_month_counts_what_still_waits(self):
+        os.environ['VINUTES_MEETING'] = '20261019-105319'
+        usage.google('https://docs.googleapis.com/v1/documents/abc')
+        usage.flush()
+        found = usage.summary(usage.now().strftime('%Y-%m'), [])
+        self.assertEqual(found['total']['google'], 1)
 
 
 class AiRun(Ledger):
@@ -120,6 +151,22 @@ class AiRun(Ledger):
         usage.ai_run('edit', 'codex', 3, 1, None, 'not logged in')
         [line] = usage.events(usage.now().strftime('%Y-%m'))
         self.assertFalse(line['limit'])
+
+
+class NeverRaises(Ledger):
+    """Counting must not stop the meeting's work, whatever is on disk."""
+
+    def test_begin_with_recordings_that_cannot_be_read(self):
+        shutil.rmtree(usage.RECORDINGS)
+        usage.RECORDINGS.write_text('a file where the folder should be')
+        usage.begin()
+
+    def test_google_and_ai_runs_with_a_folder_that_cannot_be_written(self):
+        usage.FOLDER = self.root / 'not-a-folder'
+        usage.FOLDER.write_text('x')
+        usage.google('https://docs.googleapis.com/v1/documents/abc')
+        usage.flush()
+        usage.ai_run('edit', 'claude', 1, 1, None, 'usage limit reached')
 
 
 class Begin(Ledger):
@@ -181,6 +228,28 @@ class AiReport(unittest.TestCase):
         self.assertEqual(ai_runner.read_report('claude', 'Warning: slow disk\n' + CLAUDE_SAID),
                          ('Warning: slow disk\nOK', {'in': 3910, 'cached': 120, 'out': 4}))
 
+    def test_a_claude_error_without_a_result_keeps_its_words(self):
+        import ai_runner
+        said = '{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Prompt is too long"]}\n'
+        text, tokens = ai_runner.read_report('claude', said)
+        self.assertIn('Prompt is too long', text)
+
+    def test_an_antigravity_error_keeps_its_words(self):
+        import ai_runner
+        text, _ = ai_runner.read_report('antigravity', '{"status":"ERROR","response":"","error":"quota exceeded"}\n')
+        self.assertIn('quota exceeded', text)
+
+    def test_a_codex_line_that_is_no_event_is_kept(self):
+        import ai_runner
+        text, _ = ai_runner.read_report('codex', 'Error: not logged in\n' + CODEX_SAID)
+        self.assertIn('Error: not logged in', text)
+        self.assertIn('Changed the chair.', text)
+
+    def test_a_report_with_odd_numbers_never_raises(self):
+        import ai_runner
+        text, tokens = ai_runner.read_report('claude', '{"result":"OK","usage":{"input_tokens":"many"}}\n')
+        self.assertEqual(text, 'OK')
+
     def test_each_ai_is_asked_for_its_report(self):
         import ai_runner
         claude = ai_runner.report_flags('claude', ['claude', '-p', 'do it', '--tools', 'Read'])
@@ -227,6 +296,31 @@ class AiRunCounted(Ledger):
         finally:
             ai_runner.find = saved
         self.assertEqual(usage.events(usage.now().strftime('%Y-%m')), [])
+
+
+class WriteUpTimeout(unittest.TestCase):
+    def test_what_the_ai_said_before_the_time_ran_out_goes_to_the_log(self):
+        import subprocess
+        import ai_runner
+        import auto_minutes
+        root = Path(tempfile.mkdtemp(prefix='write-'))
+        job, work, folder = root / 'job', root / 'work', root / 'minutes'
+        for d in (job, work, folder):
+            d.mkdir()
+        saved = ai_runner.run, auto_minutes.prompt
+
+        def late(*a, **kw):
+            raise subprocess.TimeoutExpired(['claude'], 60, output=b'Read the transcript\nWriting the minutes', stderr=None)
+        ai_runner.run = late
+        auto_minutes.prompt = lambda *a: 'write the minutes'
+        try:
+            with self.assertRaises(auto_minutes.Failed):
+                auto_minutes.write_minutes(job, work, {}, folder)
+        finally:
+            ai_runner.run, auto_minutes.prompt = saved
+            log = (job / 'log.txt').read_text(encoding='utf-8')
+            shutil.rmtree(root, ignore_errors=True)
+        self.assertIn('Writing the minutes', log)
 
 
 class WriteUpLog(unittest.TestCase):
@@ -432,6 +526,26 @@ class Fill(Ledger):
         usage.begin()
         [mail] = [e for e in usage.fill() if e['kind'] == 'mail']
         self.assertEqual((mail['to'], mail['at'][:16]), (3, '2026-10-16T17:02'))
+
+    def test_a_mail_sent_after_the_record_began_is_not_filled_in(self):
+        d = self.meeting('20261016-153005', log='')
+        usage.begin()
+        (d / 'result.json').write_text(json.dumps({'sent_at': usage.now().isoformat(timespec='seconds'),
+                                                   'mail': {'to': ['a@example.com']}}))   # counted live
+        self.assertEqual([e for e in usage.fill() if e['kind'] == 'mail'], [])
+
+    def test_a_meeting_deleted_before_the_usage_is_opened_is_still_filled_in(self):
+        d = self.meeting('20261016-153005', log=OLD_LOG)
+        usage.begin()
+        shutil.rmtree(d)                                         # deleted to free space, before the window shows usage
+        self.assertEqual(len([e for e in usage.fill() if e['kind'] == 'ai']), 3)
+
+    def test_one_odd_meeting_does_not_stop_the_others(self):
+        odd = self.meeting('20261014-103500', log='')
+        (odd / 'job.json').write_text(json.dumps({'started': '2026-10-14T10:35:00+08:00', 'ended': '2026-10-14T10:45:30'}))
+        self.meeting('20261016-153005', log=OLD_LOG)
+        usage.begin()
+        self.assertEqual({e['meeting'] for e in usage.fill()}, {'20261016-153005'})
 
     def test_a_meeting_whose_log_never_named_its_length_gets_it_from_its_times(self):
         d = self.meeting('20261014-103500', log='[10:50:00] claude in /x/整理\n[10:51:00] claude exited 0\n')

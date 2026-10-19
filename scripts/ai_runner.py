@@ -222,17 +222,33 @@ def report_flags(key: str, cmd: list[str]) -> list[str]:
 
 def read_report(key: str, out: str) -> tuple[str, dict | None]:
     """The AI's answer as plain text, as it printed it without a report (log.txt and the messages read that), and
-    its tokens {"in", "cached", "out"}; output that is no report comes back as it is, with no tokens."""
+    its tokens {"in", "cached", "out"}. A report of an error keeps all its words; output that is no report, or one
+    that can't be read, comes back as it is, with no tokens."""
+    try:
+        return report_of(key, out or '')
+    except Exception:
+        return out, None
+
+
+def report_of(key: str, out: str) -> tuple[str, dict | None]:
     def number(d: dict, *names: str) -> int:
-        return sum(int(d.get(n) or 0) for n in names)
+        total = 0
+        for n in names:
+            try:
+                total += int(d.get(n) or 0)
+            except (TypeError, ValueError):
+                pass
+        return total
     if key == 'codex':
         said, tokens, any_event = [], None, False
-        for line in (out or '').splitlines():
+        for line in out.splitlines():
             try:
                 event = json.loads(line)
             except ValueError:
-                continue
+                event = None
             if not isinstance(event, dict):
+                if line.strip():
+                    said.append(line)                    # a line that is no event: an error printed before them
                 continue
             any_event = True
             item = event.get('item') if isinstance(event.get('item'), dict) else {}
@@ -247,7 +263,7 @@ def read_report(key: str, out: str) -> tuple[str, dict | None]:
                 cached = number(u, 'cached_input_tokens')
                 tokens = {'in': number(u, 'input_tokens') - cached, 'cached': cached, 'out': number(u, 'output_tokens')}
         return ('\n'.join(said), tokens) if any_event else (out, None)
-    lines = (out or '').strip().splitlines()
+    lines = out.strip().splitlines()
     try:                                              # the report is the last line; anything before it is kept
         report = json.loads(lines[-1]) if lines else None
     except ValueError:
@@ -258,13 +274,18 @@ def read_report(key: str, out: str) -> tuple[str, dict | None]:
     u = report.get('usage') if isinstance(report.get('usage'), dict) else None
     if key == 'claude':
         text = report.get('result')
+        failed = report.get('is_error') or report.get('subtype') not in (None, 'success')
         tokens = u and {'in': number(u, 'input_tokens', 'cache_creation_input_tokens'),
                         'cached': number(u, 'cache_read_input_tokens'), 'out': number(u, 'output_tokens')}
     else:
         text = report.get('response') if report.get('response') is not None else report.get('error')
+        failed = report.get('status') not in (None, 'SUCCESS')
         tokens = u and {'in': number(u, 'input_tokens'), 'cached': number(u, 'cache_read_tokens'),
                         'out': number(u, 'output_tokens')}
-    return before + (text if isinstance(text, str) else json.dumps(text, ensure_ascii=False) if text else ''), tokens
+    text = text if isinstance(text, str) else json.dumps(text, ensure_ascii=False) if text else ''
+    if failed:                                        # every word of the error, for the log and friendly()
+        text = (text + '\n' + lines[-1]).strip()
+    return before + text, tokens
 
 
 def run(prompt: str, folder: Path, *, write: bool, timeout: int, env: dict, stdout=subprocess.PIPE,

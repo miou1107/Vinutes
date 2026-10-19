@@ -450,6 +450,12 @@ class Fill(Ledger):
         self.assertEqual(usage.fill(), first)
         self.assertEqual(usage.events('2026-10', 'filled.jsonl'), first)
 
+    def test_the_older_wording_of_a_write_up_counts_too(self):
+        self.meeting('20261014-103500', log='[22:28:59] claude -p in /x/project\n[22:33:52] claude exited 0\n')
+        usage.begin()
+        [write] = [e for e in usage.fill() if e['kind'] == 'ai']
+        self.assertEqual(write['s'], 293)
+
     def test_a_meeting_recorded_after_the_record_began_is_not_filled_in(self):
         usage.begin()
         self.meeting('20261020-090000', log=OLD_LOG)
@@ -582,6 +588,17 @@ class UsageCommand(Ledger):
         self.assertEqual(found['disk']['meetings'], day['disk'])
         self.assertEqual(set(found['disk']), {'meetings', 'speech', 'program'})
         self.assertEqual(found['projects'][0]['items'][0]['title'], '週會')
+
+    def test_the_speech_model_is_measured_where_its_files_really_are(self):
+        model = self.root / 'models--whisper'
+        (model / 'blobs').mkdir(parents=True)
+        (self.root / 'elsewhere').mkdir()
+        (self.root / 'elsewhere' / 'w').write_bytes(b'w' * 4000)
+        (model / 'blobs' / 'abc').symlink_to(self.root / 'elsewhere' / 'w')     # a blob kept outside the folder
+        (model / 'snapshots' / 'h').mkdir(parents=True)
+        (model / 'snapshots' / 'h' / 'weights.safetensors').symlink_to(model / 'blobs' / 'abc')
+        (model / 'snapshots' / 'h' / 'config.json').write_bytes(b'c' * 100)
+        self.assertEqual(self.app.model_size(model), 4100)
 
     def test_a_month_that_is_not_one_becomes_this_month(self):
         self.app.cmd_usage('../../x')

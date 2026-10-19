@@ -40,7 +40,7 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
                                                    when another meeting shares the folder) go to Google's trash;
                                                    answers {"trash": [...]}, the files beside the minutes, which the
                                                    app moves to the Mac's Trash after the job folder
-  minutes_app.py version <installed>               the app's version and the newest on GitHub (looked up once a day)
+  minutes_app.py version <installed>               the app's version and the newest on GitHub (looked up once an hour)
   minutes_app.py update                            git pull this folder, then recorder/install.sh in the background,
                                                    which quits the app, builds the new one and opens it
   minutes_app.py usage [YYYY-MM]                   用量統計: what the month's meetings used, by day and by project
@@ -586,7 +586,8 @@ APP_UPDATE = CONFIG / 'vinutes-update.json'   # the newest version on GitHub and
 
 def cmd_version(installed: str):
     """The list's corner: the version this app was built from, and whether GitHub has a newer one. GitHub is asked
-    at most once a day; offline, the last answer stands. Only the public VERSION file is fetched."""
+    at most once an hour, so a version released today shows today (Vin 2026-10-19); offline, the last answer stands.
+    Only the public VERSION file is fetched."""
     import check_update
     try:
         state = json.loads(APP_UPDATE.read_text(encoding='utf-8'))
@@ -594,7 +595,8 @@ def cmd_version(installed: str):
         state = {}
     if not isinstance(state, dict):
         state = {}
-    if datetime.now().timestamp() - float(state.get('checked_at') or 0) > 24 * 3600:
+    # the window asks every hour and the time is stamped after the download: a little under an hour counts too
+    if datetime.now().timestamp() - float(state.get('checked_at') or 0) > 3600 - 300:
         try:
             newest = check_update.version_of(check_update.fetch('VERSION'))
             state = {'checked_at': datetime.now().timestamp(), 'newest': '.'.join(map(str, newest)) if newest else ''}

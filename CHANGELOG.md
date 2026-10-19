@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.10 (2026-10-19)
+
+- Update in the corner of the meeting list shows within an hour of a new version, no longer the next day: GitHub is asked about the newest version once an hour instead of once a day.
+- An item under To confirm that was answered elsewhere (a voice named under People) leaves the side panel even while a Fix box is open on another item.
+
 ## v0.4.9 (2026-10-19)
 
 - Usage (用量統計), in the meeting window above the version and in the menu-bar panel between All Meetings and Settings, shows a month by day or by project: meetings and minutes of audio, AI runs (write-ups and edits) with their minutes and tokens, Google requests, emails sent, and disk. A day with a run stopped by the AI's usage limit says so. A project opens to its meetings, and a meeting opens from there.

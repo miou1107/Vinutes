@@ -252,7 +252,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         bars.show(level: level, paused: paused)
     }
 
-    /// Whether GitHub has a newer version: the same check the meeting window's corner uses (at most once a day).
+    /// Whether GitHub has a newer version: the same check the meeting window's corner uses (at most once an hour).
     private func checkVersion() {
         let mine = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         owner?.runScript("minutes_app.py", ["version", mine]) { [weak self] code, out in

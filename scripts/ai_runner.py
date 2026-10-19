@@ -18,8 +18,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
+import usage
 from google_setup import CONFIG, read_settings, setting
 from i18n import t
 
@@ -207,22 +209,89 @@ def command(key: str, exe: str, prompt: str, folder: Path, write: bool) -> tuple
     return ['/usr/bin/sandbox-exec', '-f', path, exe, '-p', prompt, '--add-dir', str(folder)], Path(path)
 
 
+def report_flags(key: str, cmd: list[str]) -> list[str]:
+    """Each AI asked to end with a report of its answer and the tokens it used (read_report): Codex's flag goes
+    before the prompt, which stays last."""
+    if key == 'codex':
+        return [*cmd[:-1], '--json', cmd[-1]]
+    return [*cmd, '--output-format', 'json']
+
+
+def read_report(key: str, out: str) -> tuple[str, dict | None]:
+    """The AI's answer as plain text, as it printed it without a report (log.txt and the messages read that), and
+    its tokens {"in", "cached", "out"}; output that is no report comes back as it is, with no tokens."""
+    def number(d: dict, *names: str) -> int:
+        return sum(int(d.get(n) or 0) for n in names)
+    if key == 'codex':
+        said, tokens, any_event = [], None, False
+        for line in (out or '').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            any_event = True
+            item = event.get('item') if isinstance(event.get('item'), dict) else {}
+            if event.get('type') == 'item.completed' and item.get('type') == 'agent_message':
+                said.append(str(item.get('text') or ''))
+            elif event.get('type') == 'error':
+                said.append(str(event.get('message') or ''))
+            elif event.get('type') == 'turn.failed' and isinstance(event.get('error'), dict):
+                said.append(str(event['error'].get('message') or ''))
+            elif event.get('type') == 'turn.completed' and isinstance(event.get('usage'), dict):
+                u = event['usage']
+                cached = number(u, 'cached_input_tokens')
+                tokens = {'in': number(u, 'input_tokens') - cached, 'cached': cached, 'out': number(u, 'output_tokens')}
+        return ('\n'.join(said), tokens) if any_event else (out, None)
+    lines = (out or '').strip().splitlines()
+    try:                                              # the report is the last line; anything before it is kept
+        report = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        return out, None
+    if not isinstance(report, dict):
+        return out, None
+    before = ''.join(line + '\n' for line in lines[:-1])
+    u = report.get('usage') if isinstance(report.get('usage'), dict) else None
+    if key == 'claude':
+        text = report.get('result')
+        tokens = u and {'in': number(u, 'input_tokens', 'cache_creation_input_tokens'),
+                        'cached': number(u, 'cache_read_input_tokens'), 'out': number(u, 'output_tokens')}
+    else:
+        text = report.get('response') if report.get('response') is not None else report.get('error')
+        tokens = u and {'in': number(u, 'input_tokens'), 'cached': number(u, 'cache_read_tokens'),
+                        'out': number(u, 'output_tokens')}
+    return before + (text if isinstance(text, str) else json.dumps(text, ensure_ascii=False) if text else ''), tokens
+
+
 def run(prompt: str, folder: Path, *, write: bool, timeout: int, env: dict, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, key: str | None = None) -> subprocess.CompletedProcess:
-    """The chosen AI, working in `folder` only. SystemExit when it is not installed."""
+        stderr=subprocess.PIPE, key: str | None = None, task: str = '') -> subprocess.CompletedProcess:
+    """The chosen AI, working in `folder` only. SystemExit when it is not installed. stdout is the answer as plain
+    text; with a `task` (write | edit | test) the run is counted (usage.py)."""
     key = key or chosen()
     exe = find(key)
     if not exe:
         raise SystemExit(t('ai_missing', ai=AIS[key]))
     cmd, profile = command(key, exe, prompt, folder, write)
+    cmd = report_flags(key, cmd)
     scratch = folder / '.ai-tmp'
     if profile:                                       # agy's temporary files stay inside the folder it may write
         scratch.mkdir(exist_ok=True)
         env = {**env, 'TMPDIR': str(scratch) + '/'}
+    began = time.time()
     try:
-        return subprocess.run(cmd, cwd=folder, env=env, stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL,
+        done = subprocess.run(cmd, cwd=folder, env=env, stdout=stdout, stderr=stderr, stdin=subprocess.DEVNULL,
                               text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if task:
+            usage.ai_run(task, key, time.time() - began, -1, None)
+        raise
     finally:
         if profile:
             profile.unlink(missing_ok=True)
             shutil.rmtree(scratch, ignore_errors=True)
+    text, tokens = read_report(key, done.stdout) if isinstance(done.stdout, str) else ('', None)
+    done.stdout = text
+    if task:
+        usage.ai_run(task, key, time.time() - began, done.returncode, tokens, text + '\n' + (done.stderr or ''))
+    return done

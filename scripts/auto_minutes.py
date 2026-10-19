@@ -411,21 +411,19 @@ def write_minutes(job: Path, work: Path, meta: dict, folder: Path, lang: str = '
     ai = ai_runner.chosen()
     # the agent works in its own folder and can write nothing else; the program copies the minutes out
     log(job, f'{ai} in {work}')
-    began = (job / 'log.txt').stat().st_size if (job / 'log.txt').is_file() else 0   # what this run says starts here
+    try:
+        done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
+                             task='write')
+    except subprocess.TimeoutExpired:
+        raise Failed(t('write_timeout', n=CLAUDE_TIMEOUT // 60))
+    except SystemExit as err:
+        raise Failed(str(err))
+    said = done.stdout + done.stderr                              # what the AI said, as plain text
     with (job / 'log.txt').open('a', encoding='utf-8') as out:
-        try:
-            done = ai_runner.run(prompt(work, meta, folder, lang, spoken), work, write=True, timeout=CLAUDE_TIMEOUT, env=env(),
-                                 stdout=out, stderr=subprocess.STDOUT)
-        except subprocess.TimeoutExpired:
-            raise Failed(t('write_timeout', n=CLAUDE_TIMEOUT // 60))
-        except SystemExit as err:
-            raise Failed(str(err))
+        out.write(said if said.endswith('\n') or not said else said + '\n')
     log(job, f'{ai} exited {done.returncode}')
     if done.returncode:
-        with (job / 'log.txt').open('rb') as said:                # not an earlier run's limit message
-            said.seek(began)
-            text = said.read().decode('utf-8', 'replace')[-3000:]
-        raise Failed(friendly(text,
+        raise Failed(friendly(said[-3000:],
                               t('write_error', ai=ai_runner.name(ai))))
 
 

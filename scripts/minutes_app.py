@@ -617,11 +617,11 @@ def attendees(md: str) -> list[str]:
 
 
 # --- 人員: who was at a meeting --------------------------------------------------------------------
-# A meeting's list starts from the people invited to it (the calendar, where ERP room bookings put their invitees),
-# the project's own list (everyone confirmed or added in its earlier meetings) and the names on the minutes'
-# 與會人員 line; voices that were given a name join it. What the user adds, confirms or takes off is kept in the
-# meeting's 人員.json and in the project's list (people.json, one list per project, Vin 2026-10-17); nobody leaves a
-# project's list by themselves.
+# A meeting's list starts from the people invited to it (the calendar, where ERP room bookings put their invitees)
+# and the names on the minutes' 與會人員 line; voices that were given a name join it. What the user adds, confirms or
+# takes off is kept in the meeting's 人員.json. Someone added or named also joins the project's list (people.json,
+# the people of its brief); taking someone off a meeting only says they weren't there, and they stay in the brief
+# (Vin 2026-10-19: the brief lists the project's people, not each meeting's, so it starts no meeting's list either).
 PROJECT_PEOPLE = briefs.PEOPLE                    # the project's people are also its brief's (專案小抄)
 MEETING_PEOPLE = '人員.json'
 
@@ -654,11 +654,9 @@ def meeting_people(job: Job) -> list[str]:
     data = read_json(job.dir / MEETING_PEOPLE)
     if isinstance(data.get('people'), list):
         names = [n for n in data['people'] if isinstance(n, str)]
-    else:                                             # first time: from the invitation, the project and the minutes
+    else:                                             # first time: from the invitation and the minutes
         names = []
-        guests = invited(job)                         # who was invited comes first (Vin: 以當場會議邀請的人為主);
-        first = guests or project_people(project_of(job))   # with no invitation, the project's own list
-        for n in first + attendees(job.md if not job.missing else ''):
+        for n in invited(job) + attendees(job.md if not job.missing else ''):   # 以當場會議邀請的人為主
             names = add_name(names, n)
     for n in speakers_shown(job).values():          # a voice with a name was there
         if n:
@@ -752,8 +750,7 @@ def cmd_people(job: Job, action: str, name: str, group: str = ''):
         save_project_people(project, add_name(project_people(project), name))
         job.log(me(), t('log_people_add', name=name), 'speaker')
     elif action == 'remove':
-        names = [n for n in names if not same_name(n, name)]
-        save_project_people(project, [n for n in project_people(project) if not same_name(n, name)])
+        names = [n for n in names if not same_name(n, name)]      # this meeting only: the brief keeps them
         for group, shown in speakers_shown(job).items():   # the voice with this name is a 講者 X again, in the minutes too
             if shown and same_name(shown, name):
                 speakers.clear_name(job.dir, group)

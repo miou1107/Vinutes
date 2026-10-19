@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.6 (2026-10-19)
+
+- The minutes put the slides shown in a meeting in Meeting Details, right under the attendees, as Slides: [deck title](link), so readers find them first. When the AI can't find the link it writes Slides: [__], which shows under To fill in until someone pastes the link. Other files stay on their own Materials line.
+
 ## v0.4.5 (2026-10-19)
 
 - Each project has a brief. The gear by the project's name opens Project settings on its first page, Brief: the project's people with what each one does, its terms with what they mean, and a few lines of background. The people are the same list as the People tab; the project's name and moving a meeting are on the second page.

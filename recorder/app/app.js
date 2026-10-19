@@ -1265,7 +1265,7 @@ function renderDocsRail(el) {
         + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t(c.person ? 'new_person' : 'to_confirm'))}</span>${c.person
             ? `<div class="text"><b>${esc(c.person)}</b>${c.role ? `<span class="role">${esc(c.role)}</span>` : ''}</div>` : `<div class="text">${esc(c.label)}</div>`}
           ${S.fixing === c.label ? `<div class="fix"><input data-c="${i}" value="${esc(S.fixText)}" aria-label="${esc(t('fix'))}"
-              placeholder="${esc(t(c.person || c.speaker ? 'name_ph' : 'fix_ph'))}">
+              placeholder="${esc(t(c.person || c.speaker || c.voice ? 'name_ph' : 'fix_ph'))}">
               <button class="fixb blue" data-save="${i}">${esc(t('save'))}</button><button class="fixb ghost" data-cancel="${i}">${esc(t('cancel'))}</button></div>`
             : `<div class="acts"><button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button>
               <button class="fixb" data-fix="${i}">${esc(t('fix'))}</button><button class="fixb ghost" data-skip="${i}">${esc(t('skip'))}</button></div>`}</div>`).join('')
@@ -1990,7 +1990,7 @@ function renderFoot() {
     ${check.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--yellow-label)">${esc(t('to_confirm'))} ${check.length}</span>
       <div class="chips">${check.map((c, i) => (S.fixing === c.label
         ? `<span class="chip yellow fixchip"><span>${esc(c.label)}</span><input data-c="${i}" value="${esc(S.fixText)}" aria-label="${esc(t('fix'))}"
-            placeholder="${esc(t(c.person || c.speaker ? 'name_ph' : 'fix_ph'))}"><button class="okbtn" data-save="${i}" title="${esc(t('save'))}"
+            placeholder="${esc(t(c.person || c.speaker || c.voice ? 'name_ph' : 'fix_ph'))}"><button class="okbtn" data-save="${i}" title="${esc(t('save'))}"
             aria-label="${esc(t('save'))}">${ICON.checkSmall}</button><button class="okbtn skip" data-cancel="${i}" title="${esc(t('cancel'))}"
             aria-label="${esc(t('cancel'))}">✕</button></span>`
         : `<span class="chip yellow"><button class="cl" data-fix="${i}" title="${esc(t('fix'))}">${esc(c.label)}</button>

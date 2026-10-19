@@ -6,13 +6,14 @@ The record: $MINUTES_HOME/usage/<YYYY-MM>.jsonl, one JSON object per line, appen
   kind ai          task (write | edit | test), ai, s (seconds), ok, limit (stopped by the AI's usage limit),
                    tokens {"in", "cached", "out"} when the AI said
   kind google      api (docs | drive | gmail | calendar | people | other), n requests, bytes uploaded; one line per
-                   API per process, written when the process ends
+                   meeting and API per hour: each process adds its requests to usage/google.json when it ends, and
+                   the hour's counts become lines once the hour is over
   kind mail        to (recipients)
   kind transcribe  s, audio (seconds of recording)
   kind speakers    s
 "meeting" is the recording folder's name ($VINUTES_MEETING, set by minutes_app.py and auto_minutes.py; '' for
-setup); "project" is the meeting's project at that moment, kept for meetings deleted later. Only ids and numbers:
-no titles, names, addresses or requests.
+setup); "project" is the meeting's project at that moment, kept for meetings deleted later. Only meeting ids,
+project names and numbers: no meeting titles, people's names, addresses or requests.
 
 usage/started.json: when the record began and how long each meeting's log.txt was then. Meetings recorded before
 are filled in once from their logs (fill), never counting twice what the record has.
@@ -20,6 +21,7 @@ are filled in once from their logs (fill), never counting twice what the record 
 from __future__ import annotations
 
 import atexit
+import fcntl
 import json
 import os
 import re
@@ -68,23 +70,32 @@ def begin() -> dict:
     if known.get('at'):
         return known
     logs = {}
-    if RECORDINGS.is_dir():
-        for d in RECORDINGS.iterdir():
+    try:
+        for d in RECORDINGS.iterdir() if RECORDINGS.is_dir() else []:
             if MEETING_ID.match(d.name) and (d / 'job.json').is_file():
                 logs[d.name] = (d / 'log.txt').stat().st_size if (d / 'log.txt').is_file() else 0
+    except OSError:
+        pass
     started = {'at': now().isoformat(timespec='seconds'), 'logs': logs}
+    won = False
     try:
         FOLDER.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f'started.{os.getpid()}.tmp')
         tmp.write_text(json.dumps(started, ensure_ascii=False), encoding='utf-8')
         try:
             os.link(tmp, path)                       # the first process to get here wins; the others read its file
+            won = True
         except FileExistsError:
             pass
         finally:
             tmp.unlink(missing_ok=True)
     except OSError:
         return started
+    if won:                                          # filled in now, before a meeting is deleted or a log rotated
+        try:
+            fill()
+        except Exception:
+            pass
     return read_json(path) or started
 
 
@@ -93,16 +104,19 @@ def record(kind: str, **fields):
     try:
         begin()
         mid = meeting()
-        line = {'at': now().isoformat(timespec='seconds'), 'kind': kind, 'meeting': mid, 'project': project(mid),
-                **fields}
-        FOLDER.mkdir(parents=True, exist_ok=True)
-        fd = os.open(FOLDER / f'{line["at"][:7]}.jsonl', os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-        try:
-            os.write(fd, (json.dumps(line, ensure_ascii=False) + '\n').encode('utf-8'))   # whole lines beside others
-        finally:
-            os.close(fd)
+        write_line({'at': now().isoformat(timespec='seconds'), 'kind': kind, 'meeting': mid, 'project': project(mid),
+                    **fields})
     except Exception:
         pass
+
+
+def write_line(line: dict):
+    FOLDER.mkdir(parents=True, exist_ok=True)
+    fd = os.open(FOLDER / f'{line["at"][:7]}.jsonl', os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        os.write(fd, (json.dumps(line, ensure_ascii=False) + '\n').encode('utf-8'))   # whole lines beside others
+    finally:
+        os.close(fd)
 
 
 def events(month: str, name: str | None = None) -> list[dict]:
@@ -131,11 +145,14 @@ def limited(text: str) -> bool:
 
 
 def ai_run(task: str, ai: str, seconds: float, code: int, tokens: dict | None, text: str = ''):
-    fields = {'task': task, 'ai': ai, 's': round(seconds, 1), 'ok': code == 0,
-              'limit': bool(code) and limited(text)}
-    if tokens:
-        fields['tokens'] = tokens
-    record('ai', **fields)
+    try:
+        fields = {'task': task, 'ai': ai, 's': round(seconds, 1), 'ok': code == 0,
+                  'limit': bool(code) and limited(text)}
+        if tokens:
+            fields['tokens'] = tokens
+        record('ai', **fields)
+    except Exception:
+        pass
 
 
 def api_of(url: str) -> str:
@@ -162,9 +179,47 @@ def google(url: str, sent: int = 0):
     count[1] += sent or 0
 
 
+def held(hold: dict) -> list[dict]:
+    """The record's lines for the requests waiting in usage/google.json."""
+    return [{'at': hold.get('at', ''), 'kind': 'google', 'meeting': c.get('meeting', ''), 'project': c.get('project', ''),
+             'api': c.get('api', 'other'), 'n': c.get('n', 0), **({'bytes': c['bytes']} if c.get('bytes') else {})}
+            for c in (hold.get('counts') or {}).values() if isinstance(c, dict)]
+
+
+def pending() -> list[dict]:
+    return held(read_json(FOLDER / 'google.json'))
+
+
 def flush():
-    for api, (n, sent) in list(COUNTS.items()):
-        record('google', api=api, n=n, **({'bytes': sent} if sent else {}))
+    """This process's requests into usage/google.json, which keeps the current hour's counts per meeting and API;
+    the window's refresh starts a process every 15 seconds, and each would otherwise write a line. When the hour has
+    changed, the counts kept become lines of the record first."""
+    if not COUNTS:
+        return
+    try:
+        begin()
+        mid = meeting()
+        name = project(mid)
+        FOLDER.mkdir(parents=True, exist_ok=True)
+        with open(FOLDER / 'google.lock', 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)         # released when the file closes
+            path = FOLDER / 'google.json'
+            hold = read_json(path)
+            hour = now().strftime('%Y-%m-%dT%H')
+            if hold.get('hour') and hold['hour'] != hour:
+                for line in held(hold):
+                    write_line(line)
+                hold = {}
+            if not hold:
+                hold = {'hour': hour, 'at': now().isoformat(timespec='seconds'), 'counts': {}}
+            for api, (n, sent) in COUNTS.items():
+                count = hold['counts'].setdefault(f'{mid}|{api}', {'meeting': mid, 'api': api, 'n': 0, 'bytes': 0})
+                count.update(project=name, n=count['n'] + n, bytes=count['bytes'] + sent)
+            tmp = path.with_name(f'google.{os.getpid()}.tmp')
+            tmp.write_text(json.dumps(hold, ensure_ascii=False), encoding='utf-8')
+            tmp.replace(path)
+    except Exception:
+        pass
     COUNTS.clear()
 
 
@@ -248,9 +303,36 @@ def from_log(mid: str, text: str, runs: list[tuple[datetime, float]]) -> list[di
                 runs.remove(match)
                 day = match[0].astimezone(at.tzinfo)
                 at = at.replace(year=day.year, month=day.month, day=day.day)
-            found.append({'at': at, 'kind': 'ai', 'task': 'edit', 'ai': 'claude', 'ok': ASK.match(said)[1] == '0',
+            found.append({'at': at, 'kind': 'ai', 'task': 'edit', 'ai': '', 'ok': ASK.match(said)[1] == '0',
                           'limit': False, 's': match[1] if match else 0})
     return found
+
+
+def one_filled(mid: str, started: dict, runs: dict, began: datetime) -> list[dict]:
+    """One meeting that existed when the record began, as records."""
+    d = RECORDINGS / mid
+    if not MEETING_ID.match(mid):
+        return []
+    try:
+        with (d / 'log.txt').open('rb') as f:
+            text = f.read(started['logs'][mid]).decode('utf-8', 'replace')
+    except OSError:
+        text = ''
+    mine = from_log(mid, text, runs.get(mid, []))
+    meta = read_json(d / 'job.json')
+    if not any(e['kind'] == 'transcribe' for e in mine) and meta.get('started') and meta.get('ended'):
+        length = (datetime.fromisoformat(meta['ended']) - datetime.fromisoformat(meta['started'])).total_seconds()
+        mine.append({'at': datetime.fromisoformat(meta['started']), 'kind': 'transcribe',
+                     'audio': max(0, round(length - float(meta.get('paused_seconds') or 0)))})
+    result = read_json(d / 'result.json')
+    if result.get('sent_at') and isinstance(result.get('mail'), dict):
+        at = datetime.fromisoformat(result['sent_at'])
+        at = at if at.tzinfo else at.astimezone()
+        if at < began:                                   # sent later: the record has it already
+            mine.append({'at': at, 'kind': 'mail', 'to': len(result['mail'].get('to') or [])})
+    name = project(mid)
+    return [{**e, 'at': e['at'].isoformat(timespec='seconds'), 'meeting': mid, 'project': name, 'filled': True}
+            for e in sorted(mine, key=lambda e: e['at'])]
 
 
 def fill() -> list[dict]:
@@ -262,37 +344,12 @@ def fill() -> list[dict]:
     started = begin()
     runs = edit_runs(started['at'])
     found = []
+    began = datetime.fromisoformat(started['at'])
     for mid in sorted(started.get('logs', {})):
-        d = RECORDINGS / mid
-        if not MEETING_ID.match(mid) or not d.is_dir():
-            continue
         try:
-            with (d / 'log.txt').open('rb') as f:
-                text = f.read(started['logs'][mid]).decode('utf-8', 'replace')
-        except OSError:
-            text = ''
-        mine = from_log(mid, text, runs.get(mid, []))
-        meta = read_json(d / 'job.json')
-        if not any(e['kind'] == 'transcribe' for e in mine) and meta.get('started') and meta.get('ended'):
-            try:
-                length = (datetime.fromisoformat(meta['ended']) - datetime.fromisoformat(meta['started'])).total_seconds()
-                mine.append({'at': datetime.fromisoformat(meta['started']), 'kind': 'transcribe',
-                             'audio': max(0, round(length - float(meta.get('paused_seconds') or 0)))})
-            except ValueError:
-                pass
-        result = read_json(d / 'result.json')
-        if result.get('sent_at') and isinstance(result.get('mail'), dict):
-            try:
-                at = datetime.fromisoformat(result['sent_at'])
-                if at.tzinfo is None:
-                    at = at.astimezone()
-                mine.append({'at': at, 'kind': 'mail', 'to': len(result['mail'].get('to') or [])})
-            except ValueError:
-                pass
-        name = project(mid)
-        for e in sorted(mine, key=lambda e: e['at']):
-            found.append({**e, 'at': e['at'].isoformat(timespec='seconds'), 'meeting': mid, 'project': name,
-                          'filled': True})
+            found += one_filled(mid, started, runs, began)
+        except Exception:                                # one meeting's odd files never stop the others
+            continue
     try:
         FOLDER.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f'filled.{os.getpid()}.tmp')
@@ -338,7 +395,7 @@ def summary(month: str, meetings: list[dict]) -> dict:
     are. `meetings`: what minutes_app knows of each meeting that still exists: id, date, title, project, disk
     (bytes), audio (seconds, from its start and end). A meeting counts on the day it was recorded, with its disk;
     everything else on the day it happened. Its project is the one it has now; a deleted meeting's is the one it had."""
-    found = [e for e in events(month) + [e for e in fill() if str(e.get('at', '')).startswith(month)]
+    found = [e for e in events(month) + [e for e in fill() + pending() if str(e.get('at', '')).startswith(month)]
              if isinstance(e, dict)]
     facts = {m['id']: m for m in meetings}
     audio, last_project = {}, {}

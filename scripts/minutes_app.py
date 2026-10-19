@@ -509,8 +509,6 @@ def cmd_delete(job: Job):
     out({'trash': [str(p) for p in beside_minutes(job)]})
 
 
-# --- the app's version -------------------------------------------------------------------------
-
 # --- 用量統計 ----------------------------------------------------------------------------------------------
 
 def size_of(path: Path) -> int:
@@ -579,6 +577,8 @@ def cmd_usage(month: str):
     found['disk'] = {'meetings': sum(f['disk'] for f in facts), **setup_disk()}
     out(found)
 
+
+# --- the app's version -------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_UPDATE = CONFIG / 'vinutes-update.json'   # the newest version on GitHub and when it was looked up

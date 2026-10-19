@@ -20,10 +20,18 @@ $('#side').addEventListener('click', (e) => { if (e.target.closest('#usageBtn'))
 async function openUsage() {
   if (S.sel && S.d) {                             // what was typed in the meeting is saved first
     await flush();
+    if (S.dirty && S.giveUp !== OTHER) {          // not saved: a second click leaves it behind, as select() does
+      S.giveUp = OTHER;
+      showAlert(t('usage_unsaved'));
+      return;
+    }
+    S.giveUp = null;
+    clearTimeout(S.saveTimer); S.dirty = false;
     if (docsMode()) refreshDoc(S.sel, true);
     else learnLater(S.sel);
   }
   if (S.player.open) audio('stop');
+  if (S.sheet && S.sheet !== 'setup') closeSheet();   // the mail or delete sheet belonged to that meeting
   S.sel = null; S.d = null; S.loadError = '';
   S.usage = true;
   renderSide();
@@ -96,7 +104,7 @@ function drawUsage(main) {
       <span class="ugrow"></span>
       ${U.month ? `<div class="umonth">
         <button class="tb" data-month="${esc(months[at - 1] || '')}" aria-label="${esc(t('usage_prev'))}" title="${esc(t('usage_prev'))}"${at > 0 ? '' : ' disabled'}>${ICON.chevL}</button>
-        <span>${esc(t('usage_month', y, m))}</span>
+        <span>${U.busy ? ICON.spin : ''}${esc(t('usage_month', y, m))}</span>
         <button class="tb" data-month="${esc(months[at + 1] || '')}" aria-label="${esc(t('usage_next'))}" title="${esc(t('usage_next'))}"${at >= 0 && at < months.length - 1 ? '' : ' disabled'}>${ICON.chevR}</button></div>` : ''}
     </div>
     ${U.err ? `<div class="banner err"><span>${esc(U.err)}</span></div>` : ''}

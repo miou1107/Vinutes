@@ -850,6 +850,7 @@ def check_items(job: Job) -> list[dict]:
     items = []
     project = project_of(job)
     listed = project_people(project)
+    groups = speakers.load(job.dir).get('groups') or {}
     for raw in job.result.get('check') or []:
         person = role = ''
         if isinstance(raw, dict) and 'person' in raw:   # 新的人名: only for a meeting with a project,
@@ -865,8 +866,15 @@ def check_items(job: Job) -> list[dict]:
             m = GUESS.search(text) or GUESS_EN.search(text)
             if m and len(m.group(2).strip()) <= 20:
                 heard, meant = m.group(1).strip(), m.group(2).strip()
+        about = re.match(ABOUT_VOICE.format('([A-Z])'), text or '')
+        voice = about.group(1) if about and about.group(1) in groups else ''
+        g = groups.get(voice) or {}
+        if voice and (g.get('name') or g.get('off')):   # 講者 B …請補姓名 once 講者 B is named (Vin 2026-10-19)
+            continue
         if text and text not in done:
             item = {'label': text, 'heard': heard, 'meant': meant, 'find': find_words(plains, meant, text)}
+            if voice:
+                item['voice'] = voice
             if person and not NOT_A_NAME.search(person):     # a name the project's brief does not have yet
                 item.update(person=person, role=role, find=find_words(plains, person, text))
             who = SPEAKER_GUESS.match(text)
@@ -1947,8 +1955,8 @@ def cmd_replace(job: Job, old: str, new: str):
 
 def ai_edit(job: Job, request: str, label: str, pictures: list[Path] = (), settle=None):
     """The AI changes the minutes as asked. `pictures`: what the user pasted with the sentence, for the AI to look
-    at, never into the minutes. `settle`: run once the change is in (a 待確認 card put right), returns what it
-    learned."""
+    at, never into the minutes. `settle(changed, new)`: a 待確認 card put right, run once the AI has answered;
+    returns what it learned."""
     sys.path.insert(0, str(SCRIPTS))
     import ai_runner
     from auto_minutes import env
@@ -2050,7 +2058,10 @@ def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, r
         sys.exit(friendly(done.stdout + done.stderr, t('ai_error', ai=ai)))
     new = (work / '紀錄.md').read_text(encoding='utf-8') if (work / '紀錄.md').is_file() else md
     note = (work / '說明.txt').read_text(encoding='utf-8').strip().split('\n')[0][:60] if (work / '說明.txt').is_file() else ''
-    if new.strip() == md.strip():                 # nothing changed: a correction stays on its card to try again
+    if new.strip() == md.strip():
+        # nothing to change (the minutes may have it right already): a correction's card still goes, as the user
+        # answered it (Vin 2026-10-19); nothing is learned. An AI that wrote no answer at all leaves it to try again.
+        learned += settle(False, md) if settle and note else []
         answer(job, fresh(), html=md != opened, reply=note or t('ai_nothing'), changed=False, learned=learned)
         return
     if not re.search(r'(?m)^#{1,3} ', new) or len(new) < len(md) * 0.15:
@@ -2072,7 +2083,7 @@ def ai_edit_done(job: Job, done, work: Path, md: str, opened: str, label: str, r
         answer(job, result, reply=reply, changed=False, learned=learned)
         return
     if settle:                                       # the user's correction: logged as theirs by settle()
-        learned += settle()
+        learned += settle(True, new)
     else:
         job.log(ai, t('log_quick', label=t(f'quick_{label}')) if label in QUICK['en'] else
                 t('log_asked', text=cut_words(request)))
@@ -2204,30 +2215,38 @@ CORRECT = {
 
 
 def cmd_correct(job: Job, label: str, right: str):
-    """A guess the user put right (修改). A voice gets the name, as in 人員; anything else goes to the AI with the
-    right word. Once the minutes have it the card goes, and the right word is learned the way 確認無誤 learns a
-    guess; if the AI cannot make the change, the card stays."""
+    """A guess the user put right (修改). A name for a line asking who a voice is names the voice, as in 人員;
+    anything else goes to the AI. Once the AI has answered the card goes, also when the minutes had it right
+    already; the right word is learned only when the AI wrote it into the minutes. If the AI fails, or writes
+    no answer at all, the card stays."""
     right = one_line(right, 60)
     item = next((c for c in check_items(job) if c['label'] == label), None)
     if not item:
         sys.exit(t('check_missing'))
     if not right:
         sys.exit(t('correct_empty'))
-    if item.get('speaker'):                          # 講者 B 推測是 Ken: the voice is named, the guess settled there
-        return cmd_speaker(job, item['speaker'], right)
+    voice = item.get('speaker') or item.get('voice')
+    a_name = (WORD.fullmatch(right) and re.search(r'[A-Za-z\u4e00-\u9fff]', right) and not NOT_A_NAME.search(right)
+              and not NOBODY.search(right))
+    asks = item.get('voice') and not item['heard'] and not item['meant'] and ASKS_WHO.search(label)
+    if a_name and not item['heard'] and (item.get('speaker') or asks):   # 講者 B 推測是 Ken / 講者 B …請補姓名:
+        # the voice gets the name; a word guess about what a voice said (講者 C 說的「SL」推測是 SEO) stays a word
+        return cmd_speaker(job, voice, right)
     meant = item.get('person') or item['meant']
     words = CORRECT.get(job.lang, CORRECT['zh-TW'])
     kind = 'heard' if item['heard'] and meant else 'word' if meant else 'note'
     request = words[kind].format(heard=item['heard'], meant=meant, right=right, label=label)
 
-    def settle() -> list:
+    def settle(changed: bool, new: str) -> list:
         job.state.setdefault('corrected', []).append(label)
+        written = changed and right in new                # what the AI put in, not an instruction typed
         job.log(me(), t('log_corrected', label=label, right=right))
-        if item.get('person') and project_of(job):    # 新的人名 put right: the right name goes in the brief
+        if item.get('person') and project_of(job) and written and WORD.fullmatch(right) and not NOT_A_NAME.search(right):
             briefs.add_person(project_of(job), right, item.get('role', ''))
             job.log(me(), t('log_brief_person', name=right, project=project_of(job)))
         heard = item['heard']
-        tidy = heard and heard != right and 0 < len(heard) <= 30 and not re.search(r'[|\n\r]', heard)
+        tidy = (written and heard and heard != right and WORD.fullmatch(heard) and WORD.fullmatch(right)
+                and not re.search(r'[|]', heard + right))   # a sentence typed as the fix is not a word to learn
         learned = [public(remember(job, 'term', heard, right, 'confirm'))] if tidy else []
         job.save_state()
         return learned
@@ -2292,18 +2311,21 @@ def voices_off(job: Job) -> list[dict]:
     return [{'group': k, 'label': f'{t("speaker")} {k}'} for k, g in groups.items() if g.get('off')]
 
 
-ABOUT_VOICE = r'^\s*(?:講者|Speaker)\s*{}(?![A-Za-z])'    # a 待確認 line about one voice: 講者 C 只有附和…
+ABOUT_VOICE = r'^\s*(?i:講者|speaker)\s*{}(?![A-Za-z])'    # a 待確認 line about one voice: 講者 C 只有附和…
+WORD = re.compile(r'[^，。,;；:：!！?？「」『』"“”\n]{1,30}')        # a name or a term, not a sentence
+ASKS_WHO = re.compile(r'姓名|名字|是誰|身分|身份|未列與會|請補|併入|\bname\b|\bwho\b', re.I)   # the line asks who it is
+NOBODY = re.compile(r'雜音|噪音|不是人|誤判|同一|分身|不用|沒有|無此|同\s*[A-Z]\b|\bnoise\b|\bnobody\b|same as', re.I)
 
 
 def cmd_drop_voice(job: Job, group: str, back: bool = False):
     """移除講者 X under 人員, or 復原 (Vin 2026-10-19). Taken off, the voice is no one: its menu and card go, the name
     the minutes gave it is no longer its, and the 待確認 items about it are put aside; the minutes stay as they are."""
-    speakers.take_off(job.dir, group, not back)
+    about = re.compile(ABOUT_VOICE.format(re.escape(group)))
+    aside = [c['label'] for c in check_items(job) if c.get('speaker') == group or about.match(c['label'])]
+    speakers.take_off(job.dir, group, not back)       # after: an off voice's items are no longer listed
     who = f'{t("speaker")} {group}'
     kept = job.state.setdefault('voices_off', {})    # what removing put aside, for 復原 to bring back
     if not back:
-        about = re.compile(ABOUT_VOICE.format(re.escape(group)), re.I)
-        aside = [c['label'] for c in check_items(job) if c.get('speaker') == group or about.match(c['label'])]
         kept[group] = {'aside': aside, 'name': speaker_map(job).get(group, '')}
         data = read_json(job.dir / MEETING_PEOPLE)
         data['speakers'] = {g: n for g, n in speaker_map(job).items() if g != group}
@@ -2325,6 +2347,7 @@ def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     """The user named a voice in the transcript: every line of it, or one line."""
     before = (next((v['name'] for v in voices_view(job) if v['group'] == group), '')
               or speaker_map(job).get(group, ''))       # the name the minutes use for this voice now
+    guesses = [c['label'] for c in check_items(job) if group in (c.get('speaker'), c.get('voice'))]   # before the name
     speakers.set_name(job.dir, group, name, int(line) if line.isdigit() else None)
     who = name.strip()[:30]
     lines = transcript(job)
@@ -2342,7 +2365,7 @@ def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     names = add_name(names, who)
     save_speaker(job, group, who)
     save_project_people(project, add_name(project_people(project), who))
-    settled = [c['label'] for c in check_items(job) if c.get('speaker') == group]   # the guess about it is answered
+    settled = guesses                                # the guesses about it are answered, also if it is renamed later
     if settled:
         job.state.setdefault('confirmed', []).extend(settled)
         job.save_state()

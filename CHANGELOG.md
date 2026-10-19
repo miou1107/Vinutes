@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.5 (2026-10-19)
 
 - Each project has a brief. The gear by the project's name opens Project settings on its first page, Brief: the project's people with what each one does, its terms with what they mean, and a few lines of background. The people are the same list as the People tab; the project's name and moving a meeting are on the second page.
 - The AI that writes the minutes reads every project's brief, decides which project the meeting is, and writes names, who does what and terms as that brief has them, putting right the spellings the transcript keeps getting wrong. Before, it knew only the people on the calendar invitation.

@@ -45,6 +45,12 @@ const pad = (n) => String(n).padStart(2, '0');
 const mmss = (t) => { t = Math.max(0, Math.floor(t)); return t >= 3600 ? `${Math.floor(t / 3600)}:${pad(Math.floor(t % 3600 / 60))}:${pad(t % 60)}` : `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; };
 const clock = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const hhmm = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+// the key belongs to Zhuyin or another input method: its Enter picks a word and is not a send. WebKit fires that
+// keydown after the word is already in the box, with isComposing false but keyCode 229.
+const inputMethod = (e) => e.isComposing || e.keyCode === 229;
+// the AI is on a request of this meeting; another meeting's requests go on by themselves meanwhile
+const aiBusy = (id = S.sel) => !!(S.work[id] && S.work[id].now);
+const cut = (s, n = 30) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 const ICON = {
   plus: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
@@ -117,6 +123,12 @@ const S = {
   giveUp: null,              // the meeting the user clicked once while this one had unsaved text
   busy: false, asked: '', askedQuick: '', said: '', saidErr: false, canUndo: false,
   busyText: '',              // the key of what the line above the box says while busy ('' = Claude is rewriting)
+  sending: false,            // a sentence is on its way while the user's own edits are saved: a second Enter waits
+  work: {},                  // meeting id → { now, waits }: the request the AI is on and the ones sent after it
+  pics: [],                  // pictures pasted into the box, for the AI to look at with the next sentence
+  askedPic: '',              // the picture that went with the last answered sentence, shown small beside it
+  fixing: '', fixText: '', fixFocus: false, fixPick: false,   // the 待確認 item open to type what it should be: its label, the text
+  skipping: new Set(),       // 待確認 items skipped whose answer has not come back (it waits for the AI's turn)
   setupSeq: 0,               // goes up with every click in 環境設定自檢: an older answer is not shown
   attach: [],                // files, links and pictures picked for 「八、補充資訊」, sent with the next sentence
   urlOpen: false, menuOpen: false,
@@ -173,16 +185,16 @@ function refreshDoc(id = S.sel, again = false) {
     if (r.busy || S.sel !== id || !S.d || !docsMode()) return;
     const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent]);
     const before = seen();
-    if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = r.check || []; }   // not over a confirm made meanwhile
+    if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = checkShown(r.check, id); }   // not over a confirm made meanwhile
     if (r.attendees) S.d.attendees = r.attendees;
     if (r.people && !S.peopleBusy) S.d.people = r.people;
     if (r.speakers && !S.peopleBusy) S.d.speakers = r.speakers;
     if (r.silent && !S.peopleBusy) S.d.silent = r.silent;
     S.d.log = r.log || [];
-    if ('can_undo' in r && !S.busy) S.canUndo = !!r.can_undo;
+    if ('can_undo' in r && !S.busy && !aiBusy(id)) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
-    if (seen() !== before && !S.pickOpen) renderRail();
+    if (seen() !== before && !S.pickOpen && !S.fixing) renderRail();
   }).catch(() => {}).finally(() => { if (S.refreshing && S.refreshing.p === p) S.refreshing = null; });
   S.refreshing = { id, p };
   return p;
@@ -190,7 +202,7 @@ function refreshDoc(id = S.sel, again = false) {
 // every 15 seconds while the window is on screen; a minimized window waits
 setInterval(() => {
   const deleting = S.del && S.del.busy && S.del.ids.includes(S.sel);
-  if (docsMode() && !S.busy && !document.hidden && !deleting) refreshDoc();
+  if (docsMode() && !S.busy && !aiBusy() && !document.hidden && !deleting) refreshDoc();
 }, 15000);
 
 // a 待補充 or 待確認 item: the Doc moves to where it is and selects it (the keyboard stays here, so nothing typed
@@ -339,7 +351,7 @@ function renderSide() {
       if (tag) { S.tag = tag.dataset.tag; return renderSide(); }    // a tag on a row: the list keeps only that tag
       if (!e.target.closest('.tb')) go();
     });
-    b.addEventListener('keydown', (e) => { if (e.target === b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); go(); } });
+    b.addEventListener('keydown', (e) => { if (e.target === b && !inputMethod(e) && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); go(); } });
   });
 }
 // the buttons on a row, also the ones drawn again while the recording plays
@@ -566,7 +578,7 @@ async function select(id) {
   S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
   S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
   S.tagAdding = false;
-  S.attach = []; S.urlOpen = false; S.menuOpen = false;
+  S.attach = []; S.pics = []; S.askedPic = ''; S.fixing = ''; S.skipping = new Set(); S.urlOpen = false; S.menuOpen = false;
   S.dirty = false; S.saveText = ''; S.saveErr = false;
   S.docFailed = false; S.docWarning = ''; S.reloadDoc = false;
   clearTimeout(S.bannerTimer); S.banner = null;
@@ -689,7 +701,7 @@ function drawMain() {
     <div class="ask" id="ask"></div>
     <div class="foot" id="foot"></div>`;
   setDoc(d.html);
-  if (d.readonly || S.busy) docEl().contentEditable = 'false';
+  if (d.readonly || S.busy || aiBusy()) docEl().contentEditable = 'false';
   wireDoc();
   renderHead(); renderTags(); renderBanners(); renderRail(); renderAsk(); renderFoot();
 }
@@ -780,7 +792,7 @@ function renderTags() {
     if (keep && g) changeTags((now) => [...now, g]); else renderTags();
   };
   box.addEventListener('keydown', (e) => {
-    if (e.isComposing) return;                      // the 注音 candidate list takes Enter first
+    if (inputMethod(e)) return;                     // the 注音 candidate list takes Enter first
     if (e.key === 'Enter') { e.preventDefault(); finish(true); }
     if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
   });
@@ -1110,7 +1122,7 @@ function afterEdit(r) {
   if (r.attendees) S.d.attendees = r.attendees;       // 與會人員 under 人員, after the names went into the minutes
   if (r.people) S.d.people = r.people;
   if (r.speakers) S.d.speakers = r.speakers;
-  if (r.check) S.d.check = r.check;
+  if (r.check) S.d.check = checkShown(r.check);
   if (r.todo) { S.d.todo = r.todo; renderFoot(); renderRail(); }
   if ('can_undo' in r) S.canUndo = !!r.can_undo;
   if (r.reload_doc) placeDoc(true);                 // the whole Doc was uploaded again: the one shown loads again
@@ -1244,7 +1256,11 @@ function renderDocsRail(el) {
     ? (waiting ? todo.map((it, i) => `<button class="todo" data-t="${i}"><span class="kind red">${esc(t('to_fill'))}</span><b>${esc(it.label)}</b>${it.anchor && it.anchor !== it.label ? `<span>${esc(it.anchor)}</span>` : ''}</button>`).join('')
         + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t(c.person ? 'new_person' : 'to_confirm'))}</span>${c.person
             ? `<div class="text"><b>${esc(c.person)}</b>${c.role ? `<span class="role">${esc(c.role)}</span>` : ''}</div>` : `<div class="text">${esc(c.label)}</div>`}
-          <button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button></div>`).join('')
+          ${S.fixing === c.label ? `<div class="fix"><input data-c="${i}" value="${esc(S.fixText)}" aria-label="${esc(t('fix'))}"
+              placeholder="${esc(t(c.person || c.speaker ? 'name_ph' : 'fix_ph'))}">
+              <button class="fixb blue" data-save="${i}">${esc(t('save'))}</button><button class="fixb ghost" data-cancel="${i}">${esc(t('cancel'))}</button></div>`
+            : `<div class="acts"><button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button>
+              <button class="fixb" data-fix="${i}">${esc(t('fix'))}</button><button class="fixb ghost" data-skip="${i}">${esc(t('skip'))}</button></div>`}</div>`).join('')
       : `<div class="empty">${esc(t('nothing_to_handle'))}</div>`)
     : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
   el.innerHTML = `
@@ -1270,6 +1286,7 @@ function renderDocsRail(el) {
     }));
     el.querySelectorAll('.card.guess .text').forEach((x, i) => x.addEventListener('click', () => showInDoc(check[i].find)));
     el.querySelectorAll('.okc2[data-c]').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
+    wireFix(el, check, renderRail);
   }
   if (tab === 'people') wirePeople(el);
 }
@@ -1281,10 +1298,10 @@ function peopleHTML(people) {
   const d = S.d;
   const voices = d.voices || [];
   const shown = d.speakers || {};
-  const busy = S.peopleBusy || S.busy;
+  const busy = S.peopleBusy || S.busy || aiBusy();
   if (!voices.length) {
     const names = d.people || [];
-    return `<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}`;
+    return `<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}${offHTML()}`;
   }
   const cards = voices.map((v) => {
     const name = v.name || shown[v.group] || '';
@@ -1295,7 +1312,8 @@ function peopleHTML(people) {
     const menu = !open ? '' : S.pickTyping === v.group
       ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
       : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
-          <div class="mi other" data-other="1">${esc(t('people_other'))}</div></div>`;
+          <div class="mi other" data-other="1">${esc(t('people_other'))}</div>
+          <div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div></div>`;
     return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
         <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
         <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
@@ -1305,19 +1323,25 @@ function peopleHTML(people) {
   });
   const silent = d.silent || [];                   // the server tells names apart (陳怡君（Jessie） is Jessie)
   return `<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
-    ${silent.length ? `<div class="pmin silent">${esc(t('people_silent_list', silent.join(t('list_sep'))))}</div>` : ''}`;
+    ${silent.length ? `<div class="pmin silent">${esc(t('people_silent_list', silent.join(t('list_sep'))))}</div>` : ''}${offHTML()}`;
+}
+
+// voices taken off (移除講者 X), each with 復原 (Vin 2026-10-19)
+function offHTML() {
+  return (S.d.voices_off || []).map((v) => `<div class="pgone"><span>${esc(t('people_off', t('people_voice', v.group)))}</span>
+    <button class="plink pback" data-g="${esc(v.group)}">${esc(t('undo'))}</button></div>`).join('');
 }
 
 // what the server sends back after a change to the people: who each voice is, the voices, the minutes
 function peopleDone(r) {
   if (!S.d) return;
-  for (const k of ['people', 'speakers', 'silent', 'voices', 'transcript', 'voice_names', 'log', 'check']) if (r[k]) S.d[k] = r[k];
+  for (const k of ['people', 'speakers', 'silent', 'voices', 'voices_off', 'transcript', 'voice_names', 'log', 'check']) if (r[k]) S.d[k] = r[k];
   afterEdit(r);
 }
 
 // true when the change went in
 async function peopleCall(cmd, args) {
-  if (S.peopleBusy || S.busy) return false;
+  if (S.peopleBusy || S.busy || aiBusy()) return false;
   const id = S.sel;
   S.peopleBusy = true; S.editSeq++;                 // a refresh meanwhile does not draw the old names again
   renderRail();
@@ -1364,9 +1388,11 @@ function wirePeople(el) {
   };
   el.querySelectorAll('.menu .mi').forEach((m) => m.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (m.dataset.drop) { const g = S.pickOpen; closePick(); peopleCall('dropVoice', { group: g }); return; }   // no one: a split voice or a noise
     if (m.dataset.other) { S.pickTyping = S.pickOpen; S.peopleTyped = ''; renderRail(); const i = $('#pIn'); if (i) i.focus(); return; }
     choose(S.pickOpen, m.dataset.n);
   }));
+  el.querySelectorAll('.pback').forEach((b) => b.addEventListener('click', () => peopleCall('dropVoice', { group: b.dataset.g, back: true })));
   const input = $('#pIn');
   if (!input) return;
   const list = $('#pAc');
@@ -1383,7 +1409,7 @@ function wirePeople(el) {
   input.addEventListener('click', (e) => e.stopPropagation());
   input.addEventListener('input', offer);
   input.addEventListener('keydown', (e) => {
-    if (e.isComposing || e.keyCode === 229) return;   // the 注音 candidate list takes Enter first (WebKit: 229)
+    if (inputMethod(e)) return;                       // the 注音 candidate list takes Enter first (WebKit: 229)
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!offered.length) return;
       e.preventDefault();
@@ -1446,7 +1472,7 @@ function wireComments() {
     });
     const input = card.querySelector('input');
     if (input) input.addEventListener('keydown', async (e) => {
-      if (e.key !== 'Enter' || e.isComposing || !input.value.trim()) return;
+      if (e.key !== 'Enter' || inputMethod(e) || !input.value.trim()) return;
       const text = input.value.trim();
       input.disabled = true;
       try {
@@ -1502,6 +1528,7 @@ function renderAsk() {
     // files, links and pictures need the Google Doc: they go to Drive and into its 「八、補充資訊」
     const canAttach = !!(S.d && S.d.doc_url && !S.d.readonly);
     el.innerHTML = `<div id="askTop"></div>
+      <div id="picBox" class="achips"></div>
       <div id="attachBox"></div>
       <div class="prompt with-tools">
         <div class="mwrap"><button class="model" id="aiPick" title="${esc(t('ai_pick'))}" aria-label="${esc(t('ai_pick'))}"
@@ -1516,8 +1543,8 @@ function renderAsk() {
       <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>`;
     const input = $('#promptInput');
     const go = () => (S.pasting ? null : S.attach.length ? sendAttach(input.value.trim()) : ask(input.value.trim()));
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) go(); });
-    if (canAttach) input.addEventListener('paste', pastePicture);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inputMethod(e)) go(); });
+    input.addEventListener('paste', pastePicture);    // a picture for the AI: no Google Doc needed
     $('#askGo').addEventListener('click', go);
     el.querySelectorAll('.qk').forEach((b) => b.addEventListener('click', () => ask('', b.dataset.k)));
     $('#aiPick').addEventListener('click', (e) => {
@@ -1545,11 +1572,14 @@ function renderAsk() {
         S.menuOpen = false; S.urlOpen = true; renderAttachMenu(); renderAttach();
       }));
     }
-    renderAttach();
+    renderAttach(); renderPics();
   }
+  // while the AI works the box stays open and what is sent waits its turn (Vin 2026-10-19); files and links for
+  // 「八、補充資訊」 and another AI wait until it is done
   $('#promptInput').disabled = S.busy;
-  el.querySelectorAll('.qk, .ib').forEach((b) => { b.disabled = S.busy; });
-  if (S.busy) S.aiOpen = false;
+  el.querySelectorAll('.qk').forEach((b) => { b.disabled = S.busy; });
+  el.querySelectorAll('.ib').forEach((b) => { b.disabled = S.busy || aiBusy(); });
+  if (S.busy || aiBusy()) S.aiOpen = false;
   renderAiMenu();
   renderLearned();
 }
@@ -1569,7 +1599,7 @@ function renderAiMenu() {
   const have = (S.d && S.d.ai_installed) || [key];
   const states = (S.aiStates && S.aiStates.ais) || {};
   btn.innerHTML = `<i class="dot ${key}"></i>${esc(aiName())}${ICON.chevU}`;
-  btn.disabled = S.busy || S.aiSaving;
+  btn.disabled = S.busy || aiBusy() || S.aiSaving;
   btn.classList.toggle('on', !!S.aiOpen);
   menu.hidden = !S.aiOpen;
   placeDoc();
@@ -1606,7 +1636,7 @@ function showAi(key) {
 async function switchAi(key) {
   const was = aiKey();
   S.aiOpen = false;
-  if (key === was || S.busy || S.aiSaving) return renderAiMenu();
+  if (key === was || S.busy || aiBusy() || S.aiSaving) return renderAiMenu();
   S.aiSaving = true;
   showAi(key);
   try {
@@ -1666,7 +1696,7 @@ function renderAttach() {
       $('#promptInput').focus();
     };
     url.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.isComposing) add();
+      if (e.key === 'Enter' && !inputMethod(e)) add();
       if (e.key === 'Escape') { S.urlOpen = false; renderAttach(); }
     });
     $('#attachUrlAdd').addEventListener('click', add);
@@ -1692,35 +1722,48 @@ async function pickAttach(kind) {
   } catch (e) { showAlert(e.message); }
 }
 
-// ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): added like one
-// chosen with the picture button. Text pastes as text.
+// ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): shown small above
+// the box and sent with the next sentence for the AI to look at; it does not go into the minutes (Vin 2026-10-19: a
+// screenshot pasted to show what to change had become an attachment). Pictures for 「八、補充資訊」 come from the
+// picture button. Text pastes as text.
 async function pastePicture(e) {
   const clip = e.clipboardData;
   if (!clip || S.busy) return;
-  const picture = [...clip.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'));
-  if (!picture && ![...clip.types].includes('Files')) return;
+  const item = [...clip.items].find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!item && ![...clip.types].includes('Files')) return;
   e.preventDefault();
   const input = e.target;
   const text = clip.getData('text/plain');
+  const blob = item && item.getAsFile();
   const id = S.sel;
   S.pasting = true;                                // Enter waits: the picture goes with this message
   try {
     const r = await call('pastePicture');
-    if (S.sel !== id || S.busy) return;            // another meeting, or the message already went
+    if (S.sel !== id) return;                      // another meeting
     const files = r.files || [];
-    for (const f of files) {
-      if (!S.attach.some((a) => a.path === f.path)) S.attach.push({ kind: 'image', path: f.path, name: f.name });
-    }
-    if (files.length) renderAttach();
+    files.forEach((f, i) => {
+      if (!S.pics.some((x) => x.path === f.path)) S.pics.push({ path: f.path, name: f.name, url: !i && blob ? URL.createObjectURL(blob) : '' });
+    });
+    if (files.length) renderPics();
     else if (text) input.setRangeText(text, input.selectionStart, input.selectionEnd, 'end');   // text, or a file that is no picture
   } catch (err) { showAlert(err.message); } finally { S.pasting = false; }
 }
 
+// the pasted pictures above the box, small; each can be taken off again
+function renderPics() {
+  const box = $('#picBox');
+  if (!box) return;
+  box.innerHTML = S.pics.map((x, i) => `<span class="pchip" title="${esc(x.name)}">${x.url ? `<img src="${esc(x.url)}" alt="">` : ICON.image}
+    <button class="ax" data-i="${i}" aria-label="${esc(t('remove'))}">✕</button></span>`).join('');
+  box.querySelectorAll('.ax').forEach((b) => b.addEventListener('click', () => { S.pics.splice(Number(b.dataset.i), 1); renderPics(); }));
+}
+
 // the picked items and the sentence about them: one line each in 「八、補充資訊」
 async function sendAttach(text) {
-  if (S.busy || !S.attach.length) return;
+  if (S.busy || S.sending || aiBusy() || !S.attach.length) return;
   const id = S.sel;
-  if (!(await savedFirst())) return;
+  S.sending = true;
+  try { if (!(await savedFirst())) return; } finally { S.sending = false; }
   const items = S.attach.map(({ kind, path, url }) => ({ kind, path, url }));
   S.busy = true; S.busyText = 'attaching';
   S.asked = text || S.attach.map((a) => a.name).join(t('list_sep')); S.askedQuick = ''; S.said = ''; S.saidErr = false; S.editSeq++;
@@ -1741,6 +1784,7 @@ async function sendAttach(text) {
       S.busy = false; S.busyText = '';
       renderAsk(); renderAttach(); renderFoot(); refreshLog();
     }
+    runNext(id);
   }
 }
 
@@ -1753,11 +1797,18 @@ function renderLearned() {
   if (fresh) S.learnHidden = false;
   const kept = top.querySelector('.lrows');
   const scroll = kept ? kept.scrollTop : 0;        // turning one row off keeps the list where it was
+  const w = S.work[S.sel];
+  const now = w && w.now;
+  const mini = (q) => (q && q.pics && q.pics[0] && q.pics[0].url ? `<img class="mini" src="${esc(q.pics[0].url)}" alt="">` : '');
   top.innerHTML = `
     ${S.busy ? `<div class="busy">${ICON.spin}<span>${esc(S.busyText ? t(S.busyText) : t('ai_working', aiName()))}</span></div>` : ''}
-    ${!S.busy && S.said ? `<div class="replyline${S.saidErr ? ' err' : ''}">${S.saidErr ? '' : ICON.done}
+    ${!S.busy && S.said ? `<div class="replyline${S.saidErr ? ' err' : ''}">${S.saidErr ? '' : ICON.done}${S.askedPic ? `<img class="mini" src="${esc(S.askedPic)}" alt="">` : ''}
         <span class="asked">${esc(t('quote', S.askedQuick ? t(`quick_${S.askedQuick}`) : S.asked))}</span><span class="said">${esc(S.said)}</span>
-        ${S.canUndo && !S.saidErr ? `<button class="btn ghost" id="undo" style="height:24px;padding:0 10px;font-size:12px">${esc(t('undo'))}</button>` : ''}</div>` : ''}
+        ${S.canUndo && !S.saidErr && !now ? `<button class="btn ghost" id="undo" style="height:24px;padding:0 10px;font-size:12px">${esc(t('undo'))}</button>` : ''}</div>` : ''}
+    ${now ? `<div class="busy">${ICON.spin}${mini(now)}<span>${esc(t('ai_working_on', aiName(), cut(asked(now))))}</span></div>` : ''}
+    ${w && w.waits.length ? `<div class="waits"><span class="wh">${esc(t('waiting'))} ${w.waits.length}</span>${w.waits.map((q, i) => `<div class="wr">
+        <span class="wn">${i + 1}</span>${mini(q)}<span class="wt">${esc(asked(q))}</span>
+        <button class="ax" data-w="${i}" aria-label="${esc(t('remove'))}">✕</button></div>`).join('')}</div>` : ''}
     ${learned.length && !S.learnHidden ? `<div class="learn${S.learnOpen ? ' open' : ''}"><div class="lh">${ICON.book}<span>${esc(t('learned_head', aiName()))}</span>
         ${learned.length > 2 ? `<span style="flex:1"></span><button class="btn ghost" id="learnMore" style="height:22px;padding:0 8px;font-size:11px">${esc(t(S.learnOpen ? 'collapse' : 'expand'))}</button>` : ''}</div>
         <div class="lrows">${learned.map((l, i) => {
@@ -1789,36 +1840,88 @@ function renderLearned() {
   if (more) more.addEventListener('click', () => { S.learnOpen = !S.learnOpen; if (!S.learnOpen) hideLater(); renderLearned(); });
   const undo = $('#undo');
   if (undo) undo.addEventListener('click', undoLast);
+  top.querySelectorAll('.wr .ax').forEach((b) => b.addEventListener('click', () => {
+    const q = w.waits.splice(Number(b.dataset.w), 1)[0];
+    if (q && q.card) putBack(q.card);               // a correction taken off: its card is back to handle
+    renderLearned();
+  }));
   top.querySelectorAll('.learn .lr button[data-i]').forEach((b) => b.addEventListener('click', () => toggleLearned(Number(b.dataset.i))));
   top.querySelectorAll('.learn .lr button[data-mv]').forEach((b) => b.addEventListener('click', () => {
     if (!b.classList.contains('on')) moveLearned(Number(b.dataset.mv), b.dataset.w);
   }));
 }
 
-async function ask(text, quick) {
+// what is sent goes to the AI one after another, per meeting: while it works on one the box stays open and what is
+// sent meanwhile waits under 待修改 (Vin 2026-10-19: he could only wait). Each answer shows as it comes in; a meeting
+// left meanwhile goes on by itself and shows its changes when it is opened again.
+function ask(text, quick, extra = {}) {
   if (S.busy || (!text && !quick)) return;
   const id = S.sel;
-  if (!(await savedFirst())) return;
-  S.busy = true; S.asked = text; S.askedQuick = quick || ''; S.said = ''; S.saidErr = false; S.editSeq++;
-  if (docEl()) docEl().contentEditable = 'false';
-  const box = $('#promptInput');
-  if (box) box.value = '';
-  renderAsk();
-  try {
-    const r = await call(quick ? 'quick' : 'ask', { id, text: quick || text });
-    if (S.sel !== id || !S.d) return;
-    S.said = r.reply || ''; S.canUndo = !!r.changed || S.canUndo;
-    if (r.changed || r.html) afterEdit(r);
-  } catch (e) {
-    if (S.sel !== id) return;
-    S.said = e.message; S.saidErr = true;
-  } finally {
-    if (S.sel === id) {
-      S.busy = false;
-      if (docEl()) docEl().contentEditable = editable();
-      renderAsk(); renderFoot(); refreshLog();
-    }
+  const w = S.work[id] || (S.work[id] = { now: null, waits: [] });
+  w.waits.push({ text, quick: quick || '', pics: extra.correct ? [] : S.pics, ...extra });
+  if (!extra.correct) {
+    S.pics = []; renderPics();
+    const box = $('#promptInput');
+    if (box) box.value = '';
   }
+  if (w.now) renderLearned(); else runNext(id);
+}
+
+// a request as the user sees it: the sentence, the quick button's name, or the correction
+function asked(q) { return q.quick ? t(`quick_${q.quick}`) : q.text; }
+
+async function runNext(id) {
+  const w = S.work[id];
+  if (!w || w.now || !w.waits.length || (S.sel === id && (S.busy || S.sending))) return;
+  if (S.sel === id) {                              // the user's own typing goes in before the AI starts
+    S.sending = true;
+    try {
+      if (!(await savedFirst())) return renderLearned();   // the edits did not save: what was sent stays waiting
+    } finally { S.sending = false; }
+    if (w.now || !w.waits.length) return;
+  }
+  const q = w.now = w.waits.shift();
+  if (S.sel === id) {
+    S.said = ''; S.saidErr = false; S.editSeq++;
+    if (docEl()) docEl().contentEditable = 'false';
+    renderAsk();
+  }
+  let r = null, err = null;
+  try {
+    r = q.correct ? await call('correct', { id, item: q.correct.label, text: q.correct.value })
+      : await call(q.quick ? 'quick' : 'ask', { id, text: q.quick || q.text, pictures: q.pics.map((x) => x.path) });
+  } catch (e) { err = e; }
+  w.now = null;
+  if (!w.waits.length) delete S.work[id];
+  if (S.sel === id && S.d) {
+    S.asked = q.text; S.askedQuick = q.quick; S.askedPic = (q.pics[0] && q.pics[0].url) || '';
+    if (err) {
+      S.said = err.message; S.saidErr = true;
+      if (q.card) putBack(q.card);                 // the change did not go in: the card is back
+    } else {
+      S.said = r.reply || ''; S.canUndo = !!r.changed || S.canUndo;
+      if (r.voices) S.d.voices = r.voices;
+      if (r.changed || r.html || q.correct) afterEdit(r);
+    }
+    if (docEl()) docEl().contentEditable = editable();
+    renderAsk(); renderFoot(); renderRail(); refreshLog();
+  }
+  runNext(id);
+}
+
+// 待確認 cards skipped or put right whose answer is still on its way stay off the list, whatever an answer that
+// started before them brings
+function checkShown(list, id = S.sel) {
+  const w = S.work[id];
+  const going = new Set(w ? [w.now, ...w.waits].filter((q) => q && q.card).map((q) => q.card.label) : []);
+  S.skipping.forEach((label) => going.add(label));
+  return (list || []).filter((c) => !going.has(c.label));
+}
+
+function putBack(card) {
+  if (!S.d || (S.d.check || []).some((c) => c.label === card.label)) return;
+  S.d.check = [...(S.d.check || []), card];
+  renderRail(); renderFoot();
 }
 
 async function undoLast() {
@@ -1834,6 +1937,7 @@ async function undoLast() {
     S.said = e.message; S.saidErr = true;
   } finally {
     if (S.sel === id) { S.busy = false; if (docEl()) docEl().contentEditable = editable(); renderAsk(); renderFoot(); refreshLog(); }
+    runNext(id);
   }
 }
 
@@ -1869,8 +1973,14 @@ function renderFoot() {
     ${todo.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--red)">${esc(t('to_fill'))} ${todo.length}</span>
       <div class="chips">${todo.map((t, i) => `<button class="chip red" data-t="${i}">${esc(t.label)}</button>`).join('')}</div></div>` : ''}
     ${check.length && !docs ? `<div class="row"><span class="lbl" style="color:var(--yellow-label)">${esc(t('to_confirm'))} ${check.length}</span>
-      <div class="chips">${check.map((c, i) => `<span class="chip yellow"><span>${esc(c.label)}</span>
-        <button class="okbtn" data-c="${i}" title="${esc(t('looks_right'))}" aria-label="${esc(t('looks_right'))}">${ICON.checkSmall}</button></span>`).join('')}</div></div>` : ''}
+      <div class="chips">${check.map((c, i) => (S.fixing === c.label
+        ? `<span class="chip yellow fixchip"><span>${esc(c.label)}</span><input data-c="${i}" value="${esc(S.fixText)}" aria-label="${esc(t('fix'))}"
+            placeholder="${esc(t(c.person || c.speaker ? 'name_ph' : 'fix_ph'))}"><button class="okbtn" data-save="${i}" title="${esc(t('save'))}"
+            aria-label="${esc(t('save'))}">${ICON.checkSmall}</button><button class="okbtn skip" data-cancel="${i}" title="${esc(t('cancel'))}"
+            aria-label="${esc(t('cancel'))}">✕</button></span>`
+        : `<span class="chip yellow"><span class="cl" data-fix="${i}" title="${esc(t('fix'))}">${esc(c.label)}</span>
+            <button class="okbtn" data-c="${i}" title="${esc(t('looks_right'))}" aria-label="${esc(t('looks_right'))}">${ICON.checkSmall}</button>
+            <button class="okbtn skip" data-skip="${i}" title="${esc(t('skip'))}" aria-label="${esc(t('skip'))}">✕</button></span>`)).join('')}</div></div>` : ''}
     ${p.open ? `<div class="player">
         <button class="play" id="pp" aria-label="${esc(t(p.playing ? 'pause' : 'play'))}">${p.playing ? ICON.pause : ICON.play}</button>
         <span class="tm" id="ptime">${mmss(p.pos)}</span>
@@ -1884,7 +1994,8 @@ function renderFoot() {
     </div>`;
   el.hidden = !el.querySelector('button, .row');      // 發送信件 is at the top: nothing left here, no empty row
   el.querySelectorAll('.chip.red').forEach((b) => b.addEventListener('click', () => jumpTo(todo[Number(b.dataset.t)])));
-  el.querySelectorAll('.okbtn').forEach((b) => b.addEventListener('click', () => confirmCheck(check[Number(b.dataset.c)])));
+  el.querySelectorAll('.okbtn[data-c]').forEach((b) => b.addEventListener('click', () => confirmCheck(check[Number(b.dataset.c)])));
+  if (!docs) wireFix(el, check, renderFoot);
   const on = (sel, fn) => { const x = $(sel); if (x) x.addEventListener('click', fn); };
   on('#openGdoc', () => call('link', { url: d.doc_url }).catch(() => {}));
   on('#pp', () => audio(S.player.playing ? 'pause' : 'play', { at: S.player.pos }));
@@ -1901,10 +2012,71 @@ async function confirmCheck(item) {
   S.editSeq++;
   try {
     const r = await call('confirm', { id: S.sel, item: item.label });
-    S.d.check = r.check || [];
+    S.d.check = checkShown(r.check);
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderAsk(); }
     renderFoot(); renderRail(); refreshLog();
   } catch (e) { showAlert(e.message); }
+}
+
+// 修改 and 略過 on the 待確認 items, in the side panel or along the bottom (Vin 2026-10-19): 修改 opens a box for what
+// it should be, starting from the guess; 略過 takes the item off and nothing is learned
+function wireFix(el, check, redraw) {
+  el.querySelectorAll('[data-fix]').forEach((b) => b.addEventListener('click', () => {
+    const c = check[Number(b.dataset.fix)];
+    S.fixing = c.label; S.fixText = c.who || c.person || c.meant || ''; S.fixFocus = true; S.fixPick = true;
+    redraw();
+  }));
+  el.querySelectorAll('[data-skip]').forEach((b) => b.addEventListener('click', () => skipCheck(check[Number(b.dataset.skip)])));
+  el.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', () => { S.fixing = ''; redraw(); }));
+  const fixed = (i) => {
+    const box = el.querySelector(`input[data-c="${i}"]`);
+    const right = box.value.trim();
+    if (!right) return box.focus();
+    S.fixing = '';
+    fixCheck(check[i], right);
+  };
+  el.querySelectorAll('[data-save]').forEach((b) => b.addEventListener('click', () => fixed(Number(b.dataset.save))));
+  const box = el.querySelector('input[data-c]');
+  if (!box) return;
+  box.addEventListener('input', () => { S.fixText = box.value; });
+  box.addEventListener('focus', () => { S.fixFocus = true; });
+  box.addEventListener('blur', () => { if (box.isConnected) S.fixFocus = false; });
+  box.addEventListener('keydown', (e) => {
+    if (inputMethod(e)) return;
+    if (e.key === 'Enter') { e.preventDefault(); fixed(Number(box.dataset.c)); }
+    if (e.key === 'Escape') { e.stopPropagation(); S.fixing = ''; redraw(); }
+  });
+  if (S.fixFocus) {                                // just opened, or drawn again while typing (an answer came in)
+    box.focus();
+    if (S.fixPick) box.select(); else box.setSelectionRange(box.value.length, box.value.length);
+    S.fixPick = false;
+  }
+}
+
+// 略過: the card goes at once (the answer may wait for the AI's turn) and comes back if it could not be skipped
+async function skipCheck(item) {
+  const id = S.sel;
+  S.editSeq++;
+  S.d.check = (S.d.check || []).filter((c) => c.label !== item.label);
+  S.skipping.add(item.label);
+  renderRail(); renderFoot();
+  try {
+    const r = await call('skip', { id, item: item.label });
+    S.skipping.delete(item.label);
+    if (S.sel !== id || !S.d) return;
+    S.d.check = checkShown(r.check);
+    renderFoot(); renderRail(); refreshLog();
+  } catch (e) { S.skipping.delete(item.label); if (S.sel === id) { putBack(item); showAlert(e.message); } }
+}
+
+// 修改 on a guess: what it should be goes to the AI like a sentence typed in the box (a voice is named at once). The
+// card goes now and comes back if the change could not be made.
+function fixCheck(item, right) {
+  if (S.busy) return;
+  S.d.check = (S.d.check || []).filter((c) => c.label !== item.label);
+  renderRail(); renderFoot();
+  const was = item.who || item.person || item.meant;
+  ask(was ? t('fixed_as', was, right) : t('fixed_note', item.label, right), '', { correct: { label: item.label, value: right }, card: item });
 }
 
 function audio(action, args = {}, fromPeople = false) {
@@ -2065,7 +2237,7 @@ function openTranscript(keep = {}) {
   };
   $('#vall').addEventListener('click', () => apply(false));
   if ($('#vone')) $('#vone').addEventListener('click', () => apply(true));
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(false); } });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inputMethod(e)) { e.preventDefault(); apply(false); } });
 }
 
 // a Word or PDF attachment: the mail says 詳細如附件 where the Doc's address was (Vin 2026-10-15), and the
@@ -2129,7 +2301,7 @@ function renderMail() {
     $('#addTo').focus();
     return true;
   };
-  add.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ',') && !e.isComposing) { e.preventDefault(); addTokens(); } });
+  add.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ',') && !inputMethod(e)) { e.preventDefault(); addTokens(); } });
   add.addEventListener('blur', () => { if (add.value.trim()) addTokens(); });
   $('#subj').addEventListener('input', keep);
   $('#body').addEventListener('input', keep);

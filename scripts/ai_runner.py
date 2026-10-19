@@ -191,16 +191,19 @@ def sandbox_profile(folder: Path, exe: str) -> str:
     ])
 
 
-def command(key: str, exe: str, prompt: str, folder: Path, write: bool) -> tuple[list[str], Path | None]:
+def command(key: str, exe: str, prompt: str, folder: Path, write: bool,
+            pictures: list[Path] = ()) -> tuple[list[str], Path | None]:
     """The command line, and the sandbox profile file to remove afterwards (agy only). `write`: the minutes are
-    written from the transcript (the agent may look around the folder); otherwise one file is changed."""
+    written from the transcript (the agent may look around the folder); otherwise one file is changed. `pictures`
+    are in the folder and named in the prompt: Claude and agy open them themselves, Codex is handed them too."""
     if key == 'claude':
         tools = 'Read,Glob,Grep,Write,Edit' if write else 'Read,Write,Edit'
         return [exe, '-p', prompt, '--restricted', '--strict-mcp-config', '--tools', tools,
                 '--permission-mode', 'acceptEdits', '--permission-prompts', 'none'], None
     if key == 'codex':
         return [exe, 'exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ephemeral',
-                '-c', 'mcp_servers={}', '--color', 'never', '-C', str(folder), prompt], None   # none of the user's MCP servers
+                '-c', 'mcp_servers={}', '--color', 'never', '-C', str(folder),   # none of the user's MCP servers
+                *[f'--image={p}' for p in pictures], prompt], None   # --image=: one each, never taking the prompt
     fd, path = tempfile.mkstemp(prefix='agy-', suffix='.sb')
     with os.fdopen(fd, 'w') as f:
         f.write(sandbox_profile(folder, exe))
@@ -208,13 +211,13 @@ def command(key: str, exe: str, prompt: str, folder: Path, write: bool) -> tuple
 
 
 def run(prompt: str, folder: Path, *, write: bool, timeout: int, env: dict, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, key: str | None = None) -> subprocess.CompletedProcess:
+        stderr=subprocess.PIPE, key: str | None = None, pictures: list[Path] = ()) -> subprocess.CompletedProcess:
     """The chosen AI, working in `folder` only. SystemExit when it is not installed."""
     key = key or chosen()
     exe = find(key)
     if not exe:
         raise SystemExit(t('ai_missing', ai=AIS[key]))
-    cmd, profile = command(key, exe, prompt, folder, write)
+    cmd, profile = command(key, exe, prompt, folder, write, pictures)
     scratch = folder / '.ai-tmp'
     if profile:                                       # agy's temporary files stay inside the folder it may write
         scratch.mkdir(exist_ok=True)

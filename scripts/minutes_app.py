@@ -2363,6 +2363,7 @@ def main():
     if len(argv) < 2:
         sys.exit(__doc__)
     job = Job(Path(argv[1]))
+    os.environ['VINUTES_MEETING'] = job.id           # what this command uses (AI, Google) is this meeting's
     rest = argv[2:]
     if cmd == 'locate':                              # only reads the Doc: no turn to wait for
         return cmd_locate(job, ' '.join(rest).strip())
@@ -2428,7 +2429,9 @@ def main():
 
 
 if __name__ == '__main__':
+    import usage
     import vlog
+    usage.begin()                                    # before this run writes a line the fill-in would read
     try:
         vlog.run(main)
     except subprocess.TimeoutExpired:

@@ -22,6 +22,7 @@ import urllib.parse
 from pathlib import Path
 
 import doc_sync
+import usage
 from i18n import t
 
 SECTION = '## 八、補充資訊'
@@ -101,6 +102,8 @@ def call(url: str, body=None, method: str | None = None, ctype: str = 'applicati
         headers['Content-Length'] = str(Path(data.name).stat().st_size)
     req = urllib.request.Request(url, data=data, method=method or ('POST' if data is not None else 'GET'),
                                  headers=headers)
+    usage.google(url, int(headers['Content-Length']) if 'Content-Length' in headers
+                 else len(data) if isinstance(data, bytes) and '/upload/' in url else 0)
     try:
         resp = urllib.request.urlopen(req, timeout=600)
     except urllib.error.HTTPError as err:

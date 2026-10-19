@@ -255,5 +255,112 @@ class WriteUpLog(unittest.TestCase):
         self.assertIn('點', str(said.exception))                 # 「…才會恢復」 with the hour, in the app's words
 
 
+class Answer:
+    """What urllib.request.urlopen hands back, for the four places that call Google."""
+
+    def __init__(self, body: bytes = b'{}'):
+        self.body = body
+
+    def read(self, *a):
+        return self.body
+
+    def getheader(self, name, default=None):
+        return default
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class GoogleCalls(Ledger):
+    """Every place that calls Google counts the request, and how much it uploaded to Drive."""
+
+    def setUp(self):
+        super().setUp()
+        import urllib.request
+        self.urllib = urllib.request
+        self.saved_open = urllib.request.urlopen
+        self.sent = []
+
+        def answer(req, *a, **kw):
+            self.sent.append(req.full_url)
+            return Answer()
+        urllib.request.urlopen = answer
+
+    def tearDown(self):
+        self.urllib.urlopen = self.saved_open
+        super().tearDown()
+
+    def test_the_docs_and_drive_calls_are_counted(self):
+        import attachments
+        import doc_sync
+        doc_sync.AUTH['Authorization'] = 'Bearer test'
+        try:
+            doc_sync.call('https://docs.googleapis.com/v1/documents/abc')
+            attachments.call('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', body=b'x' * 300,
+                             ctype='multipart/related')
+        finally:
+            doc_sync.AUTH.clear()
+        self.assertEqual(usage.COUNTS, {'docs': [1, 0], 'drive': [1, 300]})
+
+    def test_the_publish_and_mail_calls_are_counted(self):
+        import md_to_gdoc
+        import workspace
+        md_to_gdoc.call('https://www.googleapis.com/drive/v3/files?fields=id', body=b'{"name": "x"}', method='POST',
+                        headers={'Content-Type': 'application/json'})
+        workspace.call('https://gmail.googleapis.com/gmail/v1/users/me/profile')
+        self.assertEqual(usage.COUNTS, {'drive': [1, 13], 'gmail': [1, 0]})
+
+
+class TranscribeAndMail(Ledger):
+    """auto_minutes counts the transcript (seconds and minutes of audio) and each mail sent with its recipients."""
+
+    def setUp(self):
+        super().setUp()
+        import auto_minutes
+        self.am = auto_minutes
+        self.saved_script = auto_minutes.script
+
+    def tearDown(self):
+        self.am.script = self.saved_script
+        super().tearDown()
+
+    def test_a_transcript_is_counted_with_the_length_of_the_recording(self):
+        import subprocess
+        job = self.meeting('20261019-105319')
+        (job / '錄音.m4a').write_bytes(b'audio')
+        os.environ['VINUTES_MEETING'] = job.name
+
+        def script(name, *args, **kw):
+            if name == 'transcribe.py':
+                (job / '逐字稿.txt').write_text('[00:01] 大家好\n', encoding='utf-8')
+                return subprocess.CompletedProcess([], 0, f'TRANSCRIPT {job}/逐字稿.txt (878 lines, language zh, '
+                                                          'audio 40:19, took 151s)\n', '')
+            return subprocess.CompletedProcess([], 0, '', '')
+        self.am.script = script
+        self.am.transcribe(job, {'audio': '錄音.m4a', 'started': '2026-10-19T10:53:19+08:00'})
+        [line] = [e for e in usage.events(usage.now().strftime('%Y-%m')) if e['kind'] == 'transcribe']
+        self.assertEqual((line['meeting'], line['audio']), ('20261019-105319', 2419))
+        self.assertGreaterEqual(line['s'], 0)
+
+    def test_a_mail_sent_is_counted_with_its_recipients(self):
+        import subprocess
+        job = self.meeting('20261019-170440')
+        minutes = self.root / '週會_會議紀錄.md'
+        minutes.write_text('# 週會\n', encoding='utf-8')
+        (job / 'result.json').write_text(json.dumps({
+            'title': '週會', 'minutes_md': str(minutes), 'doc_url': 'https://docs.google.com/document/d/' + 'D' * 30,
+            'mail': {'to': ['amy@example.com', 'ken@example.com'], 'subject': '週會紀錄'}}))
+        (job / self.am.BODY).write_text('會議紀錄如連結。', encoding='utf-8')
+        os.environ['VINUTES_MEETING'] = job.name
+        self.am.script = lambda name, *args, **kw: subprocess.CompletedProcess(
+            [], 0, '確認碼: abc123\nSENT 18f0 | From: me | To: amy\n', '')
+        self.am.send(job, None, None, 'gdoc', False, 'abc123')
+        [line] = [e for e in usage.events(usage.now().strftime('%Y-%m')) if e['kind'] == 'mail']
+        self.assertEqual((line['meeting'], line['to']), ('20261019-170440', 2))
+
+
 if __name__ == '__main__':
     unittest.main()

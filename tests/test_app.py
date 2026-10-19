@@ -3159,3 +3159,257 @@ class ProjectBrief(unittest.TestCase):
         self.assertEqual([r.wait() for r in runs], [0, 0, 0, 0])
         self.assertEqual(sorted(self.briefs.projects()), ['P0', 'P1', 'P2', 'P3'])
         self.assertEqual({len(self.briefs.load(f'P{n}')['terms']) for n in range(4)}, {30})
+
+
+class EnterWithInputMethod(unittest.TestCase):
+    """注音 and the other input methods: the Enter that picks a word is not a send. WebKit fires that keydown after the
+    word is already in the box (isComposing false, keyCode 229), so every Enter in the window asks inputMethod(e)."""
+
+    def handlers(self, src):
+        found = []
+        for m in re.finditer(r"addEventListener\('keydown'", src):
+            depth = 0
+            for j in range(src.index('(', m.start()), len(src)):
+                depth += {'(': 1, ')': -1}.get(src[j], 0)
+                if depth == 0:
+                    break
+            if "'Enter'" in src[m.start():j]:
+                found.append(src[m.start():j])
+        return found
+
+    def test_every_enter_lets_the_input_method_have_it(self):
+        src = (Path(__file__).resolve().parent.parent / 'recorder' / 'app' / 'app.js').read_text(encoding='utf-8')
+        handlers = self.handlers(src)
+        self.assertGreaterEqual(len(handlers), 8)
+        self.assertEqual([h.split('\n')[0] for h in handlers if 'inputMethod(e)' not in h], [])
+        self.assertEqual(src.count('e.isComposing'), 1)        # only inside inputMethod: no half checks again
+
+
+# a 1×1 PNG: enough for a picture the AI is shown
+PNG = bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+                    '1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082')
+
+
+class AskTheAi(unittest.TestCase):
+    """The box under the minutes (Vin 2026-10-19): a pasted picture goes to the AI with the sentence, not into the
+    minutes; a 待確認 card that is wrong is put right through the AI, and one not worth handling is skipped. Neither
+    teaches Vinutes the wrong word the way 確認無誤 on a wrong guess does."""
+    job = Flows.job
+
+    def setUp(self):
+        import ai_runner
+        import briefs
+        Flows.setUp(self)
+        self.ai, self.briefs = ai_runner, briefs
+        self.saved_ai = {n: getattr(ai_runner, n) for n in ('find', 'run')}
+        self.saved_connect, self.saved_speaker = minutes_app.connect, minutes_app.cmd_speaker
+        minutes_app.connect = lambda: 'OFFLINE'      # nothing to pull: what is pushed is checked
+        ds.push = lambda doc_id, base, new: (ds.Plan([{'x': 1}], [], []), fake_doc(new), True)
+        ai_runner.find = lambda key=None: '/x/claude'
+        self.calls, self.code, self.change = [], 0, (lambda md: md)
+
+        def run(prompt, folder, **kw):
+            self.calls.append({'prompt': prompt, 'files': sorted(p.name for p in folder.iterdir()), **kw})
+            md = (folder / '紀錄.md').read_text(encoding='utf-8')
+            (folder / '紀錄.md').write_text(self.change(md), encoding='utf-8')
+            (folder / '說明.txt').write_text('改好了', encoding='utf-8')
+            return subprocess.CompletedProcess([], self.code, '', '')
+        ai_runner.run = run
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r.update(project='官網改版', check=[{'text': '「Fresh」推測是 Threads', 'heard': 'Fresh', 'meant': 'Threads'},
+                                          '講者 C 只有附和，未列與會', '講者 B 推測是 Kai'])
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        self.files = (minutes_app.PROJECT_PEOPLE, briefs.BRIEFS, minutes_app.CONFIG / 'glossary.md')
+        for f in self.files:
+            f.unlink(missing_ok=True)
+
+    def tearDown(self):
+        for name, fn in self.saved_ai.items():
+            setattr(self.ai, name, fn)
+        minutes_app.connect, minutes_app.cmd_speaker = self.saved_connect, self.saved_speaker
+        for f in self.files:
+            f.unlink(missing_ok=True)
+        Flows.tearDown(self)
+
+    def labels(self):
+        return [c['label'] for c in minutes_app.check_items(self.job())]
+
+    def main(self, *args):
+        argv, sys.argv = sys.argv, ['minutes_app.py', *args]
+        try:
+            minutes_app.main()
+        finally:
+            sys.argv = argv
+            for lock in minutes_app.TURN:
+                lock.close()
+            minutes_app.TURN.clear()
+
+    def test_a_pasted_picture_goes_to_the_ai_and_not_into_the_minutes(self):
+        picture = self.root / '貼上的圖片 2026-10-19 17.04.12.png'
+        picture.write_bytes(PNG)
+        self.change = lambda md: md.replace('10 萬元。', '12 萬元。')
+        self.main('ask', str(self.job_dir), '預算改成截圖上的數字', '--pictures', json.dumps([str(picture)]))
+        call = self.calls[-1]
+        self.assertIn('screenshot-1.png', call['files'])
+        self.assertIn('screenshot-1.png', call['prompt'])
+        self.assertIn('預算改成截圖上的數字', call['prompt'])
+        self.assertEqual([p.name for p in call['pictures']], ['screenshot-1.png'])
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('活動預算確定為 12 萬元。', md)
+        self.assertNotIn('貼上的圖片', md)
+
+    def test_a_request_without_pictures_reads_as_before(self):
+        self.main('ask', str(self.job_dir), '主持人是王小明')
+        self.assertIn('主持人是王小明', self.calls[-1]['prompt'])
+        self.assertNotIn('screenshot', self.calls[-1]['prompt'])
+        self.assertEqual(self.calls[-1]['pictures'], [])
+
+    def test_codex_is_handed_the_pictures_before_the_prompt(self):
+        folder = self.root / 'work'
+        folder.mkdir()
+        codex, _ = self.ai.command('codex', '/x/codex', 'P', folder, write=False, pictures=[folder / 'screenshot-1.png'])
+        self.assertEqual(codex[-1], 'P')
+        self.assertIn(f'--image={folder / "screenshot-1.png"}', codex)
+        claude, _ = self.ai.command('claude', '/x/claude', 'P', folder, write=False, pictures=[folder / 'screenshot-1.png'])
+        self.assertFalse([a for a in claude if a.startswith('--image')])   # Claude opens the file itself
+
+    def test_skipping_a_guess_takes_the_card_off_and_learns_nothing(self):
+        minutes_app.cmd_skip(self.job(), '「Fresh」推測是 Threads')
+        self.assertNotIn('「Fresh」推測是 Threads', self.labels())
+        self.assertNotIn('「Fresh」推測是 Threads', [c['label'] for c in self.outs[-1]['check']])
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])
+        self.assertNotIn('Fresh', self.glossary())
+        self.assertIn('略過', ' '.join(e['text'] for e in self.job().log_entries()))
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_skip(self.job(), '「Fresh」推測是 Threads')    # already gone
+
+    def glossary(self):
+        path = minutes_app.CONFIG / 'glossary.md'
+        return path.read_text(encoding='utf-8') if path.is_file() else ''
+
+    def test_a_wrong_guess_put_right_changes_the_minutes_and_learns_the_right_word(self):
+        self.change = lambda md: md.replace('Threads 與', 'Threads App 與')
+        minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', 'Threads App')
+        prompt = self.calls[-1]['prompt']
+        for word in ('Fresh', 'Threads', 'Threads App'):
+            self.assertIn(word, prompt)
+        self.assertIn('Threads App 與 Instagram', self.md_path.read_text(encoding='utf-8'))
+        self.assertNotIn('「Fresh」推測是 Threads', self.labels())
+        self.assertEqual([(x['word'], x['heard']) for x in self.briefs.load('官網改版')['terms']], [('Threads App', ['Fresh'])])
+        self.assertIn('Threads App', ' '.join(e['text'] for e in self.job().log_entries()))
+
+    def test_a_correction_the_ai_could_not_make_keeps_the_card(self):
+        self.code = 1
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', 'Threads App')
+        self.assertIn('「Fresh」推測是 Threads', self.labels())
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])
+
+    def test_a_note_without_a_word_goes_to_the_ai_as_it_is(self):
+        self.change = lambda md: md.replace('與會人員：Amy、Kai', '與會人員：Amy、Kai、C')
+        minutes_app.cmd_correct(self.job(), '講者 C 只有附和，未列與會', 'C 是 Amy，有與會')
+        prompt = self.calls[-1]['prompt']
+        self.assertIn('講者 C 只有附和，未列與會', prompt)
+        self.assertIn('C 是 Amy，有與會', prompt)
+        self.assertNotIn('講者 C 只有附和，未列與會', self.labels())
+
+    def test_a_correction_the_ai_leaves_undone_keeps_the_card_and_learns_nothing(self):
+        minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', 'Threads App')   # the minutes come back unchanged
+        self.assertIn('「Fresh」推測是 Threads', self.labels())
+        self.assertEqual(self.briefs.load('官網改版')['terms'], [])
+        self.assertIn('「Fresh」推測是 Threads', [c['label'] for c in self.outs[-1]['check']])
+
+    def test_a_new_name_put_right_goes_into_the_brief_with_its_role(self):
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = [{'text': '新的人名：Grace', 'person': 'Grace', 'role': '說明會窗口'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+        self.change = lambda md: md.replace('Amy、Kai', 'Amy、Kai、Gracie')
+        minutes_app.cmd_correct(self.job(), '新的人名：Grace', 'Gracie')
+        self.assertEqual([(x['name'], x['role']) for x in self.briefs.load('官網改版')['people']], [('Gracie', '說明會窗口')])
+        self.assertIn('Grace', self.calls[-1]['prompt'])
+
+    def test_requests_left_waiting_when_the_window_closes_are_done_in_order(self):
+        self.change = lambda md: md.replace('10 萬元', '12 萬元', 1) if '12 萬元' not in md else md.replace('Threads 與', 'Threads App 與')
+        items = [{'kind': 'ask', 'text': '預算改成 12 萬'}, {'kind': 'correct', 'item': '沒有這一項', 'text': 'x'},
+                 {'kind': 'correct', 'item': '「Fresh」推測是 Threads', 'text': 'Threads App'}]
+        self.main('ask_many', str(self.job_dir), json.dumps(items, ensure_ascii=False))
+        self.assertEqual(len(self.calls), 2)                       # the missing item is passed over, the rest still go
+        self.assertIn('預算改成 12 萬', self.calls[0]['prompt'])
+        self.assertIn('Threads App', self.calls[1]['prompt'])
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('12 萬元', md)
+        self.assertIn('Threads App 與', md)
+        self.assertNotIn('「Fresh」推測是 Threads', self.labels())
+
+    def test_a_voice_guess_put_right_names_the_voice(self):
+        named = []
+        minutes_app.cmd_speaker = lambda job, group, name, line='': named.append((group, name))
+        minutes_app.cmd_correct(self.job(), '講者 B 推測是 Kai', 'Kenny')
+        self.assertEqual(named, [('B', 'Kenny')])
+        self.assertEqual(self.calls, [])
+
+    def test_an_empty_correction_is_refused(self):
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', '  ')
+        self.assertEqual(self.calls, [])
+
+
+class VoiceOff(unittest.TestCase):
+    """人員: a voice that is nobody (the recording split one person in two, or a noise) can be taken off and put back
+    (Vin 2026-10-19: 講者 C 是語音誤判，要有地方移除). Its lines keep their words without a speaker, nothing about it is
+    remembered, and the 待確認 items about it go with it."""
+    job = Flows.job
+
+    def setUp(self):
+        MeetingPeople.setUp(self)
+        (self.job_dir / '逐字稿.txt').write_text('[00:01] 大家好\n[00:05] 對\n[00:09] 我們開始\n', encoding='utf-8')
+        (self.job_dir / '講者.json').write_text(json.dumps({'groups': {
+            'A': {'name': '', 'seconds': 300, 'sample': [1, 5]}, 'B': {'name': '', 'seconds': 200, 'sample': [9, 12]},
+            'C': {'name': '', 'seconds': 40, 'sample': [5, 7]}}, 'lines': ['A', 'C', 'B'], 'fixed': {}}, ensure_ascii=False))
+        r = json.loads((self.job_dir / 'result.json').read_text())
+        r['check'] = ['講者 C 只有附和，未列與會', {'text': '「HOWAN PASS」推測是台灣 PASS'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
+
+    def tearDown(self):
+        MeetingPeople.tearDown(self)
+
+    def test_a_voice_taken_off_leaves_the_people_tab_and_its_lines_lose_the_name(self):
+        minutes_app.cmd_drop_voice(self.job(), 'C')
+        self.assertEqual([v['group'] for v in minutes_app.voices_view(self.job())], ['A', 'B'])
+        self.assertEqual([v['group'] for v in self.outs[-1]['voices_off']], ['C'])
+        self.assertEqual([(x['text'], x['who']) for x in minutes_app.transcript(self.job())],
+                         [('大家好', '講者 A'), ('對', ''), ('我們開始', '講者 B')])
+        self.assertEqual([c['label'] for c in self.outs[-1]['check']], ['「HOWAN PASS」推測是台灣 PASS'])
+        self.assertIn('移除講者 C', ' '.join(e['text'] for e in self.job().log_entries()))
+        import speakers
+        self.assertNotIn('講者 C', speakers.labelled_transcript(self.job_dir))     # the AI does not see it as a person
+
+    def test_a_voice_taken_off_can_be_put_back(self):
+        minutes_app.save_speaker(self.job(), 'C', 'Kai')                  # the name the minutes gave it
+        minutes_app.cmd_drop_voice(self.job(), 'C')
+        self.assertNotIn('C', minutes_app.speaker_map(self.job()))
+        minutes_app.cmd_drop_voice(self.job(), 'C', back=True)
+        self.assertEqual([v['group'] for v in minutes_app.voices_view(self.job())], ['A', 'B', 'C'])
+        self.assertEqual(self.outs[-1]['voices_off'], [])
+        self.assertEqual(minutes_app.transcript(self.job())[1]['who'], '講者 C')
+        self.assertEqual(minutes_app.speaker_map(self.job())['C'], 'Kai')
+        self.assertIn('講者 C 只有附和，未列與會', [c['label'] for c in minutes_app.check_items(self.job())])
+
+    def test_a_named_voice_taken_off_is_forgotten_as_that_person(self):
+        import speakers
+        forgot = []
+        saved = speakers.forget
+        speakers.forget = lambda name, tags=(), job='': forgot.append(name)
+        try:
+            data = json.loads((self.job_dir / '講者.json').read_text(encoding='utf-8'))
+            data['groups']['C']['name'] = 'Kai'
+            (self.job_dir / '講者.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+            minutes_app.cmd_drop_voice(self.job(), 'C')
+        finally:
+            speakers.forget = saved
+        self.assertEqual(forgot, ['Kai'])
+        self.assertEqual(minutes_app.transcript(self.job())[1]['who'], '')
+
+    def test_an_unknown_voice_is_refused(self):
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_drop_voice(self.job(), 'Z')

@@ -279,6 +279,10 @@ def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
     mine = {'owner': owner(), 'sender_name': sender_name(), 'our_company': setting('our_company', 'MINUTES_OUR_COMPANY'),
             'style': setting('style', 'MINUTES_STYLE')}
     write_json(ref / '使用者設定.json', {k: v for k, v in mine.items() if v})
+    import briefs                                    # every project's people and terms; the agent picks the project
+    brief = briefs.markdown(lang=lang)
+    if brief:
+        (ref / briefs.FILE_NAME).write_text(brief, encoding='utf-8')
     recent = []
     for other in sorted(job.parent.iterdir(), reverse=True):
         r = read_json(other / 'result.json')
@@ -360,6 +364,7 @@ def prompt(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str
         f'- 錄音時間：{started} 到 {ended}{length}\n'
         f'- 行事曆（程式已經挑好這場會議）：{job}/行事曆.txt\n'
         f'- 詞彙表與使用者設定：{job}/參考/\n'
+        f'- 專案小抄（有的話）：{job}/參考/專案小抄.md，每個專案的人員與負責的事、名詞、背景；先判斷這場屬於哪個專案\n'
         f'- 之前的會議名稱、專案與標籤：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
         f'- 之前的會議紀錄（補背景用）：{job}/參考/舊紀錄/\n'
         f'- 紀錄寫成 {job}/{DRAFT}，程式會照 result.json 的 title 存進紀錄資料夾。\n'
@@ -390,6 +395,8 @@ def prompt_en(job: Path, meta: dict, spoken: str) -> str:
         f'- Recording: {started} to {ended}{length}\n'
         f'- The calendar (the program has picked the meeting): {job}/行事曆.txt\n'
         f'- Glossaries and the user\'s settings: {job}/參考/\n'
+        f'- Project briefs, if any: {job}/參考/專案小抄.md (each project\'s people and what they do, terms, background); '
+        'decide which project this meeting is first\n'
         f'- Earlier meeting names, projects and tags: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
         f'- Earlier minutes, for background: {job}/參考/舊紀錄/\n'
         f'- Write the minutes to {job}/{DRAFT}; the program files them under the title in result.json.\n'

@@ -495,6 +495,26 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .pset .plbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .pset .pinput { height: 30px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); font-size: 13px; }
 .pset .dnote.small { font-size: 12px; color: var(--muted); }
+/* 專案設定 › 小抄: the project's people, terms and background */
+.sheet.confirm.pset.wide { width: 600px; }
+.pset .ptab { margin-left: auto; }
+.bsec { border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
+.bsec > header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.bsec > header .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.bsec > header .btn { margin-left: auto; height: 22px; padding: 0 10px; font-size: 12px; }
+.brow { display: grid; grid-template-columns: 180px 1fr 18px; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.brow:last-child { border-bottom: 0; }
+.brow .bname { min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.brow .bname small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+.brow .pinput { height: 26px; min-width: 0; }
+.brow .pinput:not(:hover):not(:focus):not(:placeholder-shown) { border-color: transparent; background: transparent; }
+.bx { all: unset; cursor: pointer; color: var(--faint); font-size: 15px; line-height: 1; text-align: center; }
+.bx:hover, .bx:focus-visible { color: var(--red); }
+.bempty { padding: 8px 10px; font-size: 12px; color: var(--muted); }
+.bbg { display: block; box-sizing: border-box; width: calc(100% - 20px); height: auto; min-height: 72px; margin: 8px 10px; padding: 6px 8px; line-height: 1.5; resize: vertical; }
+.bwait { display: flex; justify-content: center; padding: 24px 0; }
+.card.guess .text .role { display: block; font-size: 12px; color: var(--muted); }
+.learn .lseg button { padding: 1px 8px; font-size: 11px; }
 
 /* 人員: who each voice is */
 .pickwrap { position: relative; display: flex; flex-direction: column; gap: 4px; }

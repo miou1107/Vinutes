@@ -8,8 +8,9 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
                                                    (shown: the token of the preview the user was editing)
   minutes_app.py learn <job>                       what the user changed by hand since the last time -> glossary / notes
   minutes_app.py unlearn <job> <id> | relearn <job> <id>
-  minutes_app.py ask <job> <request> [--pictures <json>]  Claude changes the minutes as asked (restricted, file tools
-                                                   only), looking at the pictures pasted with it
+  minutes_app.py ask <job> <request> [--pictures <json>] [--refs <json>]  Claude changes the minutes as asked
+                                                   (restricted, file tools only), looking at the pictures pasted with
+                                                   it and the files and links handed with it (references.py)
   minutes_app.py quick <job> <name>                the same with a preset request (精簡摘要, 完整詳盡, ...)
   minutes_app.py undo <job>                        back to the minutes before the last Claude change
   minutes_app.py reply <job> <comment id> <text>   answer a comment on the Google Doc
@@ -19,7 +20,8 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py drop_voice <job> <letter> [back]  移除講者 X under 人員 (a voice that is no one), or put it back
   minutes_app.py correct <job> <item> <right>      the user puts a guess right: Claude changes the minutes to it
   minutes_app.py ask_many <job> <json>             requests still waiting when the window closed, one after another
-  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」 (attachments.py)
+  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」, each led by
+                                                   its own note or else <note> (attachments.py)
   minutes_app.py log <job>                         the activity log, newest first
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
                                                    learns the user's own edits; the side panel's lists again
@@ -1794,7 +1796,7 @@ def answer(job: Job, result: dict, html: bool = False, **extra):
     data = {'saved_at': f'{now():%H:%M}', 'conflicts': result['conflicts'], 'held': result['held'],
             'warning': result['warning'], 'todo': todo_items(job, md), 'attendees': attendees(md), 'skipped': skipped,
             'people': meeting_people(job), 'speakers': speakers_shown(job), 'silent': silent_people(job),
-            'check': check_items(job), **extra}
+            'check': check_items(job), 'attachments': attachments_listed(md), **extra}
     if result['reload'] or skipped or html:
         data['html'] = preview(md, result['marks'], current_anchors(job, md))
         data['shown'] = page_token(job, data['html'])
@@ -1834,6 +1836,11 @@ def current_anchors(job: Job, md: str) -> list[dict]:
 
 
 # --- files, links and pictures for 「八、補充資訊」 ---------------------------------------------------
+
+def attachments_listed(md: str) -> list[dict]:
+    import attachments
+    return attachments.listed(md)
+
 
 def cmd_attach(job: Job, note: str, raw: str):
     """What the user picked in the box under the Doc, with the sentence they wrote about it, as lines of the
@@ -1955,10 +1962,10 @@ def cmd_replace(job: Job, old: str, new: str):
 
 # --- Claude changes the minutes --------------------------------------------------------------
 
-def ai_edit(job: Job, request: str, label: str, pictures: list[Path] = (), settle=None):
-    """The AI changes the minutes as asked. `pictures`: what the user pasted with the sentence, for the AI to look
-    at, never into the minutes. `settle(changed, new)`: a 待確認 card put right, run once the AI has answered;
-    returns what it learned."""
+def ai_edit(job: Job, request: str, label: str, pictures: list[Path] = (), settle=None, refs: list[dict] = ()):
+    """The AI changes the minutes as asked. `pictures`: what the user pasted with the sentence, and `refs` the files
+    and links handed with it (references.py), for the AI to look at, never into the minutes. `settle(changed, new)`:
+    a 待確認 card put right, run once the AI has answered; returns what it learned."""
     sys.path.insert(0, str(SCRIPTS))
     import ai_runner
     from auto_minutes import env
@@ -1985,8 +1992,10 @@ def ai_edit(job: Job, request: str, label: str, pictures: list[Path] = (), settl
     brief = briefs.markdown(project_of(job), job.lang) if project_of(job) else ''
     if brief:
         (work / briefs.FILE_NAME).write_text(brief, encoding='utf-8')
-    shown = picture_copies(pictures, work)
-    prompt = edit_prompt(job.lang, request, [p.name for p in shown])
+    import references
+    more, read = references.prepare(list(refs), work)
+    shown = picture_copies(list(pictures) + more, work)
+    prompt = edit_prompt(job.lang, request, [p.name for p in shown], read)
     try:
         done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env(), pictures=shown, task='edit')
     except subprocess.TimeoutExpired:
@@ -2010,9 +2019,10 @@ def picture_copies(pictures: list[Path], work: Path) -> list[Path]:
     return shown
 
 
-def edit_prompt(lang: str, request: str, pictures: list[str] = ()) -> str:
+def edit_prompt(lang: str, request: str, pictures: list[str] = (), refs: list[tuple[str, str]] = ()) -> str:
     """What the AI is told for one change. The minutes keep their language; the one line it writes back to the
-    user (說明.txt) is in the app's language. `pictures`: the screenshots in the folder that came with the request."""
+    user (說明.txt) is in the app's language. `pictures`: the screenshots in the folder that came with the request;
+    `refs`: the reference files there, as (name in the folder, the file's own name or the link)."""
     from i18n import ui_lang
     if lang == 'en':
         reply = ('one sentence in English, under 20 words, saying what you changed, e.g. "Filled in the chair: Amy Chen"'
@@ -2022,6 +2032,8 @@ def edit_prompt(lang: str, request: str, pictures: list[str] = ()) -> str:
             f'The user\'s request: {request}\n'
             + (f'The user attached screenshots: {", ".join(pictures)}. Open them first: what they mark is the place '
                'to change. The screenshots themselves do not go into 紀錄.md.\n' if pictures else '')
+            + (f'The user attached reference material: {", ".join(f"{n} ({what})" for n, what in refs)}. Read it '
+               "first and change the minutes from what it says; don't paste it into 紀錄.md whole.\n" if refs else '')
             + 'Rules:\n'
             '- Edit 紀錄.md directly and change only what the request is about; leave every other paragraph exactly as it is.\n'
             '- Keep the layout: headings with #, ##, ###, lists with - or 1., tables with |.\n'
@@ -2039,6 +2051,8 @@ def edit_prompt(lang: str, request: str, pictures: list[str] = ()) -> str:
         f'使用者的要求：{request}\n'
         + (f'使用者附了截圖：{"、".join(pictures)}。先打開來看，截圖上標示的就是要改的地方；截圖本身不要放進 紀錄.md。\n'
            if pictures else '')
+        + (f'使用者附了參考資料：{"、".join(f"{n}（{what}）" for n, what in refs)}。先讀過，照裡面的內容修改紀錄；'
+           '參考資料本身不要整份貼進 紀錄.md。\n' if refs else '')
         + '規則：\n'
         '- 直接修改 紀錄.md，只改要求提到的地方，其他段落一個字都不要動。\n'
         '- 保留原本的格式：標題用 #、##、###，條列用 - 或 1.，表格用 |。\n'
@@ -2257,7 +2271,7 @@ def cmd_correct(job: Job, label: str, right: str):
 
 def cmd_ask_many(job: Job, raw: str):
     """What was still waiting under 待修改 when the window closed (each {kind: ask | quick | correct, text, item,
-    pictures}), done in order in this one process, which holds the meeting's turn; one that cannot be done is
+    pictures, refs}), done in order in this one process, which holds the meeting's turn; one that cannot be done is
     passed over and the rest still go."""
     try:
         items = [x for x in json.loads(raw) if isinstance(x, dict)]
@@ -2273,8 +2287,9 @@ def cmd_ask_many(job: Job, raw: str):
                 key = QUICK_NAMES.get(text, text)
                 ai_edit(job, QUICK[job.lang][key], key)
             elif kind == 'ask' and text:
+                import references
                 pictures = [Path(p) for p in x.get('pictures') or [] if isinstance(p, str)]
-                ai_edit(job, text, text, pictures)
+                ai_edit(job, text, text, pictures, refs=references.checked(x.get('refs') or []))
         except SystemExit as err:
             job.log(me(), str(err.code or ''))
 
@@ -2427,7 +2442,7 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'transcript': transcript(job), 'voices': voices_view(job), 'voices_off': voices_off(job),
             'voice_names': speakers.known_names(), 'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(),
             'speakers': speakers_shown(job), 'silent': silent_people(job),
-            'attach_files': len(linked_files(job, md)), **ai_choice(),
+            'attach_files': len(linked_files(job, md)), 'attachments': attachments_listed(md), **ai_choice(),
             'audio': str(audio) if audio.is_file() else '',
             'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file(), 'minutes_lang': job.lang,
             **neighbours(job)}
@@ -2645,10 +2660,15 @@ def main():
     elif cmd == 'move_learned' and len(rest) == 2 and rest[0].isdigit():
         cmd_move_learned(job, int(rest[0]), rest[1])
     elif cmd == 'ask' and rest:
-        pictures = []
-        if len(rest) >= 3 and rest[-2] == '--pictures':   # what the user pasted with the sentence (the app checks them)
-            pictures, rest = [Path(p) for p in json.loads(rest[-1]) if isinstance(p, str)], rest[:-2]
-        ai_edit(job, ' '.join(rest).strip(), ' '.join(rest).strip(), pictures)
+        import references
+        pictures, refs = [], []
+        while len(rest) >= 3 and rest[-2] in ('--pictures', '--refs'):   # handed with the sentence (the app checks them)
+            if rest[-2] == '--pictures':
+                pictures = [Path(p) for p in json.loads(rest[-1]) if isinstance(p, str)]
+            else:
+                refs = references.checked(json.loads(rest[-1]))
+            rest = rest[:-2]
+        ai_edit(job, ' '.join(rest).strip(), ' '.join(rest).strip(), pictures, refs=refs)
     elif cmd == 'quick' and rest and QUICK_NAMES.get(rest[0], rest[0]) in QUICK['en']:
         key = QUICK_NAMES.get(rest[0], rest[0])
         ai_edit(job, QUICK[job.lang][key], key)

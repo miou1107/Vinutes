@@ -1234,6 +1234,26 @@ class Attach(Flows):
                                 '- \\# Ken 會後補充：[https://example.com/a](https://example.com/a)'])
         self.assertEqual(md.count('## 八、補充資訊'), 1)
 
+    def test_each_item_is_led_by_its_own_note_and_the_row_above_the_minutes_lists_them(self):
+        r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Pitt 要的\n各通路業績 '},
+                        {'kind': 'link', 'url': 'https://example.com/post', 'note': ''})
+        tail = self.md_path.read_text(encoding='utf-8').split('## 八、補充資訊', 1)[1].strip().splitlines()
+        self.assertEqual(tail, ['- Pitt 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
+                                '- [https://example.com/post](https://example.com/post)'])
+        self.assertEqual(r['attachments'], [
+            {'name': '9月流量報表.xlsx', 'link': 'https://drive.google.com/file/d/id1/view', 'note': 'Pitt 要的 各通路業績',
+             'kind': 'file'},
+            {'name': 'https://example.com/post', 'link': 'https://example.com/post', 'note': '', 'kind': 'link'}])
+
+    def test_the_list_reads_lines_typed_in_the_doc_and_stops_at_the_next_section(self):
+        md = (MINUTES + '\n## 八、補充資訊\n\n- Ken 的簡報：[a\\]b.pdf](https://drive.google.com/file/d/X/view)\n'
+              '- 沒有連結的一行\n![主視覺.png](m_附件/主視覺.png)\n- [主視覺.png](https://drive.google.com/file/d/Y/view)\n'
+              '\n## 九、其他\n\n- [不算](https://example.com)\n')
+        self.assertEqual([(a['name'], a['note'], a['kind']) for a in self.at.listed(md)],
+                         [('a]b.pdf', 'Ken 的簡報', 'file'), ('主視覺.png', '', 'image')])
+        self.assertEqual(self.at.listed(MINUTES), [])
+
+
     def test_lines_go_into_an_existing_section_eight_before_whatever_follows_it(self):
         md = MINUTES.replace('## 四、行動方案', '## 八、補充資訊\n\n- 舊的一行\n\n## 四、行動方案')
         out = self.at.add_lines(md, ['- 新的一行'])
@@ -3430,6 +3450,197 @@ class AskTheAi(unittest.TestCase):
         with self.assertRaises(SystemExit):
             minutes_app.cmd_correct(self.job(), '「Fresh」推測是 Threads', '  ')
         self.assertEqual(self.calls, [])
+
+
+class References(unittest.TestCase):
+    """＋ beside the box under the minutes (Vin 2026-10-19): files and links handed to the AI with a sentence are read
+    into its folder as 參考資料-1, -2, … and never go into the minutes."""
+    job = Flows.job
+    setUp, tearDown, main = AskTheAi.setUp, AskTheAi.tearDown, AskTheAi.main
+
+    def run_ai(self, *refs, pictures=()):
+        import ai_runner
+        seen = {}
+        run = ai_runner.run
+
+        def reading(prompt, folder, **kw):
+            seen.update({p.name: p.read_bytes() for p in folder.iterdir() if p.name.startswith('參考資料')})
+            return run(prompt, folder, **kw)
+        ai_runner.run = reading
+        args = ['ask', str(self.job_dir), '照參考資料補上預算', '--refs', json.dumps(list(refs), ensure_ascii=False)]
+        if pictures:
+            args += ['--pictures', json.dumps([str(p) for p in pictures])]
+        self.main(*args)
+        return seen
+
+    def office(self, name: str, parts: dict) -> Path:
+        import zipfile
+        path = self.root / name
+        with zipfile.ZipFile(path, 'w') as z:
+            for part, xml in parts.items():
+                z.writestr(part, xml)
+        return path
+
+    def test_word_excel_powerpoint_and_pdf_become_files_the_ai_reads(self):
+        ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        xlsx = self.office('10月業績.xlsx', {
+            'xl/workbook.xml': f'<workbook {ns}><sheets><sheet name="通路"/><sheet name="合計"/></sheets></workbook>',
+            'xl/sharedStrings.xml': f'<sst {ns}><si><t>通路</t></si><si><t>業績</t></si><si><r><t>官</t></r><r><t>網</t></r></si></sst>',
+            'xl/worksheets/sheet1.xml': f'<worksheet {ns}><sheetData><row><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>'
+                                        '<row><c t="s"><v>2</v></c><c><v>120000</v></c></row></sheetData></worksheet>',
+            'xl/worksheets/sheet2.xml': f'<worksheet {ns}><sheetData><row><c t="inlineStr"><is><t>總計</t></is></c>'
+                                        '<c><v>120000</v></c></row></sheetData></worksheet>'})
+        a = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+        pptx = self.office('提案.pptx', {
+            'ppt/slides/slide10.xml': f'<sld {a}><a:p><a:r><a:t>第十頁</a:t></a:r></a:p></sld>',
+            'ppt/slides/slide2.xml': f'<sld {a}><a:p><a:r><a:t>預算 </a:t></a:r><a:r><a:t>12 萬</a:t></a:r></a:p></sld>'})
+        src = self.root / '會議前說明.txt'
+        src.write_text('主持人是王小明', encoding='utf-8')
+        subprocess.run(['/usr/bin/textutil', '-convert', 'docx', str(src)], check=True, capture_output=True)
+        pdf = self.root / '報價.pdf'
+        pdf.write_bytes(b'%PDF-1.4 x')
+        seen = self.run_ai(*[{'kind': 'file', 'path': str(p)} for p in (xlsx, pptx, self.root / '會議前說明.docx', pdf)])
+        self.assertEqual(sorted(seen), ['參考資料-1.txt', '參考資料-2.txt', '參考資料-3.txt', '參考資料-4.pdf'])
+        self.assertEqual(seen['參考資料-1.txt'].decode().splitlines(),
+                         ['## 通路', '通路\t業績', '官網\t120000', '', '## 合計', '總計\t120000'])
+        self.assertEqual(seen['參考資料-2.txt'].decode().splitlines(), ['## Slide 1', '預算 12 萬', '', '## Slide 2', '第十頁'])
+        self.assertIn('主持人是王小明', seen['參考資料-3.txt'].decode())
+        prompt = self.calls[-1]['prompt']
+        self.assertIn('參考資料-1.txt（10月業績.xlsx）', prompt)
+        self.assertIn('參考資料-4.pdf（報價.pdf）', prompt)
+        self.assertNotIn('參考資料', self.md_path.read_text(encoding='utf-8'))
+
+    def test_a_picture_handed_with_the_plus_goes_with_the_screenshots(self):
+        picture = self.root / '白板.png'
+        picture.write_bytes(PNG)
+        seen = self.run_ai({'kind': 'file', 'path': str(picture)})
+        self.assertEqual(seen, {})
+        self.assertEqual([p.name for p in self.calls[-1]['pictures']], ['screenshot-1.png'])
+        self.assertNotIn('使用者附了參考資料', self.calls[-1]['prompt'])
+
+    def web(self, pages: dict, drive: dict | None = None):
+        """urllib answers with pages[url] = (bytes, content type, address it lands on); Drive with drive[url]."""
+        import attachments
+        import email.message
+        import references
+        asked = []
+
+        class Resp:
+            def __init__(self, url):
+                self.body, ctype, self.landed = pages[url]
+                self.headers = email.message.Message()
+                self.headers['Content-Type'] = ctype
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def geturl(self): return self.landed
+            def read(self, n=-1): return self.body
+        saved = references.urllib.request.urlopen, attachments.call
+        references.urllib.request.urlopen = lambda req, timeout=0: asked.append(req.full_url) or Resp(req.full_url)
+        attachments.call = lambda url, want='json', **k: asked.append(url) or (drive or {})[url]
+        self.addCleanup(lambda: (setattr(references.urllib.request, 'urlopen', saved[0]),
+                                 setattr(attachments, 'call', saved[1])))
+        return asked
+
+    def test_a_page_is_read_as_its_text_and_a_google_file_through_the_login(self):
+        page = '<html><head><title>x</title><style>p{}</style></head><body><script>var a</script>' \
+               '<h1>FUNIT 9 月</h1><p>流量   12 萬</p></body></html>'
+        big5 = '<html><head><meta charset="big5"></head><body><p>預算 12 萬</p></body></html>'.encode('big5')
+        doc = ds.DRIVE + 'S' * 30
+        self.web({'https://example.com/report': (page.encode(), 'text/html; charset=utf-8', 'https://example.com/report'),
+                  'https://example.com/big5': (big5, 'text/html', 'https://example.com/big5')},
+                 {doc + '?fields=name,mimeType': {'name': '預算', 'mimeType': 'application/vnd.google-apps.document'},
+                  doc + '/export?mimeType=text/plain': '\ufeff預算 12 萬'.encode()})
+        seen = self.run_ai({'kind': 'link', 'url': 'https://example.com/report'},
+                           {'kind': 'link', 'url': 'https://docs.google.com/document/u/1/d/' + 'S' * 30 + '/edit'},
+                           {'kind': 'link', 'url': 'https://example.com/big5'})
+        self.assertEqual(seen['參考資料-1.txt'].decode(), 'https://example.com/report\n\nx\nFUNIT 9 月\n流量 12 萬')
+        self.assertTrue(seen['參考資料-2.txt'].decode().endswith('\n\n預算 12 萬'))     # no mark before the words
+        self.assertIn('預算 12 萬', seen['參考資料-3.txt'].decode())                    # the page's own encoding
+        self.assertIn('參考資料-1.txt（https://example.com/report）', self.calls[-1]['prompt'])
+
+    def test_every_tab_of_a_google_sheet_and_a_pdf_kept_in_drive_are_read(self):
+        sheet, pdf = ds.DRIVE + 'T' * 30, ds.DRIVE + 'P' * 30
+        ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        xlsx = self.office('x.xlsx', {
+            'xl/workbook.xml': f'<workbook {ns}><sheets><sheet name="一月"/><sheet name="二月"/></sheets></workbook>',
+            'xl/worksheets/sheet1.xml': f'<worksheet {ns}><sheetData><row><c t="inlineStr"><is><t>a</t></is></c></row></sheetData></worksheet>',
+            'xl/worksheets/sheet2.xml': f'<worksheet {ns}><sheetData><row><c t="inlineStr"><is><t>預算</t></is></c></row></sheetData></worksheet>'})
+        self.web({}, {sheet + '?fields=name,mimeType': {'name': '業績', 'mimeType': 'application/vnd.google-apps.spreadsheet'},
+                      sheet + '/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': xlsx.read_bytes(),
+                      pdf + '?fields=name,mimeType': {'name': '報價.pdf', 'mimeType': 'application/pdf'},
+                      pdf + '?alt=media': b'%PDF-1.4 x'})
+        seen = self.run_ai({'kind': 'link', 'url': 'https://docs.google.com/spreadsheets/d/' + 'T' * 30 + '/edit#gid=2'},
+                           {'kind': 'link', 'url': 'https://drive.google.com/file/d/' + 'P' * 30 + '/view?usp=sharing'})
+        self.assertIn('## 二月\n預算', seen['參考資料-1.txt'].decode())
+        self.assertEqual(seen['參考資料-2.pdf'], b'%PDF-1.4 x')
+        self.assertEqual(sorted(p for p in self.calls[-1]['files'] if '參考' in p), ['參考資料-1.txt', '參考資料-2.pdf'])
+
+    def test_a_page_that_sends_you_to_sign_in_stops_before_the_ai_starts(self):
+        self.web({'https://intra.example.com/doc': (b'<html><body>Sign in</body></html>', 'text/html',
+                                                   'https://intra.example.com/login?next=/doc')})
+        with self.assertRaises(SystemExit) as stop:
+            self.run_ai({'kind': 'link', 'url': 'https://intra.example.com/doc'})
+        self.assertIn('要登入才能看', str(stop.exception))
+        self.assertEqual(self.calls, [])
+
+    def test_sheets_and_slides_keep_the_order_shown_and_cells_their_columns(self):
+        ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        r = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        rels = lambda pairs: ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                              + ''.join(f'<Relationship Id="{i}" Target="{t}"/>' for i, t in pairs) + '</Relationships>')
+        xlsx = self.office('排序.xlsx', {
+            'xl/workbook.xml': f'<workbook {ns} {r}><sheets><sheet name="後來加的" r:id="r2"/><sheet name="原本的" r:id="r1"/></sheets></workbook>',
+            'xl/_rels/workbook.xml.rels': rels([('r1', 'worksheets/sheet1.xml'), ('r2', 'worksheets/sheet2.xml')]),
+            'xl/worksheets/sheet1.xml': f'<worksheet {ns}><sheetData><row><c r="A1" t="inlineStr"><is><t>a</t></is></c>'
+                                        '<c r="C1"><v>3</v></c></row></sheetData></worksheet>',
+            'xl/worksheets/sheet2.xml': f'<worksheet {ns}><sheetData><row><c r="B1"><v>2</v></c></row></sheetData></worksheet>'})
+        a = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+        pptx = self.office('排序.pptx', {
+            'ppt/presentation.xml': f'<presentation {r}><sldIdLst><sldId r:id="s2"/><sldId r:id="s1"/></sldIdLst></presentation>',
+            'ppt/_rels/presentation.xml.rels': rels([('s1', 'slides/slide1.xml'), ('s2', '/ppt/slides/slide2.xml')]),
+            'ppt/slides/slide1.xml': f'<sld {a}><a:p><a:r><a:t>原本第一頁</a:t></a:r></a:p></sld>',
+            'ppt/slides/slide2.xml': f'<sld {a}><a:p><a:r><a:t>移到最前面</a:t></a:r></a:p></sld>'})
+        log = self.root / '紀錄.log'
+        log.write_text('10:00 預算 12 萬', encoding='utf-8')
+        seen = self.run_ai(*[{'kind': 'file', 'path': str(p)} for p in (xlsx, pptx, log)])
+        self.assertEqual(seen['參考資料-1.txt'].decode().splitlines(),
+                         ['## 後來加的', '\t2', '', '## 原本的', 'a\t\t3'])
+        self.assertEqual(seen['參考資料-2.txt'].decode().splitlines()[:2], ['## Slide 1', '移到最前面'])
+        self.assertEqual(seen['參考資料-3.txt'].decode(), '10:00 預算 12 萬')
+
+    def test_a_link_that_needs_a_sign_in_stops_before_the_ai_starts(self):
+        import references
+        import urllib.error
+        saved = references.urllib.request.urlopen
+
+        def refuse(req, timeout=0):
+            raise urllib.error.HTTPError(req.full_url, 403, 'Forbidden', {}, None)
+        references.urllib.request.urlopen = refuse
+        try:
+            with self.assertRaises(SystemExit) as stop:
+                self.run_ai({'kind': 'link', 'url': 'https://example.com/private'})
+        finally:
+            references.urllib.request.urlopen = saved
+        self.assertIn('要登入才能看', str(stop.exception))
+        self.assertEqual(self.calls, [])
+
+    def test_a_kind_the_ai_cannot_read_and_a_missing_file_are_refused(self):
+        odd = self.root / '錄音.m4a'
+        odd.write_bytes(b'\x00\x01ftypM4A')
+        with self.assertRaises(SystemExit) as stop:
+            self.run_ai({'kind': 'file', 'path': str(odd)})
+        self.assertIn('錄音.m4a', str(stop.exception))
+        with self.assertRaises(SystemExit) as stop:
+            self.run_ai({'kind': 'file', 'path': str(self.root / '不見了.pdf')})
+        self.assertIn('找不到「不見了.pdf」', str(stop.exception))
+        self.assertEqual(self.calls, [])
+
+    def test_requests_left_waiting_keep_their_files(self):
+        src = self.root / '補充.md'
+        src.write_text('預算 12 萬', encoding='utf-8')
+        items = [{'kind': 'ask', 'text': '照參考資料補預算', 'refs': [{'kind': 'file', 'path': str(src)}]}]
+        self.main('ask_many', str(self.job_dir), json.dumps(items, ensure_ascii=False))
+        self.assertIn('參考資料-1.md', self.calls[-1]['files'])
 
 
 class VoiceOff(unittest.TestCase):

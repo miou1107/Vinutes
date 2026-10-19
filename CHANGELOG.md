@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.8 (2026-10-19)
+
+- An item under To confirm now goes once you have sent a Fix and the AI has answered, also when the AI finds the minutes already right. Before, the item came back.
+- A To confirm line about one voice (Speaker B …, Speaker C …) goes once that voice is named or removed under People, and Fix with a name on it names the voice.
+- A sentence typed into the Fix box goes to the AI but is no longer learned as the word: only a name or a term is learned.
+
 ## v0.4.7 (2026-10-19)
 
 - Typing Chinese with Zhuyin or another input method, the Enter that picks a word no longer sends what is in the box under the minutes. A second Enter while the first sentence is on its way doesn't send it twice either.

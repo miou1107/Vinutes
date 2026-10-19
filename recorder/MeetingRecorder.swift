@@ -95,6 +95,7 @@ let STRINGS: [String: [String: String]] = [
         "menu.meetingLanguage": "Meeting Language",
         "menu.meetingAuto": "Detect Automatically",
         "panel.all": "All Meetings",
+        "panel.usage": "Usage",
         "panel.quit": "Quit",
         "panel.stopHint": "Click to stop recording",
         "panel.resume": "Resume",
@@ -200,6 +201,7 @@ let STRINGS: [String: [String: String]] = [
         "menu.meetingLanguage": "會議語言",
         "menu.meetingAuto": "自動判斷",
         "panel.all": "所有會議",
+        "panel.usage": "用量統計",
         "panel.quit": "退出",
         "panel.stopHint": "按一下結束錄音",
         "panel.resume": "繼續",
@@ -928,9 +930,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc func showAll() { showManager(select: nil) }
 
-    func showManager(select id: String?, setup: Bool = false) {
-        if manager == nil { appLog("meeting window opened" + (setup ? " on the setup checklist" : "")); manager = ManagerWindow(owner: self) }
-        manager?.show(select: id, setup: setup)
+    /// 用量統計: the meeting window on what the month's meetings used (the menu bar panel's button)
+    @objc func showUsage() { showManager(select: nil, usage: true) }
+
+    func showManager(select id: String?, setup: Bool = false, usage: Bool = false) {
+        if manager == nil { appLog("meeting window opened" + (setup ? " on the setup checklist" : usage ? " on usage" : "")); manager = ManagerWindow(owner: self) }
+        manager?.show(select: id, setup: setup, usage: usage)
     }
 
     @objc func openSetup() { showManager(select: nil, setup: true) }
@@ -1482,6 +1487,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     var loaded = false
     var pendingSelect: String?
     var pendingSetup = false         // 環境設定自檢 shows once the page has loaded
+    var pendingUsage = false         // 用量統計 too
     var player: AVAudioPlayer?
     var playerJob = ""
     var playerTick: Timer?
@@ -1516,12 +1522,15 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         }
     }
 
-    func show(select id: String?, setup: Bool = false) {
+    func show(select id: String?, setup: Bool = false, usage: Bool = false) {
         if let id {
             if loaded { event("select", ["id": id]) } else { pendingSelect = id }
         }
         if setup {
             if loaded { event("setup") } else { pendingSetup = true }
+        }
+        if usage {
+            if loaded { event("usage") } else { pendingUsage = true }
         }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -1608,11 +1617,15 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         switch cmd {
         case "ready":
             loaded = true
-            done(true, ["select": pendingSelect ?? "", "setup": pendingSetup])
+            done(true, ["select": pendingSelect ?? "", "setup": pendingSetup, "usage": pendingUsage])
             pendingSelect = nil
             pendingSetup = false
+            pendingUsage = false
         case "list":
             app(["list"], done)
+        case "usage":                                    // 用量統計: one month, YYYY-MM ('' = this month)
+            let month = args["month"] as? String ?? ""
+            app(["usage", month.range(of: #"^\d{4}-\d{2}$"#, options: .regularExpression) != nil ? month : ""], done)
         case "record":                                   // the button shown before the first meeting is recorded
             guard let owner else { return done(false, ["message": tr("err.unknownCommand")]) }
             owner.startRecording()

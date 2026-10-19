@@ -17,6 +17,7 @@ Vinutes 是 Mac 選單列上的錄音程式。開會時按一下就開始錄音�
 - **準備好要寄給與會人員的信**：你按下寄出之前，信不會寄出。
 - **用專案和標籤分類會議**：每場會議可以歸到一個專案，也可以加上標籤。在清單上選一個標籤，就只會顯示有這個標籤的會議。
 - **每個專案一份小抄**：在專案設定裡寫下這個專案有哪些人、各自負責什麼、常用的名詞和背景。AI 整理會議紀錄前會先讀小抄，人名和誰負責什麼都會照小抄寫。紀錄裡出現小抄沒有的人名時，會列在待確認，你按「確認無誤」，這個人就會加進小抄。
+- **看每個月用了多少**：會議視窗左下角和選單列面板都有「用量統計」，可以按天或按專案看 AI 跑了幾次、用了多少 Token、呼叫幾次 Google、寄了幾封信，也看得到會議和 Vinutes 本身各佔多少硬碟。用量統計上線前錄的會議，會用當時留下的紀錄補算次數和時間，但補不到 Token 數和呼叫 Google 的次數。
 - **整理會議清單**：不用再看的會議可以封存，也可以刪除。刪除後，錄音檔、逐字稿和紀錄會移到垃圾桶，Google 文件會移到雲端硬碟的垃圾桶。可以一次選好幾場，或在會議上按右鍵。
 
 ## 畫面長什麼樣
@@ -95,7 +96,7 @@ touch ~/.config/vin-meeting-minutes-zh/no-count
 
 ## 資料放在哪裡
 
-設定、Google 登入資料、詞彙表、專案小抄和錄音都放在 `~/.config/vin-meeting-minutes-zh/`，跟 Vinutes 的程式分開放，所以更新或重新安裝 Vinutes 都不會改到這些資料。這個資料夾跟 [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill 共用，Google 只要登入一次，兩邊都能用。
+設定、Google 登入資料、詞彙表、專案小抄、錄音和用量紀錄都放在 `~/.config/vin-meeting-minutes-zh/`，跟 Vinutes 的程式分開放，所以更新或重新安裝 Vinutes 都不會改到這些資料。這個資料夾跟 [vin-meeting-minutes-zh](https://github.com/miou1107/vin-meeting-minutes-zh) skill 共用，Google 只要登入一次，兩邊都能用。
 
 ## 這個 repo 裡有什麼
 

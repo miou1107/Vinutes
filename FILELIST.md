@@ -13,10 +13,11 @@
 | `references/example-minutes.md` | A made-up, complete set of minutes the AI uses as a model |
 | `references/glossary.md` | Common speech-recognition mistakes and their correct spelling |
 | `recorder/Capture.swift` | What a recording hears: the microphone and the sound the Mac plays (an online meeting's other side), mixed into 錄音.caf |
-| `recorder/MenuPanel.swift` | The panel under the menu-bar icon: the big round button that starts and stops the recording, pause, the last three meetings, All meetings, Settings and Quit, the version and its update button |
+| `recorder/MenuPanel.swift` | The panel under the menu-bar icon: the big round button that starts and stops the recording, pause, the last three meetings, All meetings, Usage, Settings and Quit, the version and its update button |
 | `recorder/MeetingRecorder.swift` | The menu-bar app: recording, pause and shortcuts, the floating bar with its level bars and live captions, notifications, the meeting window |
 | `recorder/Captions.swift` | The live-caption helper (built as Contents/MacOS/VinutesCaptions): reads the recording as it grows and runs Apple's on-device transcriber; logs to ~/Library/Logs/Vinutes/captions.log |
 | `recorder/app/` | The meeting window's page (`index.html`, `app.css`, `app.js`, `docblink.js`, `docfind.js`), copied into the app when it is built |
+| `recorder/app/usage.js`, `usage.css` | 用量統計 (Usage): a month by day or by project, opened from the list's corner and the menu-bar panel |
 | `recorder/app/strings.js` | Every word the meeting window shows, in English and Traditional Chinese |
 | `recorder/Info.plist` | The app's name, version and microphone permission text |
 | `recorder/l10n/` | The microphone permission text in English and Chinese (`en.lproj`, `zh-Hant.lproj`) |
@@ -41,6 +42,7 @@
 | `scripts/md_to_gdoc.py` | Publishes the minutes as a Google Doc, updating the same Doc each time |
 | `scripts/gdoc_to_md.py` | Pulls a Google Doc back as Markdown |
 | `scripts/workspace.py` | Gmail, Calendar and the company directory: reading, sending, invitations, and which calendar event a recording was |
+| `scripts/usage.py` | What each meeting used (AI runs and tokens, Google requests, mail, audio): the record in `usage/`, the one-time fill-in from older meetings' logs, and a month by day and by project |
 | `scripts/vlog.py` | The scripts' log: one start and one end line per run in ~/Library/Logs/Vinutes/scripts.log, under 5 MB plus one older file |
 | `scripts/notify.py` | Sends the Doc link through Google Docs sharing when Gmail is not available |
 | `scripts/check_update.py` | Looks up the newest version on GitHub |

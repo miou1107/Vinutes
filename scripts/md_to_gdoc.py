@@ -36,12 +36,14 @@ AUTH = {}
 
 sys.path.insert(0, str(Path(__file__).parent))
 from google_setup import access_token, company_domain, owner  # noqa: E402  (re-exported for notify.py)
+import usage  # noqa: E402
 
 OWNER = owner()                 # optional: warn when the Doc is owned by someone else
 
 
 def call(url, body=None, method=None, headers=None, raw=False):
     req = urllib.request.Request(url, data=body, method=method, headers={**AUTH, **(headers or {})})
+    usage.google(url, len(body) if isinstance(body, bytes) else 0)
     resp = urllib.request.urlopen(req, timeout=120).read()
     return resp if raw else json.loads(resp)
 

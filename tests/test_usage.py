@@ -479,11 +479,13 @@ OK
 [09:15:30] ask formal: exit 1
 Claude AI usage limit reached|1760000000
 """
-OLD_SCRIPTS_LOG = """[2026-10-16T16:19:50.000+08:00] minutes_app[111] start ask 20261016-153005
-[2026-10-16T16:19:55.000+08:00] minutes_app[999] start refresh 20261016-153005
-[2026-10-16T16:20:06.100+08:00] minutes_app[111] end ok, 16.1 s
-[2026-10-17T09:15:00.000+08:00] minutes_app[222] start quick 20261016-153005
-[2026-10-17T09:15:31.000+08:00] minutes_app[222] end failed, 31.0 s: quick 20261016-153005: Claude 用量已經用完
+# scripts.log is written in the Mac's own time zone, the one log.txt's times of day are in
+ZONE = __import__('datetime').datetime(2026, 10, 16, 16, 0).astimezone().isoformat()[-6:]
+OLD_SCRIPTS_LOG = f"""[2026-10-16T16:19:50.000{ZONE}] minutes_app[111] start ask 20261016-153005
+[2026-10-16T16:19:55.000{ZONE}] minutes_app[999] start refresh 20261016-153005
+[2026-10-16T16:20:06.100{ZONE}] minutes_app[111] end ok, 16.1 s
+[2026-10-17T09:15:00.000{ZONE}] minutes_app[222] start quick 20261016-153005
+[2026-10-17T09:15:31.000{ZONE}] minutes_app[222] end failed, 31.0 s: quick 20261016-153005: Claude limit reached
 """
 
 

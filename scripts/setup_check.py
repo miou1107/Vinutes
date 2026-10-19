@@ -205,7 +205,7 @@ def ai_test() -> dict:
     with tempfile.TemporaryDirectory(prefix='vinutes-test-') as folder:
         try:
             done = ai_runner.run('Reply with the single word OK.', Path(folder), write=False, timeout=120,
-                                 env=auto_minutes.env(), key=key)
+                                 env=auto_minutes.env(), key=key, task='test')
             result = test_result(done.returncode, (done.stdout or '') + '\n' + (done.stderr or ''))
         except (subprocess.TimeoutExpired, SystemExit):
             result = 'error'

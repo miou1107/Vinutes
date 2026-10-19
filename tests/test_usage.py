@@ -131,5 +131,129 @@ class Begin(Ledger):
         self.assertEqual(usage.begin(), first)
 
 
+CLAUDE_SAID = ('{"type":"result","subtype":"success","is_error":false,"result":"OK","total_cost_usd":0.031352,'
+               '"usage":{"input_tokens":2,"cache_creation_input_tokens":3908,"cache_read_input_tokens":120,'
+               '"output_tokens":4}}\n')
+CODEX_SAID = '\n'.join(json.dumps(x) for x in [
+    {'type': 'thread.started', 'thread_id': 't'},
+    {'type': 'turn.started'},
+    {'type': 'item.completed', 'item': {'id': 'item_1', 'type': 'agent_message', 'text': 'Changed the chair.'}},
+    {'type': 'turn.completed', 'usage': {'input_tokens': 100, 'cached_input_tokens': 40, 'output_tokens': 7}}]) + '\n'
+CODEX_FAILED = '\n'.join(json.dumps(x) for x in [
+    {'type': 'turn.started'},
+    {'type': 'error', 'message': "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."},
+    {'type': 'turn.failed', 'error': {'message': 'stream error'}}]) + '\n'
+AGY_SAID = ('{"conversation_id":"c","status":"SUCCESS","response":"OK\\n","duration_seconds":5.3,"num_turns":1,'
+            '"usage":{"input_tokens":20239,"output_tokens":25,"thinking_tokens":20,"cache_read_tokens":0,'
+            '"total_tokens":20264}}\n')
+
+
+class AiReport(unittest.TestCase):
+    """What each AI prints when asked for a report (the shapes seen 2026-10-19): the answer and the tokens."""
+
+    def test_claude_gives_its_answer_and_tokens(self):
+        import ai_runner
+        self.assertEqual(ai_runner.read_report('claude', CLAUDE_SAID), ('OK', {'in': 3910, 'cached': 120, 'out': 4}))
+
+    def test_codex_gives_its_messages_and_tokens(self):
+        import ai_runner
+        self.assertEqual(ai_runner.read_report('codex', CODEX_SAID),
+                         ('Changed the chair.', {'in': 60, 'cached': 40, 'out': 7}))
+
+    def test_a_codex_error_keeps_the_words_the_user_is_told_about(self):
+        import ai_runner
+        text, tokens = ai_runner.read_report('codex', CODEX_FAILED)
+        self.assertIn('not supported when using Codex with a ChatGPT account', text)
+        self.assertIsNone(tokens)
+
+    def test_antigravity_gives_its_answer_and_tokens(self):
+        import ai_runner
+        self.assertEqual(ai_runner.read_report('antigravity', AGY_SAID), ('OK\n', {'in': 20239, 'cached': 0, 'out': 25}))
+
+    def test_output_that_is_not_a_report_passes_through(self):
+        import ai_runner
+        for key in ('claude', 'codex', 'antigravity'):
+            self.assertEqual(ai_runner.read_report(key, 'Claude AI usage limit reached|1760000000\n'),
+                             ('Claude AI usage limit reached|1760000000\n', None))
+
+    def test_a_line_printed_before_the_report_is_kept(self):
+        import ai_runner
+        self.assertEqual(ai_runner.read_report('claude', 'Warning: slow disk\n' + CLAUDE_SAID),
+                         ('Warning: slow disk\nOK', {'in': 3910, 'cached': 120, 'out': 4}))
+
+    def test_each_ai_is_asked_for_its_report(self):
+        import ai_runner
+        claude = ai_runner.report_flags('claude', ['claude', '-p', 'do it', '--tools', 'Read'])
+        self.assertEqual(claude[-2:], ['--output-format', 'json'])
+        codex = ai_runner.report_flags('codex', ['codex', 'exec', '-C', '/f', 'do it'])
+        self.assertEqual(codex[-2:], ['--json', 'do it'])                # the prompt stays last
+        agy = ai_runner.report_flags('antigravity', ['/usr/bin/sandbox-exec', '-f', 'p', 'agy', '-p', 'do it'])
+        self.assertEqual(agy[-2:], ['--output-format', 'json'])
+
+
+class AiRunCounted(Ledger):
+    """ai_runner.run with a stand-in for the AI's command: the run is counted, the caller reads plain text."""
+
+    def fake(self, prints: str, code: int = 0) -> str:
+        exe = self.root / 'claude'
+        exe.write_text(f'#!/bin/sh\ncat <<\'EOF\'\n{prints}EOF\nexit {code}\n')
+        exe.chmod(0o755)
+        return str(exe)
+
+    def test_a_run_is_counted_and_the_caller_gets_the_answer(self):
+        import ai_runner
+        saved = ai_runner.find
+        ai_runner.find = lambda key=None: self.fake(CLAUDE_SAID)
+        try:
+            folder = self.root / 'work'
+            folder.mkdir()
+            done = ai_runner.run('Reply OK', folder, write=False, timeout=30, env=dict(os.environ), key='claude',
+                                 task='edit')
+        finally:
+            ai_runner.find = saved
+        self.assertEqual(done.stdout, 'OK')
+        [line] = usage.events(usage.now().strftime('%Y-%m'))
+        self.assertEqual((line['kind'], line['task'], line['ai'], line['ok']), ('ai', 'edit', 'claude', True))
+        self.assertEqual(line['tokens'], {'in': 3910, 'cached': 120, 'out': 4})
+
+    def test_a_run_without_a_task_is_not_counted(self):
+        import ai_runner
+        saved = ai_runner.find
+        ai_runner.find = lambda key=None: self.fake(CLAUDE_SAID)
+        try:
+            folder = self.root / 'work'
+            folder.mkdir()
+            ai_runner.run('Reply OK', folder, write=False, timeout=30, env=dict(os.environ), key='claude')
+        finally:
+            ai_runner.find = saved
+        self.assertEqual(usage.events(usage.now().strftime('%Y-%m')), [])
+
+
+class WriteUpLog(unittest.TestCase):
+    """auto_minutes.write_minutes: log.txt gets the AI's words as plain text, and a limit becomes the message the
+    user acts on, as before the AI was asked for a report."""
+
+    def test_the_ai_words_go_to_the_log_and_a_limit_is_told_in_plain_words(self):
+        import subprocess
+        import ai_runner
+        import auto_minutes
+        root = Path(tempfile.mkdtemp(prefix='write-'))
+        job, work, folder = root / 'job', root / 'work', root / 'minutes'
+        for d in (job, work, folder):
+            d.mkdir()
+        saved = ai_runner.run, auto_minutes.prompt
+        ai_runner.run = lambda *a, **kw: subprocess.CompletedProcess([], 1, "You've hit your usage limit · resets 3pm", '')
+        auto_minutes.prompt = lambda *a: 'write the minutes'
+        try:
+            with self.assertRaises(auto_minutes.Failed) as said:
+                auto_minutes.write_minutes(job, work, {}, folder)
+        finally:
+            ai_runner.run, auto_minutes.prompt = saved
+            log = (job / 'log.txt').read_text(encoding='utf-8')
+            shutil.rmtree(root, ignore_errors=True)
+        self.assertIn("You've hit your usage limit · resets 3pm\n", log)
+        self.assertIn('點', str(said.exception))                 # 「…才會恢復」 with the hour, in the app's words
+
+
 if __name__ == '__main__':
     unittest.main()

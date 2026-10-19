@@ -1898,7 +1898,7 @@ def ai_edit(job: Job, request: str, label: str):
         (work / briefs.FILE_NAME).write_text(brief, encoding='utf-8')
     prompt = edit_prompt(job.lang, request)
     try:
-        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env())
+        done = ai_runner.run(prompt, work, write=False, timeout=AI_TIMEOUT, env=env(), task='edit')
     except subprocess.TimeoutExpired:
         sys.exit(t('ai_timeout', ai=ai))
     return ai_edit_done(job, done, work, md, opened, label, request, learned, ai)

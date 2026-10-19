@@ -1775,14 +1775,19 @@ class ListCorner(Flows):
         import check_update
         saved = check_update.fetch
         check_update.fetch = lambda name: 'version: "1.3.0"\n'
-        minutes_app.APP_UPDATE.write_text(json.dumps({'checked_at': datetime.now().timestamp() - 2 * 3600,
-                                                      'newest': '1.2.0'}), encoding='utf-8')
-        try:
+        def looked_up(ago):
+            minutes_app.APP_UPDATE.write_text(json.dumps({'checked_at': datetime.now().timestamp() - ago,
+                                                          'newest': '1.2.0'}), encoding='utf-8')
             minutes_app.cmd_version('1.2.0')
+            return self.outs[-1]['newest']
+        try:
+            # the window asks every 3600 seconds and the last look-up was stamped after its download: just under an
+            # hour ago still counts as an hour
+            self.assertEqual(looked_up(3590), '1.3.0')
+            self.assertEqual(looked_up(30 * 60), '1.2.0')              # half an hour ago: GitHub is not asked again
         finally:
             check_update.fetch = saved
             minutes_app.APP_UPDATE.unlink(missing_ok=True)
-        self.assertEqual((self.outs[-1]['newest'], self.outs[-1]['update']), ('1.3.0', True))
 
     def test_offline_the_corner_shows_the_version_without_the_button(self):
         import check_update

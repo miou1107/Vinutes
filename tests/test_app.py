@@ -1753,7 +1753,7 @@ class ListCorner(Flows):
         row = minutes_app.summary(self.job())
         self.assertEqual((row['has_audio'], row['has_transcript']), (True, True))
 
-    def test_version_update_shows_only_for_a_newer_one_and_github_is_asked_once_a_day(self):
+    def test_version_update_shows_only_for_a_newer_one_and_github_is_asked_once_an_hour(self):
         import check_update
         saved = check_update.fetch
         asked = []
@@ -1769,6 +1769,20 @@ class ListCorner(Flows):
         self.assertEqual([o['update'] for o in self.outs], [True, False, False])   # 1.10 is newer than 1.2
         self.assertEqual(self.outs[0]['newest'], '1.2.0')
         self.assertEqual(len(asked), 1)
+
+    def test_a_version_released_the_same_day_is_seen_within_the_hour(self):
+        # Vin 2026-10-19: three versions went out in one evening and the corner still showed none (asked once a day)
+        import check_update
+        saved = check_update.fetch
+        check_update.fetch = lambda name: 'version: "1.3.0"\n'
+        minutes_app.APP_UPDATE.write_text(json.dumps({'checked_at': datetime.now().timestamp() - 2 * 3600,
+                                                      'newest': '1.2.0'}), encoding='utf-8')
+        try:
+            minutes_app.cmd_version('1.2.0')
+        finally:
+            check_update.fetch = saved
+            minutes_app.APP_UPDATE.unlink(missing_ok=True)
+        self.assertEqual((self.outs[-1]['newest'], self.outs[-1]['update']), ('1.3.0', True))
 
     def test_offline_the_corner_shows_the_version_without_the_button(self):
         import check_update

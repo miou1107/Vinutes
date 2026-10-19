@@ -586,7 +586,8 @@ APP_UPDATE = CONFIG / 'vinutes-update.json'   # the newest version on GitHub and
 
 def cmd_version(installed: str):
     """The list's corner: the version this app was built from, and whether GitHub has a newer one. GitHub is asked
-    at most once a day; offline, the last answer stands. Only the public VERSION file is fetched."""
+    at most once an hour, so a version released today shows today (Vin 2026-10-19); offline, the last answer stands.
+    Only the public VERSION file is fetched."""
     import check_update
     try:
         state = json.loads(APP_UPDATE.read_text(encoding='utf-8'))
@@ -594,7 +595,7 @@ def cmd_version(installed: str):
         state = {}
     if not isinstance(state, dict):
         state = {}
-    if datetime.now().timestamp() - float(state.get('checked_at') or 0) > 24 * 3600:
+    if datetime.now().timestamp() - float(state.get('checked_at') or 0) > 3600:
         try:
             newest = check_update.version_of(check_update.fetch('VERSION'))
             state = {'checked_at': datetime.now().timestamp(), 'newest': '.'.join(map(str, newest)) if newest else ''}

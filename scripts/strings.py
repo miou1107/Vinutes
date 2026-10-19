@@ -23,6 +23,19 @@ EN = {
     'ai_install_failed': "{ai} couldn't be installed.",
     'ai_bad_settings': "settings.json isn't in the right format, so the AI can't be changed.",
 
+    # references.py
+    'ref_no_file': "{name} can't be found. It may have been moved or deleted.",
+    'ref_kind': "{name} can't be read. Files for the AI can be PDF, Word, Excel, PowerPoint, text or pictures.",
+    'ref_unreadable': "{name} couldn't be opened. Save it again as a PDF and add it once more.",
+    'ref_link_failed': "This link couldn't be opened: {url}. Check the address, or save the page as a file and add "
+                       'that instead.',
+    'ref_link_login': 'This link needs a sign-in, so the AI cannot read it: {url}. Save the page as a file and add '
+                      'that instead.',
+    'ref_link_kind': "This link isn't a web page or a PDF, so it can't be read: {url}",
+    'ref_google_right': "Your Google account can't open this file: {url}",
+    'ref_link_big': "This link's file is over 20 MB, too big for the AI to read: {url}",
+    'ref_cut': '[The rest of this file was left out: it is too long.]',
+
     # attachments.py
     'attach_no_items': 'There are no files, links or pictures to add.',
     'attach_no_doc': "This meeting isn't in Google Docs yet. Files and pictures can be added once the minutes are "
@@ -297,6 +310,17 @@ ZH = {
     'ai_unknown': '沒有這個 AI。',
     'ai_install_failed': '{ai} 安裝失敗',
     'ai_bad_settings': 'settings.json 的格式不對，沒辦法換 AI。',
+
+    # references.py
+    'ref_no_file': '找不到「{name}」，可能已經移走或刪除。',
+    'ref_kind': '「{name}」這種檔案沒辦法讀取。給 AI 參考的檔案可以是 PDF、Word、Excel、PowerPoint、文字檔或圖片。',
+    'ref_unreadable': '「{name}」打不開，請另存成 PDF 再放一次。',
+    'ref_link_failed': '這個網址打不開：{url}。請確認網址，或把網頁存成檔案再放上來。',
+    'ref_link_login': '這個網址要登入才能看，AI 沒辦法讀取：{url}。請把網頁存成檔案再放上來。',
+    'ref_link_kind': '這個網址不是網頁也不是 PDF，沒辦法讀取：{url}',
+    'ref_google_right': '你的 Google 帳號沒有這份檔案的權限：{url}',
+    'ref_link_big': '這個網址的檔案超過 20 MB，AI 沒辦法讀取：{url}',
+    'ref_cut': '[The rest of this file was left out: it is too long.]',
 
     # attachments.py
     'attach_no_items': '沒有要加進去的檔案、連結或圖片。',

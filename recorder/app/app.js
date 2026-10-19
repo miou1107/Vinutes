@@ -125,13 +125,14 @@ const S = {
   busyText: '',              // the key of what the line above the box says while busy ('' = Claude is rewriting)
   sending: false,            // a sentence is on its way while the user's own edits are saved: a second Enter waits
   work: {},                  // meeting id → { now, waits }: the request the AI is on and the ones sent after it
-  pics: [],                  // pictures pasted into the box, for the AI to look at with the next sentence
+  pics: [],                  // pictures pasted or picked beside the box, for the AI to look at with the next sentence
+  refs: [],                  // files and links picked with ＋ beside the box, for the AI to read with the next sentence
   askedPic: '',              // the picture that went with the last answered sentence, shown small beside it
   fixing: '', fixText: '', fixFocus: false, fixPick: false,   // the 待確認 item open to type what it should be: its label, the text
   railLate: false,           // the side panel has news it held back while a Fix box had the keyboard
   skipping: new Set(),       // 待確認 items skipped whose answer has not come back (it waits for the AI's turn)
   setupSeq: 0,               // goes up with every click in 環境設定自檢: an older answer is not shown
-  attach: [],                // files, links and pictures picked for 「八、補充資訊」, sent with the next sentence
+  att: null,                 // 加入會議附件 open: { items: [{kind, path, url, name, note}], urlOpen, busy, err }
   urlOpen: false, menuOpen: false,
   learned: [], learnOpen: false, learnShown: 0,   // learnOpen: the list of what Claude learned shows six rows instead of two
   banner: null, bannerTimer: null, alert: null,
@@ -188,6 +189,7 @@ function refreshDoc(id = S.sel, again = false) {
     const before = seen();
     if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = checkShown(r.check, id); }   // not over a confirm made meanwhile
     if (r.attendees) S.d.attendees = r.attendees;
+    if (r.attachments) setAttachments(r.attachments);
     if (r.people && !S.peopleBusy) S.d.people = r.people;
     if (r.speakers && !S.peopleBusy) S.d.speakers = r.speakers;
     if (r.silent && !S.peopleBusy) S.d.silent = r.silent;
@@ -585,7 +587,7 @@ async function select(id) {
   S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
   S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
   S.tagAdding = false;
-  S.attach = []; S.pics = []; S.askedPic = ''; S.fixing = ''; S.skipping = new Set(); S.urlOpen = false; S.menuOpen = false;
+  S.att = null; S.refs = []; S.pics = []; S.askedPic = ''; S.fixing = ''; S.skipping = new Set(); S.urlOpen = false; S.menuOpen = false;
   S.dirty = false; S.saveText = ''; S.saveErr = false;
   S.docFailed = false; S.docWarning = ''; S.reloadDoc = false;
   clearTimeout(S.bannerTimer); S.banner = null;
@@ -634,7 +636,8 @@ window.beforeClose = async () => {
   // what still waits under 待修改 is done without the window, in order, after what the AI is on now
   for (const [id, w] of Object.entries(S.work)) {
     const items = w.waits.map((q) => (q.correct ? { kind: 'correct', item: q.correct.label, text: q.correct.value }
-      : q.quick ? { kind: 'quick', text: q.quick } : { kind: 'ask', text: q.text, pictures: q.pics.map((x) => x.path) }));
+      : q.quick ? { kind: 'quick', text: q.quick } : { kind: 'ask', text: q.text, pictures: q.pics.map((x) => x.path),
+        refs: refsOut(q.refs) }));
     w.waits = [];
     if (items.length) call('askMany', { id, items }).catch(() => {});
   }
@@ -793,7 +796,9 @@ function renderTags() {
     ${tags.map((g) => `<span class="tchip">${esc(g)}<button data-rm="${esc(g)}" title="${esc(t('remove_tag', g))}" aria-label="${esc(t('remove_tag', g))}">${ICON.xs}</button></span>`).join('')}
     ${tags.length >= MAX_TAGS ? '' : S.tagAdding ? `<input id="tagIn" class="tagin" maxlength="20" aria-label="${esc(t('add_tag'))}" placeholder="${esc(t('tag_ph'))}">`
       : `<button class="tadd" id="tagAdd">${ICON.plusSm}<span>${esc(t('add_tag'))}</span></button>`}
-    ${offered.length && tags.length < MAX_TAGS ? `<span class="tl ai">${esc(t('tag_ai', aiName()))}</span>${offered.map((g) => `<button class="tchip sug" data-add="${esc(g)}" title="${esc(t('add_this_tag', g))}">${ICON.plusSm}${esc(g)}</button>`).join('')}` : ''}`;
+    ${offered.length && tags.length < MAX_TAGS ? `<span class="tl ai">${esc(t('tag_ai', aiName()))}</span>${offered.map((g) => `<button class="tchip sug" data-add="${esc(g)}" title="${esc(t('add_this_tag', g))}">${ICON.plusSm}${esc(g)}</button>`).join('')}` : ''}
+    ${attachmentsHTML()}`;
+  bindAttachments(el);
   el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => changeTags((now) => now.filter((g) => g !== b.dataset.rm))));
   el.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => changeTags((now) => [...now, b.dataset.add])));
   if ($('#tagAdd')) $('#tagAdd').addEventListener('click', () => { S.tagAdding = true; renderTags(); $('#tagIn').focus(); });
@@ -1136,6 +1141,7 @@ function afterEdit(r) {
   if (r.unsaved) setSave(['not_saved_edit'], true);
   else setSave([r.held ? 'held' : 'saved', r.saved_at || hhmm()]);
   if (r.attendees) S.d.attendees = r.attendees;       // 與會人員 under 人員, after the names went into the minutes
+  if (r.attachments) setAttachments(r.attachments);
   if (r.people) S.d.people = r.people;
   if (r.speakers) S.d.speakers = r.speakers;
   if (r.check) S.d.check = checkShown(r.check);
@@ -1542,29 +1548,21 @@ function renderAsk() {
   const el = $('#ask');
   if (!el) return;
   if (!$('#promptInput')) {
-    // files, links and pictures need the Google Doc: they go to Drive and into its 「八、補充資訊」
-    const canAttach = !!(S.d && S.d.doc_url && !S.d.readonly);
     el.innerHTML = `<div id="askTop"></div>
-      <div id="picBox" class="achips"></div>
-      <div id="attachBox"></div>
+      <div id="refBox"></div>
       <div class="prompt with-tools">
         <div class="mwrap"><button class="model" id="aiPick" title="${esc(t('ai_pick'))}" aria-label="${esc(t('ai_pick'))}"
-            aria-haspopup="menu"></button><div class="mmenu" id="aiMenu" role="menu" hidden></div></div><span class="sep"></span>${canAttach ? `
-        <div class="awrap"><button class="ib" id="attachPlus" title="${esc(t('attach_plus'))}" aria-label="${esc(t('attach_plus'))}" aria-haspopup="menu">${ICON.plus}</button>
+            aria-haspopup="menu"></button><div class="mmenu" id="aiMenu" role="menu" hidden></div></div><span class="sep"></span>
+        <div class="awrap"><button class="ib" id="attachPlus" aria-haspopup="menu">${ICON.plus}</button>
           <div class="amenu" id="attachMenu" role="menu" hidden>
             <button role="menuitem" data-a="file">${ICON.clip}<span>${esc(t('upload_file'))}</span></button>
             <button role="menuitem" data-a="link">${ICON.link}<span>${esc(t('paste_link'))}</span></button></div></div>
-        <button class="ib" id="attachImage" title="${esc(t('insert_image'))}" aria-label="${esc(t('insert_image'))}">${ICON.image}</button>` : ''}
+        <button class="ib" id="attachImage">${ICON.image}</button>
         <input id="promptInput" aria-label="${esc(t('ask_aria', aiName()))}" placeholder="${esc(t('ask_ph', aiName()))}">
         <button class="send" id="askGo" aria-label="${esc(t('send_ask'))}">${ICON.up}</button></div>
       <div class="quick">${QUICK.map((k) => `<button class="qk" title="${esc(t(`quick_${k}_hint`))}" data-k="${k}">${esc(t(`quick_${k}`))}</button>`).join('')}</div>`;
     const input = $('#promptInput');
-    const go = () => {
-      if (S.pasting) return;
-      if (!S.attach.length) return ask(input.value.trim());
-      if (aiBusy()) return showAlert(t('attach_wait', aiName()));   // 「八、補充資訊」 waits for the AI's change
-      sendAttach(input.value.trim());
-    };
+    const go = () => { if (!S.pasting && !S.refPicking) ask(input.value.trim()); };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !inputMethod(e)) go(); });
     input.addEventListener('paste', pastePicture);    // a picture for the AI: no Google Doc needed
     $('#askGo').addEventListener('click', go);
@@ -1582,25 +1580,26 @@ function renderAsk() {
       if (b && b.classList.contains('off')) { S.aiOpen = false; renderAiMenu(); setupAi(b.dataset.ai); }
       else if (b) switchAi(b.dataset.ai);
     });
-    if (canAttach) {
-      $('#attachPlus').addEventListener('click', (e) => {
-        e.stopPropagation(); S.menuOpen = !S.menuOpen;
-        if (S.aiOpen) { S.aiOpen = false; renderAiMenu(); }
-        renderAttachMenu();
-      });
-      $('#attachImage').addEventListener('click', () => pickAttach('image'));
-      el.querySelectorAll('#attachMenu button').forEach((b) => b.addEventListener('click', () => {
-        if (b.dataset.a === 'file') return pickAttach('file');
-        S.menuOpen = false; S.urlOpen = true; renderAttachMenu(); renderAttach();
-      }));
-    }
-    renderAttach(); renderPics();
+    $('#attachPlus').addEventListener('click', (e) => {
+      e.stopPropagation(); S.menuOpen = !S.menuOpen;
+      if (S.aiOpen) { S.aiOpen = false; renderAiMenu(); }
+      renderAttachMenu();
+    });
+    $('#attachImage').addEventListener('click', () => pickRef('refImage'));
+    el.querySelectorAll('#attachMenu button').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.a === 'file') return pickRef('ref');
+      S.menuOpen = false; S.urlOpen = true; renderAttachMenu(); renderRefs();
+    }));
+    renderRefs();
   }
-  // while the AI works the box stays open and what is sent waits its turn (Vin 2026-10-19); files and links for
-  // 「八、補充資訊」 and another AI wait until it is done
+  // while the AI works the box stays open and what is sent waits its turn (Vin 2026-10-19), files and pictures
+  // for it too; another AI waits until it is done
   $('#promptInput').disabled = S.busy;
   el.querySelectorAll('.qk').forEach((b) => { b.disabled = S.busy; });
-  el.querySelectorAll('.ib').forEach((b) => { b.disabled = S.busy || aiBusy(); });
+  el.querySelectorAll('.ib').forEach((b) => { b.disabled = S.busy; });
+  for (const [sel, key] of [['#attachPlus', 'ref_plus'], ['#attachImage', 'ref_image']]) {
+    $(sel).title = t(key, aiName()); $(sel).setAttribute('aria-label', t(key, aiName()));
+  }
   if (S.busy || aiBusy()) S.aiOpen = false;
   renderAiMenu();
   renderLearned();
@@ -1633,7 +1632,7 @@ function renderAiMenu() {
       ${why ? `<span class="ms">${esc(t(why === 'install' ? 'not_installed' : 'not_signed_in'))}</span>` : ''}</button>`;
   }).join('');
   const input = $('#promptInput');
-  if (input && !S.attach.length) {
+  if (input) {
     input.placeholder = t('ask_ph', aiName());
     input.setAttribute('aria-label', t('ask_aria', aiName()));
   }
@@ -1692,56 +1691,60 @@ document.addEventListener('click', (e) => {
   if (S.aiOpen && !e.target.closest('#aiMenu')) { S.aiOpen = false; renderAiMenu(); }
 });
 
-// what was picked, above the box; each one can be taken off again
-function renderAttach() {
-  const box = $('#attachBox');
+// what goes to the AI with the next sentence, above the box under 「給 Claude 參考」; each one can be taken off again.
+// A pasted picture shows small; a picked picture, file or link by its name.
+function renderRefs() {
+  const box = $('#refBox');
   if (!box) return;
-  const items = S.attach;
-  const icon = { image: ICON.image, link: ICON.link, file: ICON.clip };
-  box.innerHTML = `${items.length ? `<div class="achips">${items.map((it, i) => `<span class="achip" title="${esc(it.name)}">
-      ${icon[it.kind]}<span class="an">${esc(it.name)}</span>
-      ${S.busy ? '' : `<button class="ax" data-i="${i}" aria-label="${esc(t('remove'))}">✕</button>`}</span>`).join('')}</div>` : ''}
-    ${S.urlOpen ? `<div class="aurl"><input id="attachUrl" aria-label="${esc(t('url_aria'))}" placeholder="${esc(t('url_ph'))}">
-      <button class="btn" id="attachUrlAdd">${esc(t('add'))}</button></div>` : ''}`.trim();
-  box.querySelectorAll('.ax').forEach((b) => b.addEventListener('click', () => {
-    S.attach.splice(Number(b.dataset.i), 1);
-    renderAttach();
-  }));
-  const url = $('#attachUrl');
-  if (url) {
-    const add = () => {
-      const u = url.value.trim();
-      if (!/^https?:\/\/\S+$/.test(u)) { showAlert(t('url_bad')); return; }
-      S.attach.push({ kind: 'link', url: u, name: u });
-      S.urlOpen = false;
-      renderAttach();
-      $('#promptInput').focus();
-    };
-    url.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !inputMethod(e)) add();
-      if (e.key === 'Escape') { S.urlOpen = false; renderAttach(); }
-    });
-    $('#attachUrlAdd').addEventListener('click', add);
-    url.focus();
-  }
-  const input = $('#promptInput');
-  if (input) {
-    input.placeholder = items.length ? t('attach_ph') : t('ask_ph', aiName());
-  }
+  const chip = (icon, name, attr) => `<span class="achip" title="${esc(name)}">${icon}<span class="an">${esc(name)}</span>
+      <button class="ax" ${attr} aria-label="${esc(t('remove'))}">✕</button></span>`;
+  const any = S.pics.length || S.refs.length;
+  box.innerHTML = `${any ? `<div class="achips"><span class="forai">${esc(t('for_ai', aiName()))}</span>
+      ${S.pics.map((x, i) => (x.url ? `<span class="picchip" title="${esc(x.name)}"><img src="${esc(x.url)}" alt="">
+        <button class="ax" data-p="${i}" aria-label="${esc(t('remove'))}">✕</button></span>` : chip(ICON.image, x.name, `data-p="${i}"`))).join('')}
+      ${S.refs.map((x, i) => chip(x.kind === 'link' ? ICON.link : ICON.clip, x.name, `data-r="${i}"`)).join('')}</div>` : ''}
+    ${S.urlOpen ? `<div class="aurl"><input id="refUrl" aria-label="${esc(t('url_aria'))}" placeholder="${esc(t('url_ph'))}">
+      <button class="btn" id="refUrlAdd">${esc(t('add'))}</button></div>` : ''}`.trim();
+  box.querySelectorAll('[data-p]').forEach((b) => b.addEventListener('click', () => { S.pics.splice(Number(b.dataset.p), 1); renderRefs(); }));
+  box.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => { S.refs.splice(Number(b.dataset.r), 1); renderRefs(); }));
+  const url = $('#refUrl');
+  if (!url) return;
+  const add = () => {
+    const u = url.value.trim();
+    if (!/^https?:\/\/\S+$/.test(u)) { showAlert(t('url_bad')); return; }
+    if (!S.refs.some((x) => x.url === u)) S.refs.push({ kind: 'link', url: u, name: u });
+    S.urlOpen = false;
+    renderRefs();
+    $('#promptInput').focus();
+  };
+  url.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !inputMethod(e)) add();
+    if (e.key === 'Escape') { e.stopPropagation(); S.urlOpen = false; renderRefs(); }
+  });
+  $('#refUrlAdd').addEventListener('click', add);
+  url.focus();
 }
 
-async function pickAttach(kind) {
+// what the window sends for the files and links handed to the AI
+const refsOut = (refs) => (refs || []).map(({ kind, path, url }) => (kind === 'link' ? { kind, url } : { kind, path }));
+
+// ＋ 上傳檔案 and the picture button beside the box: files to read and pictures to look at, with the next sentence
+async function pickRef(kind) {
   S.menuOpen = false;
   renderAttachMenu();
+  const id = S.sel;
+  S.refPicking = true;                             // Enter waits: what is being picked goes with this sentence
   try {
     const r = await call('pick', { kind });
+    if (S.sel !== id) return;
     for (const f of r.files || []) {
-      if (!S.attach.some((a) => a.path === f.path)) S.attach.push({ kind, path: f.path, name: f.name });
+      if (kind === 'refImage') { if (!S.pics.some((x) => x.path === f.path)) S.pics.push({ path: f.path, name: f.name, url: '' }); }
+      else if (!S.refs.some((x) => x.path === f.path)) S.refs.push({ kind: 'file', path: f.path, name: f.name });
     }
-    renderAttach();
+    renderRefs();
     const input = $('#promptInput');
     if (input) input.focus();
-  } catch (e) { showAlert(e.message); }
+  } catch (e) { showAlert(e.message); } finally { S.refPicking = false; }
 }
 
 // ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): shown small above
@@ -1766,45 +1769,144 @@ async function pastePicture(e) {
     files.forEach((f, i) => {
       if (!S.pics.some((x) => x.path === f.path)) S.pics.push({ path: f.path, name: f.name, url: !i && blob ? URL.createObjectURL(blob) : '' });
     });
-    if (files.length) renderPics();
+    if (files.length) renderRefs();
     else if (text) input.setRangeText(text, input.selectionStart, input.selectionEnd, 'end');   // text, or a file that is no picture
   } catch (err) { showAlert(err.message); } finally { S.pasting = false; }
 }
 
-// the pasted pictures above the box, small; each can be taken off again
-function renderPics() {
-  const box = $('#picBox');
-  if (!box) return;
-  box.innerHTML = S.pics.map((x, i) => `<span class="picchip" title="${esc(x.name)}">${x.url ? `<img src="${esc(x.url)}" alt="">` : ICON.image}
-    <button class="ax" data-i="${i}" aria-label="${esc(t('remove'))}">✕</button></span>`).join('');
-  box.querySelectorAll('.ax').forEach((b) => b.addEventListener('click', () => { S.pics.splice(Number(b.dataset.i), 1); renderPics(); }));
+// --- 加入會議附件: files, links and pictures for 「八、補充資訊」, each with its own 說明 ---------------------
+
+// in the tag bar: what section 8 holds (a click opens it) and 加入會議附件, when the minutes have a Google Doc
+function attachmentsHTML() {
+  const d = S.d, list = d.attachments || [];
+  const can = !!(d.doc_url && !d.readonly);
+  if (!list.length && !can) return '';
+  const icon = { image: ICON.image, link: ICON.link, file: ICON.clip };
+  return `<span class="tsep"></span><span class="tl">${esc(t('attachments'))}</span>
+    ${list.map((a, i) => `<button class="tfile" data-open="${i}" title="${esc(a.note ? `${a.note}${t('colon')}${a.name}` : a.name)}">${icon[a.kind] || ICON.clip}<span>${esc(a.name)}</span></button>`).join('')}
+    ${can ? `<button class="tadd" id="attOpen"${S.busy ? ' disabled' : ''}>${ICON.plusSm}<span>${esc(t('add_attachment'))}</span></button>` : ''}`;
 }
 
-// the picked items and the sentence about them: one line each in 「八、補充資訊」
-async function sendAttach(text) {
-  if (S.busy || S.sending || aiBusy() || !S.attach.length) return;
-  const id = S.sel;
-  S.sending = true;
-  try { if (!(await savedFirst())) return; } finally { S.sending = false; }
-  const items = S.attach.map(({ kind, path, url }) => ({ kind, path, url }));
-  S.busy = true; S.busyText = 'attaching';
-  S.asked = text || S.attach.map((a) => a.name).join(t('list_sep')); S.askedQuick = ''; S.said = ''; S.saidErr = false; S.editSeq++;
-  const box = $('#promptInput');
-  if (box) box.value = '';
-  renderAsk(); renderAttach();
+function bindAttachments(el) {
+  const list = (S.d && S.d.attachments) || [];
+  el.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => {
+    const a = list[Number(b.dataset.open)];
+    if (a) call('link', { url: a.link, attachment: true }).catch(() => {});
+  }));
+  if ($('#attOpen')) $('#attOpen').addEventListener('click', openAttach);
+}
+
+function setAttachments(list) {
+  if (!S.d || JSON.stringify(list) === JSON.stringify(S.d.attachments || [])) return;
+  S.d.attachments = list;
+  if (!S.tagAdding) renderTags();
+}
+
+function openAttach() {
+  if (!S.d || S.busy) return;
+  S.att = { items: [], urlOpen: false, busy: false, err: '' };
+  S.sheet = 'attach';
+  renderAttachSheet();
+  placeDoc();
+}
+
+function renderAttachSheet() {
+  const m = S.att;
+  if (!m) return closeSheet();
+  const icon = { image: ICON.image, link: ICON.link, file: ICON.clip };
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm pset attsheet" role="dialog" aria-label="${esc(t('add_attachment'))}">
+    <h3>${esc(t('add_attachment'))}</h3>
+    ${m.items.length ? `<div class="attitems">${m.items.map((it, i) => `<div class="attitem">
+      <div class="attname">${icon[it.kind]}<span title="${esc(it.name)}">${esc(it.name)}</span>
+        <button class="ax" data-rm="${i}" aria-label="${esc(t('remove'))}"${m.busy ? ' disabled' : ''}>✕</button></div>
+      <input class="pinput" id="attNote${i}" data-i="${i}" maxlength="100" value="${esc(it.note)}" aria-label="${esc(t('att_note_for', it.name))}"
+        placeholder="${esc(i ? t('att_note') : t('att_note_ph'))}"${m.busy ? ' disabled' : ''}></div>`).join('')}</div>` : ''}
+    ${m.urlOpen ? `<div class="aurl"><input id="attUrl" class="pinput" aria-label="${esc(t('url_aria'))}" placeholder="${esc(t('url_ph'))}">
+      <button class="btn" id="attUrlAdd">${esc(t('add'))}</button></div>` : ''}
+    <div class="attadd">
+      <button class="tadd" data-k="file"${m.busy ? ' disabled' : ''}>${ICON.clip}<span>${esc(t('upload_file'))}</span></button>
+      <button class="tadd" data-k="link"${m.busy ? ' disabled' : ''}>${ICON.link}<span>${esc(t('paste_link'))}</span></button>
+      <button class="tadd" data-k="image"${m.busy ? ' disabled' : ''}>${ICON.image}<span>${esc(t('insert_image'))}</span></button></div>
+    ${m.err ? `<p class="dnote err">${esc(m.err)}</p>` : ''}
+    <div class="dfoot"><button class="btn ghost" id="attCancel"${m.busy ? ' disabled' : ''}>${esc(t('cancel'))}</button>
+      <button class="btn primary" id="attGo"${m.busy || !m.items.length ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('add'))}</button></div>
+  </div></div>`;
+  const sheet = $('#sheet');
+  // typing changes the note kept here; nothing is drawn again, so the cursor stays where it is
+  sheet.querySelectorAll('.attitem input').forEach((el) => el.addEventListener('input', () => { m.items[Number(el.dataset.i)].note = el.value; }));
+  sheet.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => { m.items.splice(Number(b.dataset.rm), 1); renderAttachSheet(); }));
+  sheet.querySelectorAll('.attadd [data-k]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.k === 'link') { m.urlOpen = true; renderAttachSheet(); return; }
+    pickAttach(b.dataset.k);
+  }));
+  $('#attCancel').addEventListener('click', closeSheet);
+  $('#attGo').addEventListener('click', sendAttach);
+  const url = $('#attUrl');
+  if (url) {
+    const add = () => {
+      const u = url.value.trim();
+      if (!/^https?:\/\/\S+$/.test(u)) { m.err = t('url_bad'); renderAttachSheet(); return; }
+      m.items.push({ kind: 'link', url: u, name: u, note: '' });
+      m.urlOpen = false; m.err = '';
+      renderAttachSheet();
+      focusNote(m.items.length - 1);
+    };
+    url.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !inputMethod(e)) add();
+      if (e.key === 'Escape') { e.stopPropagation(); m.urlOpen = false; renderAttachSheet(); }
+    });
+    $('#attUrlAdd').addEventListener('click', add);
+    url.focus();
+  }
+}
+
+function focusNote(i) { const el = $(`#attNote${i}`); if (el) el.focus(); }
+
+async function pickAttach(kind) {
+  const m = S.att;
+  if (!m || m.busy) return;
   try {
-    const r = await call('attach', { id, text, items });
+    const r = await call('pick', { kind });
+    if (S.att !== m) return;
+    const first = m.items.length;
+    for (const f of r.files || []) {
+      if (!m.items.some((a) => a.path === f.path)) m.items.push({ kind, path: f.path, name: f.name, note: '' });
+    }
+    m.err = '';
+    renderAttachSheet();
+    if (m.items.length > first) focusNote(first);
+  } catch (e) { m.err = e.message; renderAttachSheet(); }
+}
+
+// 加入: one line each in 「八、補充資訊」, led by its note. The sheet stays open while the files go to Drive, and
+// opens again with what was typed if they could not
+async function sendAttach() {
+  const m = S.att, id = S.sel;
+  if (!m || m.busy || !m.items.length) return;
+  if (S.busy || S.sending || aiBusy()) { m.err = t('attach_wait', aiName()); return renderAttachSheet(); }
+  m.busy = true; m.err = ''; renderAttachSheet();
+  S.sending = true;
+  let saved = false;
+  try { saved = await savedFirst(); } finally { S.sending = false; }
+  if (!saved || S.att !== m) { m.busy = false; if (S.att === m) renderAttachSheet(); return; }
+  const items = m.items.map(({ kind, path, url, note }) => ({ kind, path, url, note: note.trim() }));
+  S.busy = true; S.busyText = 'attaching';
+  S.asked = m.items.map((a) => a.name).join(t('list_sep')); S.askedQuick = ''; S.askedPic = ''; S.said = ''; S.saidErr = false; S.editSeq++;
+  renderAsk(); renderTags();
+  try {
+    const r = await call('attach', { id, text: '', items });
     if (S.sel !== id || !S.d) return;
-    S.attach = []; S.urlOpen = false;
+    if (S.att === m) closeSheet();
     S.said = r.reply || '';
     afterEdit(r);
   } catch (e) {
     if (S.sel !== id) return;
-    S.said = e.message; S.saidErr = true;
+    m.busy = false; m.err = e.message; S.asked = '';
+    if (S.att === m) renderAttachSheet(); else showAlert(e.message);
   } finally {
     if (S.sel === id) {
       S.busy = false; S.busyText = '';
-      renderAsk(); renderAttach(); renderFoot(); refreshLog();
+      renderAsk(); renderTags(); renderFoot(); refreshLog();
     }
     runNext(id);
   }
@@ -1881,9 +1983,9 @@ function ask(text, quick, extra = {}) {
   const id = S.sel;
   const w = S.work[id] || (S.work[id] = { now: null, waits: [] });
   const own = !extra.correct && !quick;              // a quick button leaves the pasted pictures for the next sentence
-  w.waits.push({ text, quick: quick || '', pics: own ? S.pics : [], ...extra });
+  w.waits.push({ text, quick: quick || '', pics: own ? S.pics : [], refs: own ? S.refs : [], ...extra });
   if (own) {
-    S.pics = []; renderPics();
+    S.pics = []; S.refs = []; S.urlOpen = false; renderRefs();
     const box = $('#promptInput');
     if (box) box.value = '';
   }
@@ -1912,7 +2014,8 @@ async function runNext(id) {
   let r = null, err = null;
   try {
     r = q.correct ? await call('correct', { id, item: q.correct.label, text: q.correct.value })
-      : await call(q.quick ? 'quick' : 'ask', { id, text: q.quick || q.text, pictures: q.pics.map((x) => x.path) });
+      : await call(q.quick ? 'quick' : 'ask', { id, text: q.quick || q.text, pictures: q.pics.map((x) => x.path),
+        refs: refsOut(q.refs) });
   } catch (e) { err = e; }
   w.now = null;
   if (!w.waits.length) delete S.work[id];
@@ -2184,7 +2287,7 @@ function setLang(lang) {
 
 // --- sheets ----------------------------------------------------------------------------------
 
-function closeSheet() { S.sheet = null; $('#sheet').innerHTML = ''; placeDoc(); }
+function closeSheet() { S.sheet = null; S.att = null; $('#sheet').innerHTML = ''; placeDoc(); }
 
 // the transcript, each line with who said it (by voice). A voice not named yet shows as 講者 A; clicking a
 // name asks who it is, for every line of that voice or just this line, and the app remembers the voice
@@ -2379,6 +2482,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.aiOpen) { S.aiOpen = false; renderAiMenu(); return; }
   if (e.key === 'Escape' && S.sheet === 'delete' && S.del && S.del.busy) return;
   if (e.key === 'Escape' && S.sheet === 'project' && S.pset && S.pset.busy) return;
+  if (e.key === 'Escape' && S.sheet === 'attach' && S.att && S.att.busy) return;
   if (e.key === 'Escape' && S.sheet && !(S.mail && S.mail.sending)) { closeSheet(); return; }
   if (e.key === 'Escape' && S.picking) { endPicking(); renderSide(); }
 });

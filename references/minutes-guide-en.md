@@ -47,7 +47,11 @@ The prompt gives you the job folder (written `job` below), the recording's start
    use only `job/參考/舊紀錄/` (earlier minutes), the calendar and the project's brief.
 4. Prepare the mail: recipients are the attendees in the 「這場會議」 section on the user's own company domain, plus
    the user; when no meeting matched or it lists nobody, only the user. People in the other sections are not
-   recipients. Write the text in the tone of a short note to colleagues, with the line
+   recipients (the app adds the meeting's people from its own contacts when the user opens the mail). After the
+   paragraph with the link, add `Purpose:` with one sentence from section 2 and `Highlights:` with three to five
+   numbered lines (the agreements of section 4, then the action items of section 6 with the owner after each), so
+   a reader knows what the meeting was about without opening the Doc; the app fills these two in from the minutes
+   when they are missing. Write the text in the tone of a short note to colleagues, with the line
    `The minutes are ready:` and on the next line, alone, `{doc_url}`; the program puts the Doc's address there, and
    when the user sends a Word or PDF file instead it turns those two lines into "The minutes are ready; please see
    the attached file." Save it as `job/信件內文.txt`. Do not sign it unless `使用者設定.json` has a `sender_name`.

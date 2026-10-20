@@ -41,11 +41,13 @@ def qwen(folder: Path, model: str):
     result = transcribe(str(wav), model=model, language='Chinese', return_timestamps=True)
     took = time.time() - began
     merged = []                                       # word-level segments joined into lines of about a sentence
-    for seg in result.segments:
-        text = convert((seg.text or '').strip())
+    segments = result.segments if hasattr(result, 'segments') else result.get('segments', [])
+    for seg in segments:
+        get = seg.get if isinstance(seg, dict) else (lambda k, d=None: getattr(seg, k, d))
+        text = convert((get('text') or '').strip())
         if not text:
             continue
-        start, end = float(seg.start), float(seg.end)
+        start, end = float(get('start') or 0), float(get('end') or 0)
         if merged and start - merged[-1][1] < 0.8 and len(merged[-1][2]) < 40:
             merged[-1] = (merged[-1][0], end, merged[-1][2] + text)
         else:

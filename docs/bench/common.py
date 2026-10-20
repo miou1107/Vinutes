@@ -61,10 +61,12 @@ def to_wav(src: Path, wav: Path):
 
 
 def load_wav(wav: Path):
-    import wave
+    """16 kHz floats. afconvert writes WAVE_FORMAT_EXTENSIBLE headers, which Python's wave module refuses, so the
+    RIFF chunks are walked the way scripts/transcribe.py does it."""
     import numpy as np
-    with wave.open(str(wav), 'rb') as w:
-        return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+    sys.path.insert(0, str(SCRIPTS))
+    import transcribe as tr
+    return np.frombuffer(tr.pcm_frames(wav.read_bytes()), dtype=np.int16).astype(np.float32) / 32768.0
 
 
 def save_wav(path: Path, audio):

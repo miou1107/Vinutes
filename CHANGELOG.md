@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.14 (2026-10-20)
+
+- 發送信件 opens with the meeting's people as the recipients, each with the address Vinutes found: the calendar invitation, the company directory (read once a day) or a mail you sent before. A person it has no address for is a dashed chip; click it and type one. Typing a name or part of an address offers people to pick (Enter or a click adds them); a full address still works as before. What Vinutes knows is in ~/.config/vin-meeting-minutes-zh/contacts.json.
+- The mail says what the meeting was for and what came out of it: after the link, 會議目的 (one sentence from the minutes' section 二) and 重點 (up to five lines from the agreements in section 四 and the action items in section 六, the owner after each). The AI writes them for new minutes; for minutes already written, Vinutes fills them in from the minutes when the mail opens. Edit them before sending as before.
+
 ## v0.4.13 (2026-10-20)
 
 - Section 8 of the minutes is now 參考附件 (Attachments in English minutes) and every set of minutes has it: the AI writes 無 (None) when nothing was attached, and the first attachment you add takes the place of that line. Minutes written before this version keep their 補充資訊 heading, and attachments still go there.

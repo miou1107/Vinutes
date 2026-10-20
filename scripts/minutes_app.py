@@ -885,12 +885,14 @@ def people_change(job: Job, names: list[str], renames=()) -> dict:
     save_meeting_people(job, names)
     result = fresh()
     if job.md_path and not job.missing:
-        new_md = with_people(job, job.md, names)
+        was = job.md
+        new_md = with_people(job, was, names)
         others = names + known_people()
         for group, before, after in renames:
             new_md = speakers.name_voice(job.dir, new_md, group, before, after, others)
-        if new_md != job.md:
+        if new_md != was:
             result = push_edit(job, new_md)
+            relearn(job, was, new_md)                 # the app's own edit: not the user's wording, nothing to learn (issue 27)
     for group, _, after in renames:                   # the mail says it the same way
         body = job.dir / '信件內文.txt'
         if body.is_file() and not job.state.get('sent'):

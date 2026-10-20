@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.15 (2026-10-20)
+
+- Naming a voice, adding or removing a person under People no longer teaches Vinutes anything: the change it makes to the 與會人員 line is the app's own, not your wording, so no "照你的寫法" rule is written to notes.md for it. Your own edits right after are still learned.
+
 ## v0.4.14 (2026-10-20)
 
 - 發送信件 opens with the meeting's people as the recipients, each with the address Vinutes found: the calendar invitation, the company directory (read once a day) or a mail you sent before. A person it has no address for is a dashed chip; click it and type one. Typing a name or part of an address offers people to pick (Enter or a click adds them); a full address still works as before. What Vinutes knows is in ~/.config/vin-meeting-minutes-zh/contacts.json.

@@ -2331,6 +2331,48 @@ class ProjectTags(Flows):
         self.assertEqual(result['tag_suggestions'], ['對外', '月會', 'y' * 20])
 
 
+class LearnPeople(unittest.TestCase):
+    """What 人員 changes in the minutes (a voice named, a person added or taken off) is the app's own edit, not the
+    user's wording: learning from the user's edits must not turn it into a rule (Vin 2026-10-20, issue 27)."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix='learn-'))
+        self.job_dir = self.root / '20261020-150000'
+        self.job_dir.mkdir()
+        self.md_path = self.root / 'minutes.md'
+        for path in (self.md_path, self.job_dir / '同步基準.md', self.job_dir / '學習基準.md'):
+            path.write_text(MINUTES, encoding='utf-8')
+        (self.job_dir / 'job.json').write_text(json.dumps({'started': '2026-10-20T15:00:00+08:00'}))
+        (self.job_dir / 'status.json').write_text(json.dumps({'step': 'done'}))
+        (self.job_dir / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '週會', 'minutes_md': str(self.md_path)}))
+        self.saved_out, self.outs = minutes_app.out, []
+        minutes_app.out = self.outs.append
+        self.notes = minutes_app.CONFIG / 'notes.md'
+        self.notes.unlink(missing_ok=True)
+
+    def tearDown(self):
+        minutes_app.out = self.saved_out
+        self.notes.unlink(missing_ok=True)
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def job(self):
+        return minutes_app.Job(self.job_dir)
+
+    def test_adding_and_removing_people_teaches_nothing(self):
+        minutes_app.cmd_people(self.job(), 'add', 'Alan')
+        self.assertIn('與會人員：Amy、Kai、Alan', self.md_path.read_text(encoding='utf-8'))
+        self.assertEqual(minutes_app.cmd_learn(self.job(), quiet=True, log=False), [])
+        self.assertFalse(self.notes.is_file() and 'Alan' in self.notes.read_text(encoding='utf-8'))
+        minutes_app.cmd_people(self.job(), 'remove', 'Kai')
+        self.assertEqual(minutes_app.cmd_learn(self.job(), quiet=True, log=False), [])
+        # the user's own edit right after is still learned
+        md = self.md_path.read_text(encoding='utf-8').replace('活動預算確定為 10 萬元', '活動預算確定為十萬元')
+        self.md_path.write_text(md, encoding='utf-8')
+        learned = minutes_app.cmd_learn(self.job(), quiet=True, log=False)
+        self.assertEqual(len(learned), 1)
+        self.assertNotIn('Alan', json.dumps(learned, ensure_ascii=False))
+
+
 class Departments(unittest.TestCase):
     """The people a room booking's note names start the meeting's people, and the department it names remembers
     the people the user confirmed, so the next meeting of that department starts with them

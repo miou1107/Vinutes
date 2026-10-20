@@ -37,7 +37,7 @@
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |
 | `scripts/attachments.py` | Files, links and pictures from Add attachments: uploads them to Google Drive and lists them, each with its note, in the minutes' last section; reads that section back for the row under the title |
 | `scripts/references.py` | Files and links handed to the AI with a sentence: copied or read as text into its folder (Word, Excel, PowerPoint, web pages, Google files) |
-| `scripts/setup_check.py` | The setup checklist: models, the AI (installed, signed in, one test answer), Google connection |
+| `scripts/setup_check.py` | The setup checklist: the speech model (Whisper, or Qwen3-ASR chosen and downloaded from its model page), the voice model, the AI (installed, signed in, one test answer), Google connection |
 | `scripts/i18n.py` | Which language the app speaks (the user's pick, else the Mac's) and which language the minutes are written in |
 | `scripts/strings.py` | Every message the Python scripts show, in English and Traditional Chinese |
 | `scripts/google_setup.py` | Google sign-in and the user's `settings.json` |

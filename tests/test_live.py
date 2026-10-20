@@ -422,6 +422,25 @@ class Qwen(unittest.TestCase):
         self.assertTrue(self.calls[0]['context'].startswith(tr.HINT_HEAD))
         self.assertEqual(segs, [[100.5, 100.9, '第一句。'], [101.5, 102.0, '第二句？']])  # recording time, with punctuation
 
+    def test_a_sentence_that_only_reads_the_context_back_is_dropped(self):
+        ctx = '以下是會議。悠遊好好玩、搬站、UGC、Phyllis、Pitt、Alma、臺灣 PASS。'
+        self.assertTrue(tr.echoes('悠遊好好玩、搬站、UGC、Phyllis、Pitt。', ctx))          # the list read back
+        self.assertTrue(tr.echoes('搬站、ugc、Phyllis、Pitt、臺灣 PASS、Alma、好。', ctx))
+        self.assertFalse(tr.echoes('Phyllis、Pitt 和 Alma 都要參加。', ctx))              # names said in a sentence
+        self.assertFalse(tr.echoes('UGC、Pitt、Alma。', ctx))                            # three parts: too short to tell
+        self.assertFalse(tr.echoes('我們明天、後天、大後天、下週都要開會。', ctx))
+        self.assertFalse(tr.echoes('今天有 Phyllis、Pitt、Alma、Mickey 參加。', ctx))    # three in a row is still speech
+        self.assertFalse(tr.echoes('那就 Alma、Pitt、Phyllis、UGC、搬站。', ctx))          # the glossary's names, not its order
+        self.assertFalse(tr.echoes('悠遊好好玩、搬站、UGC、臺灣 PASS 這四個案子。', ctx))
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        words = [{'text': '第', 'start': 0.5, 'end': 0.6}, {'text': '一', 'start': 0.6, 'end': 0.7}, {'text': '句', 'start': 0.7, 'end': 0.9}]
+        self.fake.transcribe = lambda audio, **kw: {'text': '第一句。悠遊好好玩、搬站、UGC、Phyllis、Pitt。第二句？', 'segments': words}
+        from unittest import mock
+        with mock.patch.object(tr, 'hint', return_value=ctx):
+            name, run = tr.recogniser('zh')
+            self.assertEqual([s[2] for s in run(tone(3), 0.0)], ['第一句。', '第二句？'])
+
     def test_lines_are_cut_at_sentence_ends_and_keep_pace_with_the_words(self):
         words = [{'text': c, 'start': i * 0.5, 'end': i * 0.5 + 0.4} for i, c in enumerate('今天開會明天放假')]
         segs = tr.qwen_lines('今天 開會。明天，放假', words, 0)
@@ -452,13 +471,26 @@ class Qwen(unittest.TestCase):
         self.assertEqual(name, 'qwen3-asr')
         self.assertEqual([s[2] for s in segs], ['第0秒', '第1秒'])                   # Whisper's stand-in wrote it
 
+    def test_the_rest_of_a_recording_follows_the_model_its_pieces_were_written_with(self):
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        os.environ['MINUTES_SPEECH_MODEL'] = 'whisper'            # changed in the checklist during the meeting
+        self.assertEqual(tr.recogniser('zh', lambda *a, **k: {'segments': []}, 'qwen3-asr')[0], 'qwen3-asr')
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        self.assertEqual(tr.recogniser('zh', lambda *a, **k: {'segments': []}, 'whisper')[0], 'whisper')
+        self.assertEqual(tr.recogniser('zh', lambda *a, **k: {'segments': []}, '')[0], 'qwen3-asr')   # no pieces: the setting
+        self.assertEqual(tr.recogniser('zh', lambda *a, **k: {'segments': []}, 'nonsense')[0], 'qwen3-asr')
+
     def test_the_setup_checklist_reports_the_chosen_model(self):
         import setup_check
         os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
-        self.assertEqual(setup_check.speech()['state'], 'todo')
+        before = setup_check.speech()
+        self.assertEqual((before['state'], before['have']['qwen3-asr']), ('todo', False))
+        self.assertTrue(before['package'])                       # the fake package counts as installed
         self.weights(tr.QWEN, tr.QWEN_ALIGNER)
         got = setup_check.speech()
         self.assertEqual((got['state'], got['model']), ('done', 'qwen3-asr'))
+        self.assertTrue(got['have']['qwen3-asr'])                # the model page marks each model that is here
+        self.assertEqual(got['have']['whisper'], got['whisper'])
         self.assertEqual(setup_check.speech_repos('qwen3-asr'), [tr.QWEN, tr.QWEN_ALIGNER])
         os.environ['MINUTES_SPEECH_MODEL'] = 'whisper'
         self.assertEqual(setup_check.speech()['model'], 'whisper')

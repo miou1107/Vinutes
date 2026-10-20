@@ -125,17 +125,19 @@ def downloaded(repo: Path) -> int:
 
 def speech() -> dict:
     """The chosen speech model (whisper or qwen3-asr) and whether its files are here: done, loading with a
-    percentage while the download runs, or todo. A Mac without Qwen3-ASR's files transcribes with Whisper."""
+    percentage while the download runs, or todo. 'have' says which of the two models is on this Mac, for the
+    checklist's model page; a Mac without Qwen3-ASR's files transcribes with Whisper."""
     model = tr.speech_model()
     repos = speech_repos(model)
     total = QWEN_BYTES if model == 'qwen3-asr' else SPEECH_BYTES
+    package = tr.qwen_package()                       # False on a Mac installed before the package was added
+    have = {'whisper': tr.hub_has(SPEECH), 'qwen3-asr': package and tr.qwen_ready()}
+    common = {'model': model, 'whisper': have['whisper'], 'have': have, 'package': package}
     if 'speech' in running():
         got = sum(downloaded(tr.hub_dir(r)) for r in repos)
-        return {'state': 'loading', 'model': model, 'pct': min(99, int(got * 100 / total))}
-    ready = all(tr.hub_has(r) for r in repos) and (model != 'qwen3-asr' or tr.qwen_ready())
-    whisper = tr.hub_has(SPEECH)
-    return {'state': 'done' if ready else 'todo', 'model': model, 'whisper': whisper,
-            **({} if ready else {'failed': 'speech' in failed()})}
+        return {'state': 'loading', 'pct': min(99, int(got * 100 / total)), **common}
+    ready = have[model]
+    return {'state': 'done' if ready else 'todo', **common, **({} if ready else {'failed': 'speech' in failed()})}
 
 
 def voice() -> dict:

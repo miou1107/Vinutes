@@ -139,28 +139,36 @@ def save_people(project: str, names: list[str]):
 DEPARTMENTS = CONFIG / 'departments.json'
 
 
-def roster(departments: list[str]) -> tuple[list[str], str]:
-    """The people these departments' earlier meetings confirmed, and the meeting the first of them was learned at."""
+def roster(departments: list[str], before: str = '') -> tuple[list[str], str]:
+    """The people these departments' earlier meetings confirmed, and the meeting the first of them was learned at.
+    `before` (a date, 2026-10-20): only a roster learned at a meeting up to that day, so an older meeting opened
+    later does not get people it never had."""
     data = _read(DEPARTMENTS)
     names, where = [], ''
     for dept in departments:
         entry = data.get(dept) if isinstance(data.get(dept), dict) else {}
+        learned = entry.get('from') if isinstance(entry.get('from'), str) else ''
+        if before and learned[:10] > before:
+            continue
         for n in entry.get('people') or []:
             if isinstance(n, str):
                 names = add_name(names, n)
-        where = where or (entry.get('from') if isinstance(entry.get('from'), str) else '')
+        where = where or learned
     return names, where
 
 
-def save_roster(department: str, names: list[str], where: str):
-    """These names join the department's roster (nobody leaves it); `where` says which meeting taught it."""
+def save_roster(department: str, names: list[str], where: str, replace: bool = False):
+    """These names join the department's roster. `where` is the meeting doing this; a roster keeps the meeting
+    that first taught it as its `from`. `replace`: that first meeting is correcting it, so the roster becomes
+    exactly these names (the only way a name leaves)."""
     with _locked():
         data = _read(DEPARTMENTS)
         entry = data.get(department) if isinstance(data.get(department), dict) else {}
-        merged = [n for n in (entry.get('people') or []) if isinstance(n, str)]
+        merged = [] if replace else [n for n in (entry.get('people') or []) if isinstance(n, str)]
         for n in names:
             merged = add_name(merged, n)
-        data[department] = {'people': merged, 'from': where}
+        taught = entry.get('from') if isinstance(entry.get('from'), str) and entry.get('from') else where
+        data[department] = {'people': merged, 'from': taught}
         _write(DEPARTMENTS, data)
 
 

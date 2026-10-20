@@ -3,6 +3,7 @@
 ## v0.4.12 (2026-10-20)
 
 - A room booking made in a company system (an ERP) that invites nobody on Google, but writes the host and the participants into the calendar event's note, now counts as your meeting when the note names you. The note's host and participants start the meeting's people, spelled as the note spells them, and the minutes AI reads them with the calendar.
+- Under People, a voice that was given the wrong name can be removed like an unnamed one (移除講者 X), and each person listed as not having spoken has ✕ to take them off this meeting. A description the AI wrote beside a name on the 與會人員 line ("Adam（負責 AI SEO，逐字稿標記為講者 B）") is no longer split into two people; the name is Adam.
 - The department such a note names (參與部門) remembers the people you confirm under People at that meeting. The next meeting that names the department starts with them, under People and in the minutes the AI writes, so its voices are matched against them first. People shows what the calendar note said and which meeting the roster came from. Vinutes never takes anyone off a roster; the rosters are in ~/.config/vin-meeting-minutes-zh/departments.json.
 
 ## v0.4.11 (2026-10-19)

@@ -20,13 +20,13 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py drop_voice <job> <letter> [back]  移除講者 X under 人員 (a voice that is no one), or put it back
   minutes_app.py correct <job> <item> <right>      the user puts a guess right: Claude changes the minutes to it
   minutes_app.py ask_many <job> <json>             requests still waiting when the window closed, one after another
-  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」, each led by
+  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、參考附件」, each led by
                                                    its own note or else <note> (attachments.py)
   minutes_app.py log <job>                         the activity log, newest first
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
                                                    learns the user's own edits; the side panel's lists again
   minutes_app.py locate <job> <words>              how far down the Doc those words are ({"at": 0.0–1.0})
-  minutes_app.py note <job> <text>                 a paragraph at the end of 「八、補充資訊」, written by someone else
+  minutes_app.py note <job> <text>                 a paragraph at the end of 「八、參考附件」, written by someone else
                                                    than the user (an agent through mcp_server.py)
   minutes_app.py replace <job> <old> <new>         the words `old`, which the minutes have exactly once, become `new`
   minutes_app.py speaker <job> <group> <name> [line]  the user named a voice (講者 A -> Alex), or one line's
@@ -95,7 +95,7 @@ AI_TIMEOUT = 10 * 60
 # the preset requests under the box: what the AI is told, in the minutes' language (the window shows the names)
 QUICK = {
     'zh-TW': {
-        'short': '把整份紀錄改得精簡：每一節只留結論、決定和數字，刪掉重複的說明。七節的標題和表格的欄位不變。',
+        'short': '把整份紀錄改得精簡：每一節只留結論、決定和數字，刪掉重複的說明。八節的標題和表格的欄位不變，第八節參考附件不動。',
         'detail': '照 逐字稿.txt 把討論摘要寫完整：補回討論過程、每個人的說法和理由。其他節不變。',
         'formal': '把用語改成正式的書面語氣，口語說法全部換掉。內容和格式不變。',
         'visual': '能做成表格的內容改成表格，例如決議、負責人與時程；時程照時間先後排。',
@@ -1073,7 +1073,7 @@ REJECTED_OPEN = t('rejected_open')
 
 
 def linked_files(job: Job, md: str) -> list[str]:
-    """The Drive files 「八、補充資訊」 still links to (cmd_attach keeps their ids in the Doc's record): the mail opens
+    """The Drive files 「八、參考附件」 still links to (cmd_attach keeps their ids in the Doc's record): the mail opens
     these to its recipients (workspace.linked_files)."""
     record = read_json(job.md_path.with_name(job.md_path.name + '.gdoc.json')) if job.md_path else {}
     return [f for f in record.get('attach_files', []) if f'/file/d/{f}/' in md]
@@ -1271,7 +1271,7 @@ def after_sync(job: Job, doc: dict | None) -> list[str]:
 
 
 def place_pictures(job: Job) -> list[str]:
-    """Pictures from 「八、補充資訊」 that are not in the Doc yet (cmd_attach): each one in a paragraph of its own under
+    """Pictures from 「八、參考附件」 that are not in the Doc yet (cmd_attach): each one in a paragraph of its own under
     its line. One that fails for now waits for the next sync; after three tries its line keeps just the link."""
     import attachments
     warnings, left = [], []
@@ -1925,7 +1925,7 @@ def current_anchors(job: Job, md: str) -> list[dict]:
         return []
 
 
-# --- files, links and pictures for 「八、補充資訊」 ---------------------------------------------------
+# --- files, links and pictures for 「八、參考附件」 ---------------------------------------------------
 
 def attachments_listed(md: str) -> list[dict]:
     import attachments

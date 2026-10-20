@@ -2396,6 +2396,122 @@ class Departments(unittest.TestCase):
         self.assertEqual(minutes_app.roster(['數據經濟發展課']), ([], ''))
 
 
+class Contacts(unittest.TestCase):
+    """contacts.py: the addresses Vinutes knows (directory, calendar invitees, people mailed before), a name to an
+    address, and the people offered while typing a recipient (prototypes/mail-recipients.html, Vin 2026-10-20)."""
+
+    def setUp(self):
+        import contacts
+        self.c = contacts
+        contacts.CONTACTS.unlink(missing_ok=True)
+        contacts.learn('evanhsu@example.com', '許志明 Evan', 'directory')
+        contacts.learn('alan.wang@example.com', '李大同 Alan', 'directory')
+        contacts.learn('phyllis@example.com', '周美玲 Phyllis', 'directory')
+        contacts.learn('chen@partner.example.com', '陳小姐', 'mail')
+
+    def tearDown(self):
+        self.c.CONTACTS.unlink(missing_ok=True)
+
+    def test_a_name_finds_its_address_whichever_part_of_the_name_is_used(self):
+        self.assertEqual(self.c.address_of('Evan'), 'evanhsu@example.com')
+        self.assertEqual(self.c.address_of('許志明'), 'evanhsu@example.com')
+        self.assertEqual(self.c.address_of('許志明(Evan)'), 'evanhsu@example.com')
+        self.assertEqual(self.c.address_of('alan'), 'alan.wang@example.com')
+        self.assertEqual(self.c.address_of('Kai'), '')                        # nobody of that name
+        self.assertEqual(self.c.address_of('林'), '')                          # one character matches too many
+        self.c.learn('evan.lee@example.com', 'Evan Lee', 'calendar')
+        self.assertEqual(self.c.address_of('Evan'), '')                        # two Erics: the user picks
+
+    def test_typing_offers_people_by_name_or_address_and_not_those_already_added(self):
+        self.assertEqual([p['mail'] for p in self.c.suggest('ph')], ['phyllis@example.com'])
+        self.assertEqual([p['mail'] for p in self.c.suggest('許')], ['evanhsu@example.com'])
+        self.assertEqual([p['mail'] for p in self.c.suggest('example.com', exclude=['phyllis@example.com'])],
+                         ['alan.wang@example.com', 'chen@partner.example.com', 'evanhsu@example.com'])
+        self.assertEqual(self.c.suggest('陳')[0], {'name': '陳小姐', 'mail': 'chen@partner.example.com', 'src': 'mail'})
+        self.assertEqual(self.c.suggest(''), [])
+
+    def test_learning_again_keeps_the_fuller_name_and_the_directory_source(self):
+        self.c.learn('evanhsu@example.com', 'Evan', 'calendar')
+        self.assertEqual(self.c.suggest('evan')[0]['name'], '許志明 Evan')
+        self.assertEqual(self.c.suggest('evan')[0]['src'], 'directory')
+        self.c.learn('new@example.com', '', 'mail')                            # an address without a name
+        self.assertEqual(self.c.suggest('new')[0]['name'], 'new@example.com')
+
+
+MINUTES_WITH_PURPOSE = MINUTES.replace('## 二、討論摘要', '## 二、會議目的\n\n確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n## 三、討論摘要')
+
+
+class MailDefaults(Flows):
+    """What the mail sheet opens with: the meeting's people as recipients with their addresses, who has none, and
+    a body with the meeting's purpose and highlights (prototypes/mail-recipients.html, Vin 2026-10-20)."""
+
+    def setUp(self):
+        super().setUp()
+        import contacts
+        self.c = contacts
+        contacts.CONTACTS.unlink(missing_ok=True)
+        self.saved_refresh = contacts.refresh_directory
+        contacts.refresh_directory = lambda: None
+        contacts.learn('kai@example.com', '李國豪 Kai', 'directory')
+        (self.job_dir / '行事曆.json').write_text(json.dumps({
+            'title': '週會', 'guests': [{'name': 'Amy Chen', 'email': 'amy@example.com', 'self': False},
+                                      {'name': '', 'email': 'vinston@example.com', 'self': True}],
+            'host': '', 'departments': [], 'participants': []}, ensure_ascii=False), encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text('Hi，\n\n週會的會議紀錄整理好了：\n{文件網址}\n\n內容有需要調整的地方再跟我說。\n\nVin\n', encoding='utf-8')
+        self.saved_owner, self.saved_sender = minutes_app.owner, minutes_app.sender_name
+        minutes_app.owner = lambda: 'vinston@example.com'
+        minutes_app.sender_name = lambda: '黃建國 Vin'
+        result = json.loads((self.job_dir / 'result.json').read_text(encoding='utf-8'))
+        result['mail'] = {'to': [], 'subject': '週會會議紀錄'}
+        (self.job_dir / 'result.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+
+    def tearDown(self):
+        self.c.refresh_directory = self.saved_refresh
+        self.c.CONTACTS.unlink(missing_ok=True)
+        minutes_app.owner, minutes_app.sender_name = self.saved_owner, self.saved_sender
+        super().tearDown()
+
+    def test_the_meetings_people_are_the_recipients_and_the_calendar_teaches_addresses(self):
+        self.md_path.write_text(MINUTES_WITH_PURPOSE.replace('Amy、Kai', 'Vin、Amy、Kai'), encoding='utf-8')
+        self.c.learn('vinston@example.com', 'Vinston Kao', 'directory')       # the directory's name for the user
+        mail = minutes_app.mail_defaults(self.job())
+        # the invitation's Amy Chen and the minutes' Amy are one address: one chip; the user, Vin in the minutes and
+        # 黃建國 Vin on the invitation, is one too, whatever the directory calls them
+        self.assertEqual(mail['people'], [{'name': 'Amy Chen', 'mail': 'amy@example.com'}, {'name': '黃建國 Vin', 'mail': 'vinston@example.com'},
+                                          {'name': 'Kai', 'mail': 'kai@example.com'}])
+        self.assertEqual(mail['missing'], [])
+        self.assertEqual(mail['to'], ['amy@example.com', 'vinston@example.com', 'kai@example.com'])
+        self.assertEqual(self.c.address_of('Amy Chen'), 'amy@example.com')     # learned from the invitation
+
+    def test_a_person_without_an_address_or_with_two_is_listed_as_missing(self):
+        self.c.learn('evan.lee@example.com', 'Evan Lee', 'directory')
+        self.c.learn('evanhsu@example.com', '許志明 Evan', 'directory')
+        self.md_path.write_text(MINUTES.replace('Amy、Kai', 'Amy、Kai、陳小姐、Evan'), encoding='utf-8')
+        mail = minutes_app.mail_defaults(self.job())
+        self.assertEqual([p['name'] for p in mail['people']], ['Amy Chen', '黃建國 Vin', 'Kai', '陳小姐', 'Evan'])
+        self.assertEqual(mail['people'][3], {'name': '陳小姐', 'mail': ''})
+        self.assertEqual(mail['missing'], ['陳小姐', 'Evan'])                 # two Erics: the user picks one
+        self.assertNotIn('', mail['to'])
+
+    def test_the_body_gets_the_purpose_and_the_highlights_after_the_link(self):
+        self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        body = minutes_app.mail_defaults(self.job())['body']
+        self.assertIn('{文件網址}\n\n會議目的：確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n重點：\n'
+                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. 社群活動執行\n4. KOL 試行合作：Kai\n\n內容有需要調整的地方再跟我說。', body)
+        again = minutes_app.with_summary(body, MINUTES_WITH_PURPOSE, 'zh-TW')
+        self.assertEqual(again, body)                                          # not twice
+        self.assertEqual(minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', '# x\n\n## 一、會議基本資訊\n\n- 主持人：Vin\n', 'zh-TW'),
+                         'Hi\n\n{文件網址}\n\nVin')                               # nothing to take: unchanged
+
+    def test_english_minutes_get_purpose_and_highlights(self):
+        md = ('# Weekly\n\n## 1. Meeting Details\n\n- Host: Vin\n\n## 2. Purpose\n\nSettle the October budget.\n\n'
+              '## 4. Agreements\n\n1. Budget is 100k.\n2. Two KOLs first.\n\n## 6. Action Items\n\n'
+              '| No. | Item | Owner | Notes |\n|---|---|---|---|\n| 1 | Book the venue | Amy | by Friday |\n')
+        out = minutes_app.with_summary('Hi,\n\nThe minutes:\n{doc_url}\n\nVin', md, 'en')
+        self.assertIn('{doc_url}\n\nPurpose: Settle the October budget.\n\nHighlights:\n1. Budget is 100k.\n2. Two KOLs first.\n'
+                      '3. Book the venue: Amy\n\nVin', out)
+
+
 class CalendarPick(unittest.TestCase):
     """workspace.pick_meeting: which calendar event a recording was. Only events on the user's own calendar that
     they have not declined count as theirs; the company calendar's rooms are only offered as maybes."""

@@ -131,6 +131,47 @@ def save_people(project: str, names: list[str]):
         _write(PEOPLE, data)
 
 
+# A room booking made in a company system names a department instead of inviting people. Who that department's
+# people are is learned from the meetings the user confirmed (minutes_app.remember_roster): every name under 人員
+# in a meeting whose calendar note names the department, kept as {department: {'people': [...], 'from':
+# '2026-10-20 數據課週會'}}. The next meeting that names the department starts with them, and the minutes AI reads
+# them (prototypes/department-people.html, Vin 2026-10-20). Nothing is ever taken off a roster by the app.
+DEPARTMENTS = CONFIG / 'departments.json'
+
+
+def roster(departments: list[str], before: str = '') -> tuple[list[str], str]:
+    """The people these departments' earlier meetings confirmed, and the meeting the first of them was learned at.
+    `before` (a date, 2026-10-20): only a roster learned at a meeting up to that day, so an older meeting opened
+    later does not get people it never had."""
+    data = _read(DEPARTMENTS)
+    names, where = [], ''
+    for dept in departments:
+        entry = data.get(dept) if isinstance(data.get(dept), dict) else {}
+        learned = entry.get('from') if isinstance(entry.get('from'), str) else ''
+        if before and learned[:10] > before:
+            continue
+        for n in entry.get('people') or []:
+            if isinstance(n, str):
+                names = add_name(names, n)
+        where = where or learned
+    return names, where
+
+
+def save_roster(department: str, names: list[str], where: str, replace: bool = False):
+    """These names join the department's roster. `where` is the meeting doing this; a roster keeps the meeting
+    that first taught it as its `from`. `replace`: that first meeting is correcting it, so the roster becomes
+    exactly these names (the only way a name leaves)."""
+    with _locked():
+        data = _read(DEPARTMENTS)
+        entry = data.get(department) if isinstance(data.get(department), dict) else {}
+        merged = [] if replace else [n for n in (entry.get('people') or []) if isinstance(n, str)]
+        for n in names:
+            merged = add_name(merged, n)
+        taught = entry.get('from') if isinstance(entry.get('from'), str) and entry.get('from') else where
+        data[department] = {'people': merged, 'from': taught}
+        _write(DEPARTMENTS, data)
+
+
 def _entry(project: str) -> dict:
     found = _read(BRIEFS).get(project)
     found = found if isinstance(found, dict) else {}

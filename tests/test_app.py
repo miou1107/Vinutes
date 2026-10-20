@@ -2298,6 +2298,104 @@ class ProjectTags(Flows):
         self.assertEqual(result['tag_suggestions'], ['對外', '月會', 'y' * 20])
 
 
+class Departments(unittest.TestCase):
+    """The people a room booking's note names start the meeting's people, and the department it names remembers
+    the people the user confirmed, so the next meeting of that department starts with them
+    (prototypes/department-people.html, Vin 2026-10-20)."""
+
+    NOTE = {'title': '(ITRI-427會議室)數據課週會', 'series': '數據課週會', 'recurring': '', 'start': '2026-10-20T15:00:00+08:00',
+            'guests': [], 'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'participants': ['高聖哲(Vin)']}
+    EMPTY = {'host': '', 'departments': [], 'roster': [], 'roster_from': '', 'learned': False}
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix='dept-'))
+        self.saved_out, self.saved_sender = minutes_app.out, minutes_app.sender_name
+        self.outs = []
+        minutes_app.out = self.outs.append
+        minutes_app.sender_name = lambda: '高聖哲 Vin'            # the note's own spelling is kept, not this one
+        for f in (minutes_app.DEPARTMENTS, minutes_app.PROJECT_PEOPLE):
+            f.unlink(missing_ok=True)
+
+    def tearDown(self):
+        minutes_app.out, minutes_app.sender_name = self.saved_out, self.saved_sender
+        minutes_app.DEPARTMENTS.unlink(missing_ok=True)
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def job(self, name, calendar, md=MINUTES):
+        d = self.root / name
+        d.mkdir()
+        (d / 'minutes.md').write_text(md, encoding='utf-8')
+        (d / 'job.json').write_text(json.dumps({'started': f'2026-{name[4:6]}-{name[6:8]}T15:00:00+08:00'}))
+        (d / 'status.json').write_text(json.dumps({'step': 'done'}))
+        (d / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '數據課週會', 'minutes_md': str(d / 'minutes.md')}))
+        (d / '行事曆.json').write_text(json.dumps(calendar, ensure_ascii=False), encoding='utf-8')
+        return minutes_app.Job(d)
+
+    def test_the_notes_host_and_participants_start_the_meetings_people(self):
+        job = self.job('20261020-150000', {**self.NOTE, 'participants': ['高聖哲(Vin)', '許恩碩(Eric)']})
+        self.assertEqual(minutes_app.invited(job), ['高聖哲(Vin)', '許恩碩(Eric)'])     # as the note spells them
+        self.assertEqual(minutes_app.meeting_people(job), ['高聖哲(Vin)', '許恩碩(Eric)', 'Amy', 'Ken'])
+        self.assertEqual(minutes_app.calendar_payload(job),
+                         {**self.EMPTY, 'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課']})
+
+    def test_adding_a_person_remembers_the_department_but_the_ais_attendee_line_does_not(self):
+        job = self.job('20261020-150000', self.NOTE)          # the minutes' 與會人員 line says Amy、Ken: not confirmed
+        minutes_app.cmd_people(job, 'add', 'Adam')
+        people, where = minutes_app.roster(['數據經濟發展課'])
+        self.assertEqual(people, ['高聖哲(Vin)', 'Adam'])
+        self.assertEqual(where, '2026-10-20 數據課週會')
+        self.assertEqual(self.outs[-1]['calendar'],
+                         {'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'roster': people,
+                          'roster_from': '2026-10-20 數據課週會', 'learned': True})
+
+    def test_in_the_meeting_that_taught_the_roster_the_user_can_still_correct_it(self):
+        job = self.job('20261020-150000', self.NOTE)
+        minutes_app.cmd_people(job, 'add', 'Adan')                              # a typo
+        minutes_app.cmd_people(job, 'remove', 'Adan')
+        minutes_app.cmd_people(job, 'add', 'Adam')
+        self.assertEqual(minutes_app.roster(['數據經濟發展課'])[0], ['高聖哲(Vin)', 'Adam'])
+        later = self.job('20261027-150000', {**self.NOTE, 'start': '2026-10-27T15:00:00+08:00'},
+                         md=MINUTES.replace('Amy、Ken', '[__]'))
+        minutes_app.cmd_people(later, 'remove', 'Adam')                        # absent one week: the roster keeps him
+        self.assertEqual(minutes_app.roster(['數據經濟發展課'])[0], ['高聖哲(Vin)', 'Adam'])
+        minutes_app.cmd_people(later, 'add', '許恩碩(Eric)')                    # a later meeting adds, never takes off
+        self.assertEqual(minutes_app.roster(['數據經濟發展課']), (['高聖哲(Vin)', 'Adam', '許恩碩(Eric)'], '2026-10-20 數據課週會'))
+        minutes_app.cmd_people(later, 'remove', '許恩碩(Eric)')                 # and still cannot take off, even its own addition
+        self.assertEqual(minutes_app.roster(['數據經濟發展課'])[0], ['高聖哲(Vin)', 'Adam', '許恩碩(Eric)'])
+
+    def test_the_next_meeting_of_the_department_starts_with_the_roster(self):
+        first = self.job('20261020-150000', self.NOTE)
+        minutes_app.cmd_people(first, 'add', 'Adam')
+        later = self.job('20261027-150000', {**self.NOTE, 'start': '2026-10-27T15:00:00+08:00'},
+                         md=MINUTES.replace('Amy、Ken', '[__]'))
+        self.assertEqual(minutes_app.meeting_people(later), ['高聖哲(Vin)', 'Adam'])
+        self.assertEqual(minutes_app.calendar_payload(later),
+                         {'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'roster': ['高聖哲(Vin)', 'Adam'],
+                          'roster_from': '2026-10-20 數據課週會', 'learned': False})
+        # a participant the note names who is not in the roster is added, and nobody twice
+        third = self.job('20261103-150000', {**self.NOTE, 'participants': ['高聖哲(Vin)', 'Adam', '許恩碩(Eric)']},
+                         md=MINUTES.replace('Amy、Ken', '[__]'))
+        self.assertEqual(minutes_app.meeting_people(third), ['高聖哲(Vin)', 'Adam', '許恩碩(Eric)'])
+        # a meeting before the one that taught the roster does not get it
+        earlier = self.job('20261013-150000', {**self.NOTE, 'start': '2026-10-13T15:00:00+08:00'},
+                           md=MINUTES.replace('Amy、Ken', '[__]'))
+        self.assertEqual(minutes_app.meeting_people(earlier), ['高聖哲(Vin)'])
+        self.assertEqual(minutes_app.calendar_payload(earlier), {**self.EMPTY, 'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課']})
+
+    def test_a_description_the_ai_wrote_beside_a_name_is_not_part_of_the_name(self):
+        line = '- 與會人員：Vin、Adam（負責 AI SEO，逐字稿標記為講者 B）、Eric、陳怡君（Jessie）、王小明 (Ming)\n'
+        self.assertEqual(minutes_app.attendees(line), ['Vin', 'Adam', 'Eric', '陳怡君（Jessie）', '王小明 (Ming)'])
+        self.assertEqual(minutes_app.attendees('- Attendees: Amy Chen (Marketing lead, Speaker C), Ken Lee\n'), ['Amy Chen', 'Ken Lee'])
+
+    def test_a_meeting_without_a_department_writes_no_roster(self):
+        job = self.job('20261020-150000', {**self.NOTE, 'departments': []})
+        minutes_app.cmd_people(job, 'add', 'Adam')
+        self.assertFalse(minutes_app.DEPARTMENTS.exists())
+        self.assertEqual(self.outs[-1]['calendar'], {**self.EMPTY, 'host': '高聖哲(Vin)'})
+        self.assertEqual(minutes_app.calendar_payload(self.job('20261021-150000', {})), self.EMPTY)
+        self.assertEqual(minutes_app.roster(['數據經濟發展課']), ([], ''))
+
+
 class CalendarPick(unittest.TestCase):
     """workspace.pick_meeting: which calendar event a recording was. Only events on the user's own calendar that
     they have not declined count as theirs; the company calendar's rooms are only offered as maybes."""
@@ -2311,11 +2409,75 @@ class CalendarPick(unittest.TestCase):
                                   {'email': 'amy@example.com', 'responseStatus': 'accepted'}]
         return {'ev': event, 'primary': primary, 'cal': 'vincent@example.com' if primary else '範例公司'}
 
-    def pick(self, found, start='15:31', end='16:15'):
+    def pick(self, found, start='15:31', end='16:15', me=()):
         import workspace
         day = '2026-10-07'
         return workspace.pick_meeting(found, datetime.fromisoformat(f'{day}T{start}:00+08:00'),
-                                      datetime.fromisoformat(f'{day}T{end}:00+08:00'))
+                                      datetime.fromisoformat(f'{day}T{end}:00+08:00'), me=list(me))
+
+    # an ERP room booking: nobody invited, the people written in the event's note instead
+    NOTE = ('開始時間: 2026-10-07 15:00\n結束時間: 2026-10-07 16:00\n主持人: 高聖哲(Vin)\n參與部門: 數據經濟發展課\n'
+            '會議連結: https://erp.example.com/meetingRoom/1\n參與人員: 高聖哲(Vin)')
+
+    def booking(self, note, title='(ITRI-427會議室)數據課週會'):
+        f = self.ev(title, '15:00', '16:00', primary=False, me=None)
+        f['ev']['description'] = note
+        return f
+
+    def test_the_note_of_a_booking_is_read_whichever_wording_it_uses(self):
+        import workspace
+        self.assertEqual(workspace.describe({'description': self.NOTE}),
+                         {'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'participants': ['高聖哲(Vin)']})
+        self.assertEqual(workspace.describe({'description': 'Host: Amy Chen\nDepartments: Data, Marketing\nAttendees: Amy Chen; Ken Lee'}),
+                         {'host': 'Amy Chen', 'departments': ['Data', 'Marketing'], 'participants': ['Amy Chen', 'Ken Lee']})
+        self.assertEqual(workspace.describe({'description': '與會人員：王小明、Amy\n主席：王小明\n與會部門：行銷部／數據部'}),
+                         {'host': '王小明', 'departments': ['行銷部', '數據部'], 'participants': ['王小明', 'Amy']})
+        empty = {'host': '', 'departments': [], 'participants': []}
+        self.assertEqual(workspace.describe({'description': '參與人員:\n主持人：\n參與部門:  '}), empty)
+        self.assertEqual(workspace.describe({}), empty)
+        # a meeting link, an address, HTML list items: never a department or a person
+        self.assertEqual(workspace.describe({'description': 'Teams: https://teams.microsoft.com/l/meetup-join/abc\n'
+                                                            'Attendees: amy@example.com; Ken Lee\n參與部門: 數據課'}),
+                         {'host': '', 'departments': ['數據課'], 'participants': ['Ken Lee']})
+        self.assertEqual(workspace.describe({'description': '<ul><li>主持人: Amy</li><li>參與部門: 行銷部</li></ul>'}),
+                         {'host': 'Amy', 'departments': ['行銷部'], 'participants': []})
+
+    def test_the_users_name_is_matched_by_its_parts_not_inside_another_name(self):
+        import workspace
+        me = workspace.me_tokens('高聖哲 Vin')
+        self.assertEqual(me, ['高聖哲', 'Vin'])
+        self.assertTrue(workspace.names_me('高聖哲(Vin)', me))
+        self.assertTrue(workspace.names_me('vin kao', me))
+        self.assertFalse(workspace.names_me('Kevin Wu', me))
+        self.assertFalse(workspace.names_me('', me))
+        self.assertEqual(workspace.me_tokens('Vincent Kao'), ['Vincent', 'Kao'])
+        self.assertEqual(workspace.me_tokens(''), [])
+
+    def test_a_booking_whose_note_names_the_user_is_the_meeting(self):
+        got = self.pick([self.booking(self.NOTE), self.booking('主持人: 王小明\n參與人員: 王小明、Amy', title='(會議室D)ISMS 專案會議')],
+                        me=['高聖哲', 'Vin'])
+        self.assertEqual(got['match']['ev']['summary'], '(ITRI-427會議室)數據課週會')
+        self.assertEqual([o['ev']['summary'] for o in got['others']], ['(會議室D)ISMS 專案會議'])
+
+    def test_a_booking_whose_note_names_only_others_stays_a_maybe(self):
+        got = self.pick([self.booking('主持人: 王小明\n參與部門: 數據經濟發展課\n參與人員: 王小明、Amy')], me=['高聖哲', 'Vin'])
+        self.assertIsNone(got['match'])
+        self.assertEqual(len(got['others']), 1)
+        got = self.pick([self.booking('主持人:\n參與人員:')], me=['高聖哲', 'Vin'])     # labels with nothing after them
+        self.assertIsNone(got['match'])
+
+    def test_the_note_lines_are_shown_for_the_agent(self):
+        import io
+        import contextlib
+        import workspace
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            workspace.show(self.booking(self.NOTE)['ev'], '範例公司')
+        lines = out.getvalue().splitlines()
+        self.assertIn('   主持人: 高聖哲(Vin)', lines)
+        self.assertIn('   參與部門: 數據經濟發展課', lines)
+        self.assertIn('   參與人員: 高聖哲(Vin)', lines)
+        self.assertIn('   連結: https://erp.example.com/meetingRoom/1', lines)
 
     def test_a_room_booking_the_user_is_not_on_is_never_the_meeting(self):
         got = self.pick([self.ev('(會議室A)FunTOUR月會', '15:30', '17:00', primary=False, me=None),
@@ -2476,6 +2638,26 @@ class CalendarForTheAgent(unittest.TestCase):
         job.mkdir()
         self.answer('', code=1)
         self.assertTrue(self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00'}).startswith('（讀不到行事曆'))
+
+    def test_the_roster_of_the_department_the_note_names_is_handed_to_the_agent(self):
+        minutes_app.DEPARTMENTS.write_text(json.dumps({'數據經濟發展課': {'people': ['高聖哲(Vin)', 'Adam', 'Eric'],
+                                                                     'from': '2026-10-13 數據課週會'}}, ensure_ascii=False))
+        try:
+            job = self.root / '20261020-150051'
+            job.mkdir()
+            self.answer('== 這場會議\nMATCH {"title": "(ITRI-427會議室)數據課週會", "series": "數據課週會", "recurring": "", "start": "",'
+                        ' "host": "高聖哲(Vin)", "departments": ["數據經濟發展課"], "participants": ["高聖哲(Vin)"]}\n')
+            text = self.am.read_calendar(job, {'started': '2026-10-20T15:00:51+08:00'})
+            self.assertIn('== 參與部門之前確認過的名單', text)
+            self.assertIn('數據經濟發展課：高聖哲(Vin)、Adam、Eric', text)
+            self.assertIn('2026-10-13 數據課週會', text)
+            self.assertEqual(json.loads((job / '行事曆.json').read_text())['departments'], ['數據經濟發展課'])
+            other = self.root / '20261021-150051'
+            other.mkdir()
+            self.answer('== 這場會議\nMATCH {"title": "週會", "series": "週會", "recurring": "", "start": "", "departments": ["行銷部"]}\n')
+            self.assertNotIn('參與部門之前確認過的名單', self.am.read_calendar(other, {'started': '2026-10-21T15:00:51+08:00'}))
+        finally:
+            minutes_app.DEPARTMENTS.unlink(missing_ok=True)
 
 
 class ScriptLog(unittest.TestCase):

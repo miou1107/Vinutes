@@ -2686,6 +2686,14 @@ window.addEventListener('focus', () => { if (S.sheet === 'setup') refreshSetup()
 function setupSide(key, label) {
   const st = (S.setup || {})[key] || {};
   if (key === 'ai') return aiSide(st);
+  // item 3 also opens its model page (Whisper or Qwen3-ASR), except while a download runs
+  if (key === 'speech' && st.state && st.state !== 'loading') {
+    return plainSide(key, label, st) + `<button class="slink" data-k="speech" data-act="change">${esc(t('speech_change'))}</button>`;
+  }
+  return plainSide(key, label, st);
+}
+
+function plainSide(key, label, st) {
   const btn = (text, act, extra = '') => `<button class="btn primary sbtn" data-k="${key}" data-act="${act}"${extra}>${esc(text)}</button>`;
   switch (st.state) {
     case 'done': return `<span class="sok">${esc(t('s_done'))}</span>`;
@@ -2709,6 +2717,7 @@ function renderSetup() {
   if (!el || S.sheet !== 'setup') return;
   const st = S.setup;
   if (S.setupGuide === 'ai') return renderAiGuide(el);
+  if (S.setupGuide === 'speech') return renderSpeechGuide(el);
   if (S.setupGuide) return renderGoogleGuide(el);
   const done = st ? SETUP.filter(([k]) => (st[k] || {}).state === 'done').length : 0;
   const desc = (k) => t(`setup_${k}_desc`);
@@ -2721,6 +2730,7 @@ function renderSetup() {
       <div class="sico" style="background:${bg}">${icon}</div>
       <div class="stxt"><div class="stt">${i + 1}. ${esc(t(`setup_${k}`))}${req ? `<span class="sreq">${esc(t('required'))}</span>` : ''}</div>
         ${k === 'ai' && st && st.ai ? aiDesc(st.ai)
+          : k === 'speech' && st && st.speech && st.speech.model ? `<div class="sds">${esc(speechName(st.speech.model))}</div>`
           : desc(k) && st && st[k] && st[k].state !== 'done' ? `<div class="sds">${esc(desc(k))}</div>` : ''}
         ${k === 'login' && st && st.login && st.login.email ? `<div class="sds">${esc(st.login.email)}</div>` : ''}</div>
       <div class="sside">${st ? setupSide(k, t(`setup_${k}_btn`)) : `<span class="slock">${esc(t('checking'))}</span>`}</div></div>`).join('')}</div>
@@ -2746,6 +2756,7 @@ async function setupAct(key, act) {
   try {
     if (key === 'mic' || key === 'notify') await call(key === 'mic' ? 'setupMic' : 'setupNotify');
     else if (act === 'aiguide') { S.setupGuide = 'ai'; return renderSetup(); }
+    else if (act === 'change') { S.setupGuide = 'speech'; return renderSetup(); }
     else if (act === 'ailogin') { await call('setupAILogin', { ai: st.ai }); aiWaitLogin(st); }
     else if (act === 'open') await call('setupOpen', { url: st.url });
     else if (act === 'glogin' || key === 'login') await call('setupRun', { what: 'login' });
@@ -2778,6 +2789,59 @@ const AI_WHO = { claude: 'Claude', codex: 'ChatGPT', antigravity: 'Google' };   
 const aiFullName = (key) => (AIS.find(([k]) => k === key) || [key, key])[1];   // Claude Code, Codex…
 
 // the checklist's row: what it says under its name, and its button
+// --- item 3's model page: Whisper (every language, on every Mac) or Qwen3-ASR (Chinese meetings, 4 GB more) ---
+// [key, name, t() key of the one-line note, t() key of the size]
+const SPEECH_MODELS = [
+  ['whisper', 'Whisper', 'speech_whisper_note', 'speech_whisper_size'],
+  ['qwen3-asr', 'Qwen3-ASR', 'speech_qwen_note', 'speech_qwen_size'],
+];
+function speechModel(key) { return SPEECH_MODELS.find(([k]) => k === key) || SPEECH_MODELS[0]; }
+function speechName(key) { return speechModel(key)[1]; }
+
+// step 1 picks the model (kept at once), step 2 downloads it: the same download as item 3's button
+function renderSpeechGuide(el) {
+  const sp = (S.setup || {}).speech || {};
+  const [model, name, , size] = speechModel(sp.model);
+  const have = sp.have || {};
+  const dlDone = sp.state === 'done';
+  const num = (i, ok) => `<div class="sico snum${ok ? ' ok' : ''}">${ok ? '✓' : i}</div>`;
+  let side;
+  if (sp.state === 'loading') side = `<span class="swait">${esc(t('downloading', sp.pct || 0))}</span><div class="sbar"><i style="width:${sp.pct || 0}%"></i></div>`;
+  else if (dlDone) side = `<span class="sok">${esc(t('s_downloaded'))}</span>`;
+  else if (!sp.state) side = `<span class="slock">${esc(t('checking'))}</span>`;
+  else if (model === 'qwen3-asr' && sp.package === false) side = `<span class="slock">${esc(t('speech_no_package'))}</span>`;  // installed before v0.4.17
+  else side = (sp.failed ? `<span class="sbad">${esc(t('dl_failed'))}</span>` : '')
+    + `<button class="btn primary sbtn" data-k="speech" data-act="do">${esc(t(sp.failed ? 'redownload' : 'setup_speech_btn'))}</button>`;
+  const done = 1 + (dlDone ? 1 : 0);
+  el.innerHTML = `<div class="veil"><div class="sheet setup" role="dialog" aria-label="${esc(t('speech_title'))}">
+    <div class="shead"><h3>${esc(t('speech_title'))}</h3></div>
+    <div class="slist">
+      <div class="srow">${num(1, true)}<div class="stxt"><div class="stt">${esc(t('speech_pick'))}</div>
+        <div class="aicards" role="radiogroup" aria-label="${esc(t('speech_pick'))}">${SPEECH_MODELS.map(([k, n, note, sz]) =>
+          `<button class="aicard${k === model ? ' on' : ''}" role="radio" aria-checked="${k === model}" data-model="${k}"${sp.state === 'loading' ? ' disabled' : ''}>
+            <b>${esc(n)}</b><span>${esc(t(note))}・${esc(t(sz))}</span>${have[k] ? `<em>${esc(t('s_downloaded'))}</em>` : ''}</button>`).join('')}</div></div></div>
+      <div class="srow">${num(2, dlDone)}<div class="stxt"><div class="stt">${esc(t('speech_dl', name))}</div><div class="sds">${esc(t(size))}</div></div>
+        <div class="sside">${side}</div></div>
+    </div>
+    <div class="sfoot"><span class="scount">${esc(t('done_count', done, 2))}</span><button class="btn ${done === 2 ? 'primary' : 'ghost'}" id="backS">${esc(t('back_list'))}</button></div>
+  </div></div>`;
+  $('#backS').addEventListener('click', () => { S.setupGuide = false; renderSetup(); });
+  el.querySelectorAll('.aicard').forEach((b) => b.addEventListener('click', () => chooseSpeech(b.dataset.model)));
+  el.querySelectorAll('.sbtn').forEach((b) => b.addEventListener('click', () => setupAct('speech', 'do')));
+}
+
+async function chooseSpeech(key) {
+  const sp = (S.setup || {}).speech || {};
+  if (sp.model === key || sp.state === 'loading') return;
+  S.setupSeq++;
+  try {
+    const r = await call('setupSpeechModel', { model: key });
+    if (S.setup && r && r.speech) S.setup.speech = r.speech;
+  } catch (e) { showAlert(e.message); }
+  renderSetup();
+  refreshSetup();
+}
+
 function aiDesc(ai) {
   if (ai.state === 'done') return `<div class="sds">${esc(aiFullName(ai.ai))}</div>`;
   if (ai.state === 'login' && ai.was_signed) return `<div class="sds bad">${esc(t('ai_signed_out', aiFullName(ai.ai)))}</div>`;

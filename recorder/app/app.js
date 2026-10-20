@@ -2413,14 +2413,21 @@ function withLink(body, url) {
   return body.includes(w.mail_attached) ? body.replace(w.mail_attached, `${w.mail_link_colon}\n${url}`) : `${body.trimEnd()}\n\n${url}`;
 }
 
+// The recipients open as the meeting's people, each with the address Vinutes found (the calendar invitation, the
+// company directory, a mail sent before); one without an address is a dashed chip. Typing offers people to pick
+// (prototypes/mail-recipients.html, Vin 2026-10-20).
 function openMail() {
   const m = S.d.mail;
-  S.mail = { to: [...m.to], subject: m.subject, body: m.body, linkBody: m.body, fmt: 'gdoc', info: '', sending: false, err: '',
-             files: S.d.attach_files || 0 };
+  const rcpts = (m.people || []).map((p) => ({ name: p.name, mail: p.mail || '' }));
+  for (const a of m.to || []) if (!rcpts.some((r) => r.mail === a)) rcpts.push({ name: a, mail: a });
+  S.mail = { rcpts, subject: m.subject, body: m.body, linkBody: m.body, fmt: 'gdoc', info: '', sending: false, err: '',
+             files: S.d.attach_files || 0, typed: '', sugg: [], at: 0, seq: 0 };
   S.sheet = 'mail';
   placeDoc();
   renderMail();
 }
+
+const mailTo = () => S.mail.rcpts.filter((r) => r.mail).map((r) => r.mail);
 
 function renderMail() {
   const m = S.mail;
@@ -2430,9 +2437,10 @@ function renderMail() {
     <div class="grid">
       <span class="k">${esc(t('mail_from'))}</span><span>${esc(d.mail.from)}</span>
       <span class="k" style="align-self:start;padding-top:6px">${esc(t('mail_to'))}</span>
-      <div class="field tokens" id="tokens">${m.to.map((a, i) => `<span class="token"><span>${esc(a)}</span>
+      <div class="field tokens" id="tokens">${m.rcpts.map((r, i) => `<span class="token${r.mail ? '' : ' missing'}"${r.mail ? '' : ` data-fill="${esc(r.name)}" title="${esc(t('add_rcpt'))}"`}><span>${esc(r.name)}</span>${r.mail && r.mail !== r.name ? `<small>${esc(r.mail)}</small>` : ''}${r.mail ? '' : `<small>${esc(t('rcpt_no_mail'))}</small>`}
         <button data-i="${i}" aria-label="${esc(t('remove_rcpt'))}">${ICON.xs}</button></span>`).join('')}
-        <input id="addTo" aria-label="${esc(t('add_rcpt'))}" placeholder="${esc(t('add_rcpt'))}"></div>
+        <input id="addTo" autocomplete="off" aria-label="${esc(t('add_rcpt'))}" placeholder="${esc(t('add_rcpt'))}" value="${esc(m.typed)}">
+        ${m.sugg.length ? `<div class="ac rcpts" id="rcptAc" role="listbox">${m.sugg.map((p, i) => `<div class="aci${i === m.at ? ' on' : ''}" role="option" data-i="${i}"><span>${esc(p.name)}</span><small>${esc(p.mail)}</small><span class="src">${esc(t('rcpt_src_' + (p.src || 'mail')) || '')}</span></div>`).join('')}</div>` : ''}</div>
       <label class="k" for="subj">${esc(t('mail_subject'))}</label><input class="field" id="subj" value="${esc(m.subject)}">
       <span class="k">${esc(t('mail_attachment'))}</span>
       <div style="display:flex;align-items:center;gap:10px"><div class="seg" role="radiogroup" aria-label="${esc(t('mail_attachment'))}">
@@ -2447,19 +2455,32 @@ function renderMail() {
       <button class="btn primary" id="mailSend"${m.sending ? ' disabled' : ''}>${esc(t(m.sending ? 'sending' : 'send_mail_btn'))}</button></div>
   </div></div>`;
   const keep = () => { m.subject = $('#subj').value; m.body = $('#body').value; };
-  $('#tokens').querySelectorAll('.token button').forEach((b) => b.addEventListener('click', () => { keep(); m.to.splice(Number(b.dataset.i), 1); renderMail(); }));
+  const again = () => { keep(); renderMail(); const i = $('#addTo'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); };
+  $('#tokens').querySelectorAll('.token button').forEach((b) => b.addEventListener('click', () => { keep(); m.rcpts.splice(Number(b.dataset.i), 1); renderMail(); }));
+  $('#tokens').querySelectorAll('.token[data-fill]').forEach((c) => c.addEventListener('click', (e) => {   // no address: type one for this name
+    if (e.target.closest('button')) return;
+    m.rcpts.splice(m.rcpts.findIndex((r) => r.name === c.dataset.fill && !r.mail), 1);
+    m.typed = c.dataset.fill; m.sugg = []; again(); suggestRcpts();
+  }));
+  $('#tokens').querySelectorAll('.aci').forEach((el) => el.addEventListener('mousedown', (e) => { e.preventDefault(); pickRcpt(Number(el.dataset.i)); }));
   const add = $('#addTo');
   const addTokens = () => {
     const parts = add.value.split(/[,，、;\s]+/).map((t) => t.trim().toLowerCase()).filter((t) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t));
     if (!parts.length) return false;
-    keep();
-    for (const a of parts) if (!m.to.includes(a)) m.to.push(a);
-    renderMail();
-    $('#addTo').focus();
+    for (const a of parts) if (!m.rcpts.some((r) => r.mail === a)) m.rcpts.push({ name: a, mail: a });
+    m.typed = ''; m.sugg = [];
+    again();
     return true;
   };
-  add.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ',') && !inputMethod(e)) { e.preventDefault(); addTokens(); } });
-  add.addEventListener('blur', () => { if (add.value.trim()) addTokens(); });
+  add.addEventListener('input', () => { m.typed = add.value; m.at = 0; suggestRcpts(); });
+  add.addEventListener('keydown', (e) => {
+    if (inputMethod(e)) return;
+    if (e.key === 'ArrowDown' && m.sugg.length) { e.preventDefault(); m.at = (m.at + 1) % m.sugg.length; again(); }
+    else if (e.key === 'ArrowUp' && m.sugg.length) { e.preventDefault(); m.at = (m.at + m.sugg.length - 1) % m.sugg.length; again(); }
+    else if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); if (m.sugg.length) pickRcpt(m.at); else addTokens(); }
+    else if (e.key === 'Escape' && m.sugg.length) { e.stopPropagation(); m.sugg = []; again(); }
+  });
+  add.addEventListener('blur', () => { if (add.value.trim() && !m.sugg.length) addTokens(); });
   $('#subj').addEventListener('input', keep);
   $('#body').addEventListener('input', keep);
   $('#sheet').querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', async () => {
@@ -2474,7 +2495,7 @@ function renderMail() {
     if (m.fmt === 'gdoc') return;
     const fmt = m.fmt;
     try {
-      const r = await call('mailPrepare', { id: S.sel, to: m.to, subject: m.subject, body: m.body, format: fmt });
+      const r = await call('mailPrepare', { id: S.sel, to: mailTo(), subject: m.subject, body: m.body, format: fmt });
       if (m.fmt === fmt) { m.info = `${r.attachment}　${r.attachment_kb} KB`; renderMail(); }
     } catch (e) { if (m.fmt === fmt) { m.info = ''; m.err = e.message; renderMail(); } }
   }));
@@ -2482,18 +2503,56 @@ function renderMail() {
   $('#mailSend').addEventListener('click', sendMail);
 }
 
+// the people whose name or address holds what was typed, from contacts.py; an address being typed needs no menu
+let suggestTimer = null;
+function suggestRcpts() {
+  const m = S.mail;
+  clearTimeout(suggestTimer);
+  const q = (m.typed || '').trim();
+  if (!q || q.includes('@')) { if (m.sugg.length) { m.sugg = []; renderMailKeepingFocus(); } return; }
+  const seq = ++m.seq;
+  suggestTimer = setTimeout(async () => {
+    try {
+      const r = await call('suggest', { id: S.sel, q });
+      if (S.sheet !== 'mail' || S.mail !== m || seq !== m.seq) return;
+      const have = new Set(m.rcpts.map((x) => x.mail));
+      m.sugg = (r.people || []).filter((p) => !have.has(p.mail));
+      m.at = 0;
+      renderMailKeepingFocus();
+    } catch (e) { /* no menu: the address can still be typed */ }
+  }, 150);
+}
+
+function renderMailKeepingFocus() {
+  const m = S.mail;
+  const focused = document.activeElement && document.activeElement.id === 'addTo';
+  m.subject = $('#subj').value; m.body = $('#body').value;
+  renderMail();
+  if (focused) { const i = $('#addTo'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+}
+
+function pickRcpt(i) {
+  const m = S.mail;
+  const p = m.sugg[i];
+  if (!p) return;
+  if (!m.rcpts.some((r) => r.mail === p.mail)) m.rcpts.push({ name: p.name, mail: p.mail });
+  m.typed = ''; m.sugg = []; m.at = 0;
+  renderMailKeepingFocus();
+  const input = $('#addTo'); if (input) input.focus();
+}
+
 async function sendMail() {
   const m = S.mail;
   if (m.sending) return;
   m.subject = $('#subj').value; m.body = $('#body').value;
-  if (!m.to.length) { m.err = ['need_rcpt']; renderMail(); return; }
+  if (!mailTo().length) { m.err = ['need_rcpt']; renderMail(); return; }
   await flush();
   if (S.dirty) { m.err = ['mail_unsaved']; renderMail(); return; }
   m.sending = true; m.err = '';
   renderMail();
   const id = S.sel;
   try {
-    const r = await call('send', { id, to: m.to, subject: m.subject, body: m.body, format: m.fmt });
+    const r = await call('send', { id, to: mailTo(), subject: m.subject, body: m.body, format: m.fmt });
     if (S.sel !== id) return;
     S.d.sent = r.sent;
     closeSheet();

@@ -1614,7 +1614,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice", "askMany"]
+                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice", "askMany",
+                                     "suggest"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1865,6 +1866,10 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["update"], done)
         case "mailPrepare", "send":
             mail(dir, args, send: cmd == "send", done)
+        case "suggest":
+            // people for the mail sheet's recipient box, from what was typed (contacts.py)
+            let q = String((args["q"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+            app(["suggest", dir.path, q], done)
         case "archive", "unarchive", "delete":
             let ids = (args["ids"] as? [String] ?? []).filter {
                 $0.range(of: #"^\d{8}-\d{6}$"#, options: .regularExpression) != nil

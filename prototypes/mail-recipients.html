@@ -1,0 +1,215 @@
+<title>Vinutes 寄信視窗</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one page, a short lead, then the mail sheet as it is today and the sheet after the change, stacked. */
+:root {
+  --bg: #f3f3f6; --win: #ffffff; --panel: #f6f6f8; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --field: #ffffff; --field-line: #cfcfd6;
+  --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee; --link: #2a6dd6;
+  --green-bg: #dff3e3; --green-ink: #14532d; --hover: #e0e0e6; --amber: #d98a00; --amber-bg: #fff6dd; --amber-ink: #6b4d00;
+  --asis: #b42318; --asis-bg: #fdecea; --asis-line: #f1b5af;
+  --tobe: #0a64d8; --tobe-bg: #eaf2ff; --tobe-line: #a9c4ef;
+  --note: #6b4d00; --note-bg: #fff6dd; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.18);
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --link: #7fb0ff;
+  --green-bg: #1f3a28; --green-ink: #b6e8c4; --hover: #303036; --amber: #e0a030; --amber-bg: #3d3214; --amber-ink: #ffe08a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --link: #7fb0ff;
+  --green-bg: #1f3a28; --green-ink: #b6e8c4; --hover: #303036; --amber: #e0a030; --amber-bg: #3d3214; --amber-ink: #ffe08a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px; }
+.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 22px; margin: 0; text-wrap: balance; }
+.lead { margin: 6px 0 0; color: var(--text2); max-width: 62ch; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* the two states: red frame = today, blue frame = after the change */
+.state { border: 2px solid; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.state.asis { border-color: var(--asis-line); background: var(--asis-bg); }
+.state.tobe { border-color: var(--tobe-line); background: var(--tobe-bg); }
+.tag { align-self: flex-start; font-size: 13px; font-weight: 700; padding: 3px 12px; border-radius: 999px; color: var(--on-accent); }
+.asis .tag { background: var(--asis); } .tobe .tag { background: var(--tobe); }
+.cap { margin: 0; color: var(--text2); }
+.hint { margin: 0; font-size: 13px; color: var(--note); background: var(--note-bg); border-radius: 8px; padding: 6px 10px; align-self: flex-start; }
+
+/* the mail sheet, as the window shows it */
+.sheet { background: var(--win); border: 1px solid var(--line2); border-radius: 12px; padding: 18px 20px; max-width: 640px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow); min-width: 0; }
+.sheet h3 { margin: 0; font-size: 16px; }
+.grid { display: grid; grid-template-columns: 64px 1fr; gap: 10px 12px; align-items: center; }
+.k { color: var(--muted); font-size: 13px; }
+.field { border: 1px solid var(--field-line); background: var(--field); border-radius: 8px; padding: 6px 10px; font-size: 13px; min-width: 0; }
+.tokens { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; position: relative; }
+.token { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line2); border-radius: 999px; padding: 2px 6px 2px 10px; font-size: 13px; }
+.token small { color: var(--muted); font-size: 11px; }
+.token button { all: unset; cursor: pointer; display: flex; padding: 3px; border-radius: 50%; color: var(--muted); }
+.token button:hover { background: var(--hover); }
+.token.missing { border-style: dashed; color: var(--amber-ink); background: var(--amber-bg); border-color: var(--amber); }
+.tokens input { all: unset; flex: 1; min-width: 160px; font-size: 13px; padding: 4px 2px; }
+.tokens input::placeholder { color: var(--muted); }
+.ac { position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; min-width: 300px; background: var(--field); border: 1px solid var(--field-line); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.aci { display: flex; gap: 10px; align-items: baseline; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.aci:hover, .aci.on { background: var(--blue-bg); }
+.aci small { color: var(--muted); font-size: 12px; }
+.aci .src { margin-left: auto; font-size: 11px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; }
+.seg button { all: unset; cursor: pointer; padding: 4px 12px; font-size: 13px; }
+.seg button.on { background: var(--blue); color: var(--on-accent); }
+textarea { width: 100%; min-height: 220px; border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); color: var(--text); font: inherit; font-size: 13px; line-height: 1.6; padding: 10px 12px; resize: vertical; }
+.foot { display: flex; align-items: center; gap: 10px; }
+.note { flex: 1; font-size: 12px; color: var(--muted); }
+.btn { border: 1px solid var(--line2); background: var(--win); border-radius: 8px; padding: 6px 14px; font-size: 13px; }
+.btn.primary { background: var(--blue); color: var(--on-accent); border-color: var(--blue); font-weight: 600; }
+.who { font-size: 12px; color: var(--muted); grid-column: 2; margin-top: -4px; }
+.who b { color: var(--green-ink); font-weight: 600; }
+.mark { background: var(--amber-bg); color: var(--amber-ink); border-radius: 4px; padding: 0 4px; }
+@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .k { margin-bottom: -6px; } .who { grid-column: 1; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Vinutes 寄信視窗</h1>
+    <p class="lead">按「發送信件」的時候，收件人已經是這場的與會人員，要再加人打名字就能選。信的內容多了會議目的和三到五條重點，收到的人不打開文件也知道這場談了什麼。</p>
+  </header>
+
+  <section class="state asis" aria-label="目前的畫面">
+    <span class="tag">目前的畫面</span>
+    <div class="sheet">
+      <h3>發送信件</h3>
+      <div class="grid">
+        <span class="k">寄件人</span><span>高聖哲 Vin &lt;vincent@example.com&gt;</span>
+        <span class="k" style="align-self:start;padding-top:6px">收件人</span>
+        <div class="field tokens"><span class="token"><span>vincent@example.com</span><button aria-label="移除這位收件人">✕</button></span><input placeholder="加收件人" aria-label="加收件人"></div>
+        <span class="k">標題</span><input class="field" value="數據課週會會議紀錄（10/20）" aria-label="標題">
+        <span class="k">附件</span><div class="seg"><button class="on">Google 文件連結</button><button>Word</button><button>PDF</button></div>
+      </div>
+      <textarea aria-label="內文" readonly>Hi，
+
+數據課週會的會議紀錄整理好了：
+https://docs.google.com/document/d/…
+
+這次主要討論資料平台後端架構與抓取排程、AI SEO 成效分析引擎的三大情境、旅遊軌跡與核銷資料分析，以及四十大供應商關鍵字的刪減。內容有需要調整的地方再跟我說。
+
+Vin</textarea>
+      <div class="foot"><span class="note">收件人可以在 Google 文件上加註</span><button class="btn">取消</button><button class="btn primary">寄出</button></div>
+    </div>
+    <p class="cap">10/20 數據課週會的收件人只有你自己。Adam 和 Eric 在人員分頁上，卻沒有進收件人，要寄給他們得把信箱一字不漏打出來。信裡只有一句「這次主要討論⋯」，收到的人要打開文件才知道決定了什麼。</p>
+  </section>
+
+  <section class="state tobe" aria-label="調整後的畫面">
+    <span class="tag">調整後的畫面</span>
+    <p class="hint">收件人欄打「ph」或「林」試試，再按 Enter 或點選單加人；按 ✕ 可以拿掉。名字和信箱是範例。</p>
+    <div class="sheet" id="sheet">
+      <h3>發送信件</h3>
+      <div class="grid">
+        <span class="k">寄件人</span><span>高聖哲 Vin &lt;vincent@example.com&gt;</span>
+        <span class="k" style="align-self:start;padding-top:6px">收件人</span>
+        <div class="field tokens" id="tokens"></div>
+        <span class="who" id="who"></span>
+        <span class="k">標題</span><input class="field" value="數據課週會會議紀錄（10/20）" aria-label="標題">
+        <span class="k">附件</span><div class="seg"><button class="on">Google 文件連結</button><button>Word</button><button>PDF</button></div>
+      </div>
+      <textarea aria-label="內文">Hi，
+
+數據課週會（10/20）的會議紀錄整理好了：
+https://docs.google.com/document/d/…
+
+會議目的：檢視資料平台後端架構調整與抓取排程的進度、AI SEO 成效分析引擎的設計方向，並確認四十大供應商關鍵字的刪減方式。
+
+重點：
+1. 爬蟲額度改由排程控管，API 查詢服務下週開通。
+2. AI SEO 成效分析引擎先做三個情境，Adam 負責，11/3 前給第一版。
+3. 四十大供應商關鍵字由 Eric 刪到二十個，10/24 前給名單。
+
+內容有需要調整的地方再跟我說。
+
+Vin</textarea>
+      <div class="foot"><span class="note">收件人可以在 Google 文件上加註</span><button class="btn">取消</button><button class="btn primary">寄出</button></div>
+    </div>
+    <p class="cap">收件人一打開就是人員分頁上的三個人，Vinutes 從行事曆邀請和公司通訊錄找到他們的信箱。信裡的會議目的取自紀錄的第二節，重點取自第三節的共識和第四節的行動方案，寄之前都可以改。</p>
+    <p class="cap">找不到信箱的人會用虛線框顯示，例如外部來賓，點一下補信箱。</p>
+  </section>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// the company directory and the addresses mailed before (example people)
+const DIRECTORY = [
+  { name: '高聖哲 Vin', mail: 'vincent@example.com', src: '通訊錄' },
+  { name: '林佩蓉 Phoebe', mail: 'phoebe@example.com', src: '通訊錄' },
+  { name: '許恩碩 Eric', mail: 'eric@example.com', src: '通訊錄' },
+  { name: '王建安 Adam', mail: 'adam@example.com', src: '通訊錄' },
+  { name: '林珈平 Jamie', mail: 'jamie@example.com', src: '通訊錄' },
+  { name: '采瑤 Celia', mail: 'celia@example.com', src: '通訊錄' },
+  { name: '陳小姐（台灣 PASS）', mail: 'chen@partner.example.com', src: '寄過' }
+];
+// who the meeting's 人員 tab lists, with the address Vinutes found for each
+const to = [
+  { name: 'Vin', mail: 'vincent@example.com' },
+  { name: 'Adam', mail: 'adam@example.com' },
+  { name: 'Eric', mail: 'eric@example.com' }
+];
+let typed = '', at = 0;
+
+function offered() {
+  const q = typed.trim().toLowerCase();
+  if (!q) return [];
+  return DIRECTORY.filter((p) => !to.some((r) => r.mail === p.mail))
+    .filter((p) => p.name.toLowerCase().includes(q) || p.mail.toLowerCase().includes(q)).slice(0, 6);
+}
+
+function render() {
+  const box = $('#tokens');
+  const list = offered();
+  box.innerHTML = to.map((r, i) => `<span class="token${r.mail ? '' : ' missing'}"><span>${esc(r.name)}</span>${r.mail ? `<small>${esc(r.mail)}</small>` : '<small>找不到信箱</small>'}<button data-i="${i}" aria-label="移除這位收件人">✕</button></span>`).join('')
+    + `<input id="addTo" placeholder="打名字或信箱" aria-label="加收件人" autocomplete="off" value="${esc(typed)}">`
+    + (list.length ? `<div class="ac" role="listbox">${list.map((p, i) => `<div class="aci${i === at ? ' on' : ''}" role="option" data-i="${i}"><span>${esc(p.name)}</span><small>${esc(p.mail)}</small><span class="src">${esc(p.src)}</span></div>`).join('')}</div>` : '');
+  const missing = to.filter((r) => !r.mail).map((r) => r.name);
+  $('#who').innerHTML = missing.length ? `<span class="mark">${esc(missing.join('、'))}找不到信箱</span>` : '<b>與會人員都在收件人裡</b>';
+  box.querySelectorAll('.token button').forEach((b) => b.addEventListener('click', () => { to.splice(Number(b.dataset.i), 1); render(); $('#addTo').focus(); }));
+  box.querySelectorAll('.aci').forEach((el) => el.addEventListener('mousedown', (e) => { e.preventDefault(); pick(Number(el.dataset.i)); }));
+  const input = $('#addTo');
+  input.addEventListener('input', () => { typed = input.value; at = 0; render(); $('#addTo').focus(); const i = $('#addTo'); i.setSelectionRange(i.value.length, i.value.length); });
+  input.addEventListener('keydown', (e) => {
+    const list = offered();
+    if (e.key === 'ArrowDown' && list.length) { e.preventDefault(); at = (at + 1) % list.length; render(); $('#addTo').focus(); }
+    else if (e.key === 'ArrowUp' && list.length) { e.preventDefault(); at = (at + list.length - 1) % list.length; render(); $('#addTo').focus(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (list.length) pick(at);
+      else if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(typed.trim())) { to.push({ name: typed.trim(), mail: typed.trim() }); typed = ''; render(); $('#addTo').focus(); }
+    } else if (e.key === 'Escape') { typed = ''; render(); }
+  });
+}
+
+function pick(i) {
+  const p = offered()[i];
+  if (!p) return;
+  to.push({ name: p.name.split(' ').pop(), mail: p.mail });
+  typed = ''; at = 0;
+  render();
+  $('#addTo').focus();
+}
+render();
+</script>

@@ -276,6 +276,14 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .padd { align-self: flex-start; }
 .addrow .pin { all: unset; box-sizing: border-box; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--blue); background: var(--field); font-size: 13px; }
 .ac { margin-top: 4px; border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); padding: 4px; }
+/* the mail sheet's recipients: a chip without an address is dashed; the people offered while typing drop below the box */
+.tokens { position: relative; }
+.token small { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.token.missing { border-style: dashed; border-color: var(--amber); color: var(--yellow-label); cursor: text; }
+.ac.rcpts { position: absolute; left: 0; top: calc(100% + 2px); z-index: 6; min-width: 320px; max-width: 100%; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+.ac.rcpts .aci { display: flex; gap: 10px; align-items: baseline; }
+.ac.rcpts .aci small { color: var(--muted); font-size: 12px; }
+.ac.rcpts .aci .src { margin-left: auto; font-size: 11px; color: var(--muted); }
 .ac[hidden] { display: none; }
 .aci { padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .aci.on, .aci:hover { background: var(--blue-bg); color: var(--blue); }

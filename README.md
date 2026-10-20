@@ -11,7 +11,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Shows live captions.** CC on the floating bar shows what people are saying, under the bar, as they say it (macOS 26 and later). The captions are made on your Mac and are not written into the transcript.
 - **Tells speakers apart** by their voices. In the People tab you pick who each voice is: the minutes and the email change to that name, and the next meeting recognises the voice.
 - **Writes the minutes with the AI you already use:** Claude Code, Codex or Antigravity. Each one runs in a sandbox that can only read and write that meeting's folder.
-- **Matches the recording to your Google Calendar** to fill in the title, time, place and attendees.
+- **Matches the recording to your Google Calendar** to fill in the title, time, place and attendees. A room booking that names its host and department in the event's note counts too, and the department's people, once confirmed under People, come back at its next meeting.
 - **Publishes a Google Doc** and keeps it in sync: your colleagues' edits and comments show up in the app, and when you edit in the app only the paragraphs you changed are updated, so their comments stay where they were.
 - **Learns from your corrections.** A misheard name you fix once goes into the project's brief (or your glossary, for a meeting without a project), and the next meeting gets it right.
 - **Adds attachments to the minutes.** Add attachments, under the meeting's title, takes files, links and pictures, each with a note of its own. They are saved to Google Drive and listed in section 8 of the minutes, Supporting Materials.

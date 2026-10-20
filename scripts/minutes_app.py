@@ -2509,7 +2509,8 @@ def mail_defaults(job: Job) -> dict | None:
     people, missing, seen = [], [], set()
     me_parts = contacts.tokens(sender_name()) | {mine.split('@')[0]}   # Vin, 高聖哲, vincent: the user, whatever the directory calls them
     for name in meeting_people(job):
-        address = mine if mine and contacts.tokens(name) & me_parts else contacts.address_of(name)
+        parts = contacts.tokens(name)                 # the user when every part of the name is theirs (Vin, 高聖哲(Vin); not Kevin Kao)
+        address = mine if mine and parts and parts <= me_parts else contacts.address_of(name)
         if address in seen:
             continue                                  # Amy Chen on the invitation and Amy in the minutes: one chip
         if address:
@@ -2558,20 +2559,26 @@ def with_summary(body: str, md: str, lang: str) -> str:
     section 四, then the action items of section 六, owner after each) after the paragraph with the Doc link.
     Unchanged when the body already has them, or the minutes give nothing to take."""
     words = SUMMARY['en' if lang == 'en' else 'zh-TW']
-    if not body or words['purpose_label'].strip(' :：') + (':' if lang == 'en' else '：') in body or words['highlights'] in body:
+    if not body or re.search(r'(?m)^\s*(會議目的|重點|Purpose|Highlights)\s*[:：]', body):
         return body
-    purpose = next((plain_text(p) for p in re.split(r'\n\s*\n', section_text(md, words['purpose'])) if plain_text(p)), '')[:160]
+    purpose = next((plain_text(p) for p in re.split(r'\n\s*\n', section_text(md, words['purpose'])) if plain_text(p)), '')
+    if len(purpose) > 160:                            # cut at the end of a sentence, else with an ellipsis
+        stop = max(purpose.rfind(c, 0, 160) for c in '。！？，.!?')
+        purpose = purpose[:stop + 1] if stop >= 40 else purpose[:159] + '…'
     items = []
     for line in section_text(md, words['decisions']).split('\n'):
-        m = re.match(r'^\s*(?:\d+[.、)]|[-*])\s+(.*\S)', line)
+        m = re.match(r'^(?:\d+[.、)]|[-*])\s+(.*\S)', line)       # the top level only; an indented sub-point is detail
         if m:
             items.append(plain_text(m.group(1)))
-    for row in section_text(md, words['actions']).split('\n'):
-        cells = [plain_text(c) for c in row.strip().strip('|').split('|')] if row.strip().startswith('|') else []
-        if len(cells) >= 3 and not re.fullmatch(r'[-:\s]*', cells[0]) and not re.search(r'追蹤事項|事項|Item', cells[1]):
-            owner_name = '' if BLANK in cells[2] else cells[2]      # an owner still to fill in is not said in the mail
-            items.append(f'{cells[1]}{words["owner_sep"]}{owner_name}' if owner_name else cells[1])
-    items = [i for i in items if i][:MOST_HIGHLIGHTS]
+    rows = [r.strip() for r in section_text(md, words['actions']).split('\n') if r.strip().startswith('|')]
+    header = next((i - 1 for i, r in enumerate(rows) if re.fullmatch(r'\|?[\s:|-]+\|?', r)), None)   # the row above |---|
+    for i, row in enumerate(rows):
+        cells = [plain_text(c) for c in row.strip('|').split('|')]
+        if i == header or len(cells) < 3 or re.fullmatch(r'[-:\s]*', cells[0]):
+            continue
+        owner_name = cells[2]
+        items.append(f'{cells[1]}{words["owner_sep"]}{owner_name}' if owner_name else cells[1])
+    items = [i for i in items if i and BLANK not in i][:MOST_HIGHLIGHTS]   # a line still to fill in is not said in the mail
     if not purpose and not items:
         return body
     block = (f'{words["purpose_label"]}{purpose}' if purpose else '')
@@ -2588,6 +2595,17 @@ def cmd_suggest(job: Job, query: str):
     """People for the mail sheet's recipient box, from what was typed (contacts.py)."""
     import contacts
     out({'people': contacts.suggest(query)})
+
+
+def cmd_contacts(job: Job, raw: str):
+    """The recipients a mail just went to, kept with their names for the next mail's menu (contacts.py)."""
+    import contacts
+    try:
+        rows = json.loads(raw)
+    except ValueError:
+        rows = []
+    contacts.learn_many([(r.get('mail', ''), r.get('name', ''), 'mail') for r in rows if isinstance(r, dict)])
+    out({'ok': True})
 
 
 def neighbours(job: Job) -> dict:
@@ -2801,6 +2819,8 @@ def main():
     job = Job(Path(argv[1]))
     os.environ['VINUTES_MEETING'] = job.id           # what this command uses (AI, Google) is this meeting's
     rest = argv[2:]
+    if cmd == 'suggest':                             # only reads the contacts: answers while the AI works on the meeting
+        return cmd_suggest(job, ' '.join(rest))
     if cmd == 'locate':                              # only reads the Doc: no turn to wait for
         return cmd_locate(job, ' '.join(rest).strip())
     if cmd in ('archive', 'unarchive'):              # only a marker file: no turn to wait for either
@@ -2874,8 +2894,8 @@ def main():
         cmd_replace(job, rest[0], rest[1])
     elif cmd == 'speaker' and len(rest) >= 2:
         cmd_speaker(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
-    elif cmd == 'suggest':
-        cmd_suggest(job, ' '.join(rest))
+    elif cmd == 'contacts' and rest:
+        cmd_contacts(job, rest[0])
     elif cmd == 'delete':
         cmd_delete(job)
     else:

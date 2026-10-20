@@ -2419,6 +2419,12 @@ class Contacts(unittest.TestCase):
         self.assertEqual(self.c.address_of('adam'), 'adam.wang@example.com')
         self.assertEqual(self.c.address_of('Ken'), '')                        # nobody of that name
         self.assertEqual(self.c.address_of('林'), '')                          # one character matches too many
+        self.assertEqual(self.c.address_of('Amy（悠遊卡）'), '')               # an explanation beside a name is not an alias
+        self.c.learn('amy@example.com', 'Amy Chen', 'directory')
+        self.assertEqual(self.c.address_of('Amy（悠遊卡）'), '')               # still not the company's Amy
+        self.assertEqual(self.c.address_of('Amy Chen'), 'amy@example.com')
+        self.assertEqual(self.c.address_of('Amy'), 'amy@example.com')
+        self.assertEqual(self.c.address_of('陳小姐（台灣 PASS）'), '')
         self.c.learn('eric.lee@example.com', 'Eric Lee', 'calendar')
         self.assertEqual(self.c.address_of('Eric'), '')                        # two Erics: the user picks
 
@@ -2430,12 +2436,15 @@ class Contacts(unittest.TestCase):
         self.assertEqual(self.c.suggest('陳')[0], {'name': '陳小姐', 'mail': 'chen@partner.example.com', 'src': 'mail'})
         self.assertEqual(self.c.suggest(''), [])
 
-    def test_learning_again_keeps_the_fuller_name_and_the_directory_source(self):
-        self.c.learn('erichsu@example.com', 'Eric', 'calendar')
+    def test_learning_again_keeps_the_directorys_name_and_a_mail_remembers_new_people(self):
+        self.c.learn('erichsu@example.com', 'Eric Hsu the Great', 'calendar')     # longer, but the directory's name wins
         self.assertEqual(self.c.suggest('eric')[0]['name'], '許恩碩 Eric')
         self.assertEqual(self.c.suggest('eric')[0]['src'], 'directory')
         self.c.learn('new@example.com', '', 'mail')                            # an address without a name
         self.assertEqual(self.c.suggest('new')[0]['name'], 'new@example.com')
+        self.c.learn_many([('guest@partner.example.com', '王小姐', 'mail'), ('bad address', 'x', 'mail')])
+        self.assertIn({'name': '王小姐', 'mail': 'guest@partner.example.com', 'src': 'mail'}, self.c.suggest('王'))
+        self.assertEqual(self.c.suggest('e')[0]['mail'], 'erichsu@example.com')   # a name part starting with it comes first
 
 
 MINUTES_WITH_PURPOSE = MINUTES.replace('## 二、討論摘要', '## 二、會議目的\n\n確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n## 三、討論摘要')
@@ -2497,7 +2506,7 @@ class MailDefaults(Flows):
         self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
         body = minutes_app.mail_defaults(self.job())['body']
         self.assertIn('{文件網址}\n\n會議目的：確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n重點：\n'
-                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. 社群活動執行\n4. KOL 試行合作：Ken\n\n內容有需要調整的地方再跟我說。', body)
+                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作：Ken\n\n內容有需要調整的地方再跟我說。', body)   # the row whose owner is still [__] stays in the Doc
         again = minutes_app.with_summary(body, MINUTES_WITH_PURPOSE, 'zh-TW')
         self.assertEqual(again, body)                                          # not twice
         self.assertEqual(minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', '# x\n\n## 一、會議基本資訊\n\n- 主持人：Vin\n', 'zh-TW'),
@@ -2505,11 +2514,17 @@ class MailDefaults(Flows):
 
     def test_english_minutes_get_purpose_and_highlights(self):
         md = ('# Weekly\n\n## 1. Meeting Details\n\n- Host: Vin\n\n## 2. Purpose\n\nSettle the October budget.\n\n'
-              '## 4. Agreements\n\n1. Budget is 100k.\n2. Two KOLs first.\n\n## 6. Action Items\n\n'
-              '| No. | Item | Owner | Notes |\n|---|---|---|---|\n| 1 | Book the venue | Amy | by Friday |\n')
+              '## 4. Agreements\n\n- Budget is 100k.\n  - detail that stays in the Doc\n- Two KOLs first.\n- Venue [__] to confirm.\n\n'
+              '## 6. Action Items\n\n'
+              '| No. | Action | Owner | Notes |\n|---|---|---|---|\n| 1 | Book the venue | Amy | by Friday |\n| 2 | 確認合約付款事項 | Ken | |\n')
         out = minutes_app.with_summary('Hi,\n\nThe minutes:\n{doc_url}\n\nVin', md, 'en')
         self.assertIn('{doc_url}\n\nPurpose: Settle the October budget.\n\nHighlights:\n1. Budget is 100k.\n2. Two KOLs first.\n'
-                      '3. Book the venue: Amy\n\nVin', out)
+                      '3. Book the venue: Amy\n4. 確認合約付款事項: Ken\n\nVin', out)      # the header row is not an item, nor a sub-point or a blank
+        long = '## 二、會議目的\n\n' + '這是一句很長的話，' * 12 + '最後一句。\n'
+        got = minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', long, 'zh-TW')
+        self.assertLessEqual(len(got.split('會議目的：')[1].split('\n')[0]), 160)
+        self.assertTrue(got.split('會議目的：')[1].split('\n')[0].endswith(('，', '。', '…')))
+        self.assertEqual(minutes_app.with_summary('Hi\n\n會議目的: x\n\n{文件網址}', long, 'zh-TW'), 'Hi\n\n會議目的: x\n\n{文件網址}')
 
 
 class CalendarPick(unittest.TestCase):

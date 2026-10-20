@@ -15,15 +15,18 @@ meeting ends instead of four to seven minutes later (an hour takes about 260 s o
   after the CAF data chunk's header). Every time 5½ minutes of audio past the last cut exist, it finds the quietest
   half second between 4½ and 5½ minutes past the last cut, cuts there, and transcribes that piece with Whisper. Each
   finished piece is `分段/0001.json`, `0002.json`, … (`start`, `end` in seconds from the recording's beginning,
-  `language`, `segments` as [start, end, text] in recording time, `prompt_tail`). The language is detected once, on
-  the first piece, unless the setting fixes it. Each piece's prompt is the glossary hint plus the last words of the
-  piece before, so names stay spelled the same. While a piece is being transcribed, `分段/working.json` holds the
-  helper's pid. The helper exits when `job.json` has an `ended` time (after finishing the piece in hand, never
+  `language`, `segments` as [start, end, text] in recording time). The language is detected once, on the first
+  piece, unless the setting fixes it. Each piece gets exactly the prompt a whole recording gets (the glossary hint
+  for Chinese, nothing for English). The last words of the piece before were tried as an extra prompt and dropped:
+  on a real meeting the model then skipped most of the first half minute of the next piece, and with a full
+  glossary the prompt overran Whisper's 223-token window. While a piece is being transcribed, `分段/working.json`
+  holds the helper's pid. The helper exits when `job.json` has an `ended` time (after finishing the piece in hand, never
   starting another), when the app that started it is gone (after the piece in hand), or when the setting
   `live_transcribe` is false.
 - `scripts/transcribe.py <audio> [out] [--pieces <dir>]` reuses the pieces: it waits for `working.json` (at most
-  three minutes, then stops that helper), takes the longest run of pieces that starts at 0 and joins end to start,
-  transcribes only the audio after the last piece (prompted with the last piece's tail, in the pieces' language),
+  three minutes, then stops that helper, after checking the pid really is a live_transcribe.py), takes the longest
+  run of pieces that starts at 0 and joins end to start, transcribes only the audio after the last piece (with the
+  same hint, in the pieces' language),
   and writes `逐字稿.txt` and `逐字稿.json` exactly as before. The transcription and assembly code is shared
   between the helper and the final run.
 - `auto_minutes.py` passes `--pieces <job>/分段` and removes the folder once the transcript is written. Pause and

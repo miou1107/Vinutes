@@ -49,6 +49,9 @@ HINT_HEAD = '以下是台灣公司的會議錄音，用繁體中文記錄。'
 HINT_MAX = 180          # characters; whisper only reads the last ~224 tokens of a prompt
 # Lines whisper invents on silence or music; dropped when a whole segment is one of these.
 HALLUCINATIONS = ('請不吝點贊', '訂閱 轉發', '明鏡與點點', '字幕由', '字幕組', '感謝觀看', '謝謝觀看', '請訂閱')
+# A segment where whisper got stuck repeating itself ("請教教教教教…", "好的好的好的…"): one character twenty times in
+# a row, or a short pattern ten times. Nobody said that; the segment is dropped.
+STUCK = re.compile(r'(.)\1{19,}|(.{2,6}?)\2{9,}')
 WORKING = 'working.json'        # in the pieces folder while live_transcribe.py is on a piece: {"pid", "start", "end"}
 HELPER_WAIT = 180               # seconds the final run waits for that piece before stopping the helper
 
@@ -169,12 +172,12 @@ def tidy(text: str, convert) -> str:
 
 
 def assemble(segments: list, lang: str, convert) -> tuple[list[str], list[list]]:
-    """The transcript's lines ('[mm:ss] text') and each line's [start, end]: empty, repeated and invented
-    segments dropped, Chinese converted to Taiwan wording."""
+    """The transcript's lines ('[mm:ss] text') and each line's [start, end]: empty, repeated, invented and
+    stuck segments dropped, Chinese converted to Taiwan wording."""
     lines, spans, last = [], [], ''
     for start, end, raw in segments:
         text = tidy(raw, convert) if lang == 'zh' else (raw or '').strip()
-        if not text or text == last or any(h in text for h in HALLUCINATIONS):
+        if not text or text == last or any(h in text for h in HALLUCINATIONS) or STUCK.search(text):
             continue
         lines.append(f'{stamp(start)} {text}')
         spans.append([round(float(start), 2), round(float(end), 2)])

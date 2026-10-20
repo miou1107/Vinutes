@@ -166,6 +166,11 @@ class Assemble(unittest.TestCase):
         self.assertEqual(lines, ['[00:00] 第一句', '[05:05] 第二段'])            # repeated and empty ones dropped
         self.assertEqual(spans, [[0.0, 1.5], [305.2, 306.0]])
 
+    def test_a_segment_where_the_model_got_stuck_is_dropped(self):
+        segs = [[0, 1, '通常自己發表請' + '教' * 60], [1, 2, '好的' * 12], [2, 3, '好 好 好'], [3, 4, '會議開始']]
+        lines, _ = tr.assemble(segs, 'zh', lambda s: s)
+        self.assertEqual(lines, ['[00:02] 好 好 好', '[00:03] 會議開始'])
+
     def test_a_piece_boundary_does_not_break_a_repeat_check(self):
         lines, _ = tr.assemble([[299.0, 300.0, '好'], [300.0, 301.0, '好']], 'zh', lambda s: s)
         self.assertEqual(len(lines), 1)

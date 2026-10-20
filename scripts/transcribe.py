@@ -20,8 +20,8 @@ from the start of the recording. The language is kept in <out>.json as "language
 --pieces <folder>: pieces of the same recording already transcribed while it was being recorded
 (live_transcribe.py writes them there as 0001.json, 0002.json, ...). The pieces that join end to start from the
 beginning of the recording are reused and only the audio after the last one is transcribed, in the pieces'
-language and prompted with their last words. A piece still being transcribed when the recording stopped
-(working.json in the folder) is waited for, at most three minutes.
+language and with the same hint. A piece still being transcribed when the recording stopped (working.json in
+the folder) is waited for, at most three minutes.
 
 Install the two packages with recorder/install.sh, or: pip install mlx-whisper opencc-python-reimplemented
 Environment: MINUTES_WHISPER_MODEL picks another model; MINUTES_MEETING_LANG (zh, en, auto) overrides the setting.
@@ -47,7 +47,6 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 RATE = 16000
 HINT_HEAD = '以下是台灣公司的會議錄音，用繁體中文記錄。'
 HINT_MAX = 180          # characters; whisper only reads the last ~224 tokens of a prompt
-TAIL_MAX = 80           # characters of the piece before, given with the hint so names continue the same way
 # Lines whisper invents on silence or music; dropped when a whole segment is one of these.
 HALLUCINATIONS = ('請不吝點贊', '訂閱 轉發', '明鏡與點點', '字幕由', '字幕組', '感謝觀看', '謝謝觀看', '請訂閱')
 WORKING = 'working.json'        # in the pieces folder while live_transcribe.py is on a piece: {"pid", "start", "end"}
@@ -90,26 +89,12 @@ def hint() -> str:
     return text.rstrip('、') + '。'
 
 
-def prompt_for(lang: str, tail: str = '') -> str:
-    """What the model is told before it listens: the glossary hint for a Chinese meeting, and the last words of
-    the piece before (live_transcribe.py), so a name keeps the spelling it got there. '' when there is nothing."""
-    parts = [hint()] if lang == 'zh' else []
-    if tail:
-        parts.append(tail)
-    return ' '.join(parts)
-
-
-def tail_of(segments: list, limit: int = TAIL_MAX) -> str:
-    """The last `limit` characters of what was transcribed, whole segments from the end, as the next prompt."""
-    text = ''
-    for _, _, raw in reversed(segments):
-        piece = (raw or '').strip()
-        if not piece:
-            continue
-        if len(text) + len(piece) + 1 > limit and text:
-            break
-        text = (piece + ' ' + text).strip()
-    return text[-limit:] if len(text) > limit else text
+def prompt_for(lang: str) -> str:
+    """What the model is told before it listens: the glossary hint for a Chinese meeting, nothing otherwise. The
+    same for the whole recording, for every piece transcribed during it and for the rest after it, so a piece
+    starts the way the recording itself starts. (The words of the piece before were tried as a prompt and dropped:
+    a long prompt made the model skip most of the first half minute of the next piece.)"""
+    return hint() if lang == 'zh' else ''
 
 
 def load_audio(src: Path):
@@ -224,17 +209,20 @@ def pieces_in(folder: Path, audio_seconds: float) -> list[dict]:
     return out
 
 
-def alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+def is_helper(pid: int) -> bool:
+    """Whether `pid` is a live_transcribe.py of this user: a pid left in working.json by a helper that died could
+    since have gone to any other process, which must be neither waited for nor stopped."""
+    if pid <= 0:
         return False
-    except PermissionError:
-        return True
-    return True
+    try:
+        done = subprocess.run(['ps', '-o', 'command=', '-p', str(pid)], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0 and 'live_transcribe.py' in done.stdout
 
 
-def wait_for_helper(folder: Path, limit: float = HELPER_WAIT, poll: float = 2.0, sleep=time.sleep) -> float:
+def wait_for_helper(folder: Path, limit: float = HELPER_WAIT, poll: float = 2.0, sleep=time.sleep,
+                    running=is_helper) -> float:
     """The helper may still be on a piece when the recording stops: wait for it (the piece is worth more than
     the wait), at most `limit` seconds, then stop the helper and go on without that piece. Seconds waited."""
     marker = folder / WORKING
@@ -245,12 +233,12 @@ def wait_for_helper(folder: Path, limit: float = HELPER_WAIT, poll: float = 2.0,
             pid = int(json.loads(marker.read_text(encoding='utf-8')).get('pid') or 0)
         except (OSError, ValueError, AttributeError):
             pid = 0
-        if pid and not alive(pid):                     # the helper died on it: nothing to wait for
+        if not running(pid):                           # the helper is gone (or never wrote a pid): nothing to wait for
             marker.unlink(missing_ok=True)
             break
         sleep(poll)
     if marker.exists():
-        if pid and alive(pid):
+        if running(pid):
             try:
                 os.kill(pid, signal.SIGTERM)
             except OSError:
@@ -303,15 +291,15 @@ def main():
     setting = meeting_setting()
     if setting != 'auto':
         lang = setting
-    elif pieces:
-        lang = str(pieces[0].get('language') or 'zh')
+    elif pieces and pieces[0].get('language'):
+        lang = str(pieces[0]['language'])
     else:
         lang = detect(audio, mlx_whisper.transcribe)
     segments = [seg for piece in pieces for seg in piece['segments']]
     from_s = pieces[-1]['end'] if pieces else 0.0
     rest = audio[int(from_s * RATE):]
     if not pieces or len(rest) >= RATE // 2:              # half a second: less than that is no speech
-        segments += transcribe_range(rest, lang, prompt_for(lang, tail_of(segments)), from_s, mlx_whisper.transcribe)
+        segments += transcribe_range(rest, lang, prompt_for(lang), from_s, mlx_whisper.transcribe)
     lines, spans = assemble(segments, lang, OpenCC('s2twp').convert)
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     # each line's start and end in seconds, for telling the voices apart (speakers.py)

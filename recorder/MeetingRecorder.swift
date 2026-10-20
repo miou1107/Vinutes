@@ -702,6 +702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             refreshIcon()
             appLog("recording started: \(dir.lastPathComponent)")
             if let cfg = recorderConfig() { live.start(job: dir, python: cfg.python, skill: cfg.skill, language: uiLanguage()) }
+            else { appLog("no recorder.json: the recording is transcribed after it stops") }
             checkAIForRecording()
         } catch {
             appLog("recording could not start: \(error.localizedDescription)")

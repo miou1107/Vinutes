@@ -75,6 +75,11 @@ class Cut(unittest.TestCase):
     def test_a_stretch_too_short_to_search_cuts_at_its_end(self):
         self.assertEqual(live.quietest_cut(tone(1), 100, 200), 200)
 
+    def test_a_window_past_the_end_of_the_audio_is_clamped(self):
+        audio = tone(1)                                                     # 16000 samples, one short of a window
+        at = live.quietest_cut(audio, 8000, 16001)
+        self.assertTrue(8000 <= at <= 16000, at)
+
 
 class CafHead(unittest.TestCase):
     def test_the_samples_start_after_the_data_chunk_header_and_edit_count(self):
@@ -128,28 +133,30 @@ class Pieces(unittest.TestCase):
         self.assertLess(waited, 2)
         self.assertEqual(naps, [])
 
-    def test_waiting_gives_up_after_the_limit_and_clears_the_marker(self):
-        (self.folder / tr.WORKING).write_text(json.dumps({'pid': 0}), encoding='utf-8')   # unreadable pid: just wait
-        clock = [0.0]
-        tr.time.time, real = (lambda: clock[0]), tr.time.time
-        try:
-            tr.wait_for_helper(self.folder, limit=3, poll=1, sleep=lambda s: clock.__setitem__(0, clock[0] + s))
-        finally:
-            tr.time.time = real
+    def test_a_pid_that_is_not_a_helper_is_neither_waited_for_nor_stopped(self):
+        (self.folder / tr.WORKING).write_text(json.dumps({'pid': os.getpid()}), encoding='utf-8')   # this test runner
+        naps = []
+        tr.wait_for_helper(self.folder, limit=5, poll=0.01, sleep=naps.append)
         self.assertFalse((self.folder / tr.WORKING).exists())
+        self.assertEqual(naps, [])                                        # still here: nothing was sent a signal
 
-    def test_the_prompt_carries_the_glossary_and_the_last_words(self):
-        prompt = tr.prompt_for('zh', '上一段最後幾個字')
-        self.assertTrue(prompt.startswith(tr.HINT_HEAD))
-        self.assertTrue(prompt.endswith('上一段最後幾個字'))
-        self.assertEqual(tr.prompt_for('en', 'the last words'), 'the last words')
+    def test_waiting_gives_up_after_the_limit_and_stops_the_helper(self):
+        (self.folder / tr.WORKING).write_text(json.dumps({'pid': 4242}), encoding='utf-8')
+        clock = [0.0]
+        stopped = []
+        tr.time.time, real = (lambda: clock[0]), tr.time.time
+        tr.os.kill, kill = (lambda pid, sig: stopped.append((pid, sig))), tr.os.kill
+        try:
+            tr.wait_for_helper(self.folder, limit=3, poll=1, sleep=lambda s: clock.__setitem__(0, clock[0] + s),
+                               running=lambda pid: pid == 4242)
+        finally:
+            tr.time.time, tr.os.kill = real, kill
+        self.assertFalse((self.folder / tr.WORKING).exists())
+        self.assertEqual(stopped, [(4242, tr.signal.SIGTERM)])
+
+    def test_the_prompt_is_the_glossary_hint_for_chinese_and_nothing_for_english(self):
+        self.assertTrue(tr.prompt_for('zh').startswith(tr.HINT_HEAD))
         self.assertEqual(tr.prompt_for('en'), '')
-
-    def test_the_tail_is_whole_segments_from_the_end_within_the_limit(self):
-        segs = [[0, 1, 'a' * 50], [1, 2, 'b' * 50], [2, 3, 'c' * 10]]
-        tail = tr.tail_of(segs, limit=70)
-        self.assertEqual(tail, 'b' * 50 + ' ' + 'c' * 10)
-        self.assertEqual(len(tr.tail_of([[0, 1, 'x' * 200]], limit=70)), 70)
 
 
 class Assemble(unittest.TestCase):
@@ -218,7 +225,7 @@ class Live(unittest.TestCase):
         self.assertFalse((self.job / live.PIECES / tr.WORKING).exists())
         self.assertIn('recording ended', self.logged[-1])
 
-    def test_the_prompt_of_a_piece_ends_with_the_piece_before(self):
+    def test_every_piece_gets_the_same_hint_as_a_whole_recording(self):
         prompts = []
 
         def whisper(audio, **kw):
@@ -229,8 +236,15 @@ class Live(unittest.TestCase):
         runner.sleep = lambda _: self.end()
         runner.run()
         self.assertEqual(len(prompts), 2)
-        self.assertTrue(prompts[0].startswith(tr.HINT_HEAD))
-        self.assertTrue(prompts[1].endswith('第1秒'), prompts[1])         # the first piece's last words
+        self.assertEqual(prompts, [tr.prompt_for('zh')] * 2)
+
+    def test_reading_a_stretch_gives_exactly_its_samples_for_awkward_floats(self):
+        self.grow(tone(700))
+        runner = self.runner()
+        runner.available()                                                  # finds where the samples start
+        for start in (271.1, 123.7, 1497.7 / 5):                            # 271.1 * 16000 is not whole in floating point
+            got = runner.read(start, start + 330.0)
+            self.assertEqual(len(got), 330 * RATE, start)
 
     def test_stop_before_the_first_piece_writes_nothing(self):
         self.grow(tone(1))

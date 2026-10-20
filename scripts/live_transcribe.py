@@ -7,8 +7,8 @@ Usage:
 It follows the recording (錄音.caf: 16 kHz mono 16-bit PCM, written as the meeting goes) and, each time 5½ minutes
 of audio past the last cut exist, cuts at the quietest half second between 4½ and 5½ minutes past that cut, so a
 piece never ends in the middle of a sentence. The piece is transcribed with the same model, hint and settings as
-transcribe.py, prompted with the last words of the piece before, so names keep their spelling. The language is
-decided once, on the first piece, unless the setting fixes it.
+transcribe.py gives the whole recording. The language is decided once, on the first piece, unless the setting
+fixes it.
 
 Each finished piece is <job>/分段/0001.json, 0002.json, ...:
   {"start", "end": seconds from the recording's beginning, "language", "segments": [[start, end, text], ...],
@@ -17,8 +17,9 @@ While a piece is being transcribed, <job>/分段/working.json says so ({"pid", "
 reuses the pieces and waits for that one. A pause in the recording needs nothing: the file stops growing.
 
 It ends by itself: when job.json gets its "ended" time (after the piece in hand, never starting another), when the
-app that started it is gone (after the piece in hand), when the recording file cannot be read for a minute, or
-when "live_transcribe" in settings.json is false. It runs at low priority and never writes the recording.
+app that started it is gone (after the piece in hand), or when the recording file cannot be read for a minute.
+With "live_transcribe": false in settings.json it does nothing at all. It runs at low priority and never writes
+the recording.
 """
 from __future__ import annotations
 
@@ -64,6 +65,7 @@ def quietest_cut(audio, lo: int, hi: int, rate: int = RATE, quiet: float = QUIET
     seconds, root mean square). hi when the stretch is too short to search."""
     import numpy as np
     step = max(1, int(frame * rate))
+    hi = min(hi, len(audio))
     n = (hi - lo) // step
     need = max(1, int(round(quiet / frame)))
     if n < need:
@@ -100,7 +102,6 @@ class Runner:
         self.data_start: int | None = None
         self.cut = 0.0                                     # seconds of the recording transcribed so far
         self.number = 0
-        self.tail = ''
         self.done = 0
 
     # --- the recording file -----------------------------------------------------------------------
@@ -118,8 +119,8 @@ class Runner:
         """Seconds of audio in the file so far, or -1 when the file cannot be read yet."""
         try:
             if self.data_start is None:
-                with open(self.audio, 'rb') as f:
-                    self.data_start = caf_data_start(f.read(4096))
+                with open(self.audio, 'rb') as f:              # Core Audio puts the data chunk near 4 KB; read well past
+                    self.data_start = caf_data_start(f.read(65536))
                 if self.data_start is None:
                     return -1
             size = self.audio.stat().st_size
@@ -128,9 +129,10 @@ class Runner:
         return max(0, (size - self.data_start) // 2) / RATE
 
     def read(self, start: float, end: float):
-        """audio[start:end] in seconds, as 16 kHz floats"""
+        """audio[start:end] in seconds, as 16 kHz floats: exactly round((end - start) * RATE) samples when the file
+        has them (271.1 * 16000 is not a whole number in floating point; truncating it loses a sample)"""
         import numpy as np
-        a, b = int(start * RATE), int(end * RATE)
+        a, b = round(start * RATE), round(end * RATE)
         with open(self.audio, 'rb') as f:
             f.seek(self.data_start + a * 2)
             blob = f.read((b - a) * 2)
@@ -147,7 +149,6 @@ class Runner:
             self.cut = have[-1]['end']
             self.number = len(have)
             self.language = self.language or str(have[0].get('language') or '')
-            self.tail = tr.tail_of(have[-1]['segments'])
             self.log(f'going on after {self.number} pieces ({tr.stamp(self.cut)[1:-1]})')
 
     def do_piece(self) -> bool:
@@ -162,12 +163,11 @@ class Runner:
         began = time.time()
         try:
             audio = self.read(self.cut, hi)
-            at = quietest_cut(audio, int((self.piece - self.search) * RATE), int((self.piece + self.search) * RATE))
+            at = quietest_cut(audio, round((self.piece - self.search) * RATE), round((self.piece + self.search) * RATE))
             piece = audio[:at]
             if not self.language:
                 self.language = self.detect(piece, self.transcribe)
-            segments = tr.transcribe_range(piece, self.language, tr.prompt_for(self.language, self.tail), self.cut,
-                                           self.transcribe)
+            segments = tr.transcribe_range(piece, self.language, tr.prompt_for(self.language), self.cut, self.transcribe)
             end = round(self.cut + at / RATE, 2)
             self.number += 1
             write_json(self.folder / f'{self.number:04d}.json',
@@ -176,7 +176,6 @@ class Runner:
             self.log(f'piece {self.number}: {tr.stamp(self.cut)[1:-1]}-{tr.stamp(end)[1:-1]}, {len(segments)} segments, '
                      f'{time.time() - began:.0f}s')
             self.cut = end
-            self.tail = tr.tail_of(segments)
             self.done += 1
         finally:
             marker.unlink(missing_ok=True)

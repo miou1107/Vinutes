@@ -1,4 +1,4 @@
-"""Files, links and pictures added from the box under the Doc go into the minutes' last section, 「八、補充資訊」,
+"""Files, links and pictures added from the box under the Doc go into the minutes' last section, 「八、參考附件」,
 one line each, as SKILL.md §3 writes it: who gave it and what it is, then the link.
 
 Files and pictures are uploaded to the user's Google Drive, into a folder of this meeting's own beside its Doc
@@ -25,9 +25,10 @@ import doc_sync
 import usage
 from i18n import t
 
-SECTION = '## 八、補充資訊'
-SECTIONS = {'zh-TW': SECTION, 'en': '## 8. Supporting Materials'}    # the last section, by the minutes' language
-LAST = re.compile(r'##\s*(?:八、|8\.\s)')
+SECTION = '## 八、參考附件'
+SECTIONS = {'zh-TW': SECTION, 'en': '## 8. Attachments'}    # the last section, by the minutes' language
+LAST = re.compile(r'##\s*(?:八、|8\.\s)')                      # also 八、補充資訊, the name before v0.4.13
+NONE_YET = re.compile(r'^\s*(?:無|None|N/A|沒有|—|-)\s*[。.]?\s*$', re.I)   # the section's only line until the first attachment
 UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
 FOLDER_MIME = 'application/vnd.google-apps.folder'
 PICTURES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif'}
@@ -289,7 +290,7 @@ ITEM = re.compile(r'^[-*]\s+(?:(?P<note>.*?)(?:：|:\s*))?\[(?P<name>(?:\\.|[^\\
 
 
 def listed(md: str) -> list[dict]:
-    """What 「八、補充資訊」 holds now, for the 附件 row above the minutes: {name, link, note, kind} for each line
+    """What 「八、參考附件」 holds now, for the 附件 row above the minutes: {name, link, note, kind} for each line
     that is a link, written by 加入會議附件 or typed in the Doc."""
     rows = md.split('\n')
     head = next((i for i, r in enumerate(rows) if LAST.match(r)), None)
@@ -310,7 +311,7 @@ def listed(md: str) -> list[dict]:
 
 
 def add_lines(md: str, lines: list[str], lang: str = '') -> str:
-    """The lines at the end of 「八、補充資訊」 (8. Supporting Materials in English minutes), the section made at the
+    """The lines at the end of 「八、參考附件」 (8. Attachments in English minutes), the section made at the
     end of the minutes when it is missing. Without `lang` the minutes' own headings tell which language they are."""
     rows = md.rstrip('\n').split('\n')
     head = next((i for i, r in enumerate(rows) if LAST.match(r)), None)
@@ -327,6 +328,10 @@ def add_lines(md: str, lines: list[str], lang: str = '') -> str:
     end = next((i for i in range(head + 1, len(rows)) if re.match(r'#{1,2}\s', rows[i])), len(rows))
     while end > head + 1 and not rows[end - 1].strip():
         end -= 1
+    body = [r for r in rows[head + 1:end] if r.strip()]
+    if len(body) == 1 and NONE_YET.match(body[0]):   # 無: the section was empty; the first attachment takes its place
+        rows = rows[:head + 1] + rows[end:]
+        end = head + 1
     after_picture = rows[end - 1].startswith('![')
     joined = rows[:end] + ([''] if end == head + 1 or after_picture else []) + block + rows[end:]
     return re.sub(r'\n{3,}', '\n\n', '\n'.join(joined)).rstrip('\n') + '\n'

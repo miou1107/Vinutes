@@ -704,6 +704,63 @@ def attendees(md: str) -> list[str]:
 # (Vin 2026-10-19: the brief lists the project's people, not each meeting's, so it starts no meeting's list either).
 PROJECT_PEOPLE = briefs.PEOPLE                    # the project's people are also its brief's (專案小抄)
 MEETING_PEOPLE = '人員.json'
+# A room booking made in a company system names a department instead of inviting people. Who that department's
+# people are is learned from the meetings the user confirmed: every name under 人員 in a meeting whose calendar
+# note names the department, kept here as {department: {'people': [...], 'from': '2026-10-20 數據課週會'}}. The
+# next meeting that names the department starts with them (prototypes/department-people.html, Vin 2026-10-20).
+# Nothing is ever taken off a roster by the app; taking someone off a meeting only says they weren't there.
+DEPARTMENTS = CONFIG / 'departments.json'
+
+
+def calendar_of(job: Job) -> dict:
+    """What the picked calendar event's note said (workspace.describe), as 行事曆.json keeps it."""
+    data = read_json(job.dir / '行事曆.json')
+    return {'host': data.get('host') if isinstance(data.get('host'), str) else '',
+            'departments': [d for d in (data.get('departments') or []) if isinstance(d, str) and d],
+            'participants': [p for p in (data.get('participants') or []) if isinstance(p, str) and p]}
+
+
+def roster(departments: list[str]) -> tuple[list[str], str]:
+    """The people these departments' earlier meetings confirmed, and which meeting the first of them was learned at."""
+    data = read_json(DEPARTMENTS)
+    names, where = [], ''
+    for dept in departments:
+        entry = data.get(dept) if isinstance(data.get(dept), dict) else {}
+        for n in entry.get('people') or []:
+            if isinstance(n, str):
+                names = add_name(names, n)
+        where = where or (entry.get('from') if isinstance(entry.get('from'), str) else '')
+    return names, where
+
+
+def job_label(job: Job) -> str:
+    """2026-10-20 數據課週會: how a roster says where it was learned."""
+    started = job.meta.get('started') or ''
+    day = started[:10] if re.match(r'\d{4}-\d{2}-\d{2}', started) else f'{job.id[:4]}-{job.id[4:6]}-{job.id[6:8]}'
+    return f'{day} {job.result.get("title") or ""}'.strip()
+
+
+def remember_roster(job: Job, names: list[str]):
+    """The meeting's people join the roster of each department its calendar note names."""
+    departments = calendar_of(job)['departments']
+    if not departments:
+        return
+    data = read_json(DEPARTMENTS)
+    for dept in departments:
+        entry = data.get(dept) if isinstance(data.get(dept), dict) else {}
+        merged = [n for n in (entry.get('people') or []) if isinstance(n, str)]
+        for n in names:
+            merged = add_name(merged, n)
+        data[dept] = {'people': merged, 'from': job_label(job)}
+    write_json(DEPARTMENTS, data)
+
+
+def calendar_payload(job: Job) -> dict:
+    """For the window's 人員: what the calendar note said, the roster it brings in, and whether this meeting taught it."""
+    cal = calendar_of(job)
+    people, where = roster(cal['departments'])
+    return {'host': cal['host'], 'departments': cal['departments'], 'roster': people, 'roster_from': where,
+            'learned': bool(where) and where == job_label(job)}
 
 
 def project_people(project: str) -> list[str]:
@@ -727,6 +784,9 @@ def invited(job: Job) -> list[str]:
         if not name and local and not re.search(r'[\d_-]|team|group|room|info|service|admin|noreply|calendar', local, re.I):
             name = ' '.join(w[:1].upper() + w[1:] for w in local.split('.') if w)
         names = add_name(names, name)
+    cal = calendar_of(job)                            # a room booking's note: the host and participants, as it spells them
+    for n in [cal['host'], *cal['participants']]:
+        names = add_name(names, n)
     return names
 
 
@@ -736,7 +796,8 @@ def meeting_people(job: Job) -> list[str]:
         names = [n for n in data['people'] if isinstance(n, str)]
     else:                                             # first time: from the invitation and the minutes
         names = []
-        for n in invited(job) + attendees(job.md if not job.missing else ''):   # 以當場會議邀請的人為主
+        roster_names, _ = roster(calendar_of(job)['departments'])   # the department's people, confirmed earlier
+        for n in invited(job) + roster_names + attendees(job.md if not job.missing else ''):   # 以當場會議邀請的人為主
             names = add_name(names, n)
     for n in speakers_shown(job).values():          # a voice with a name was there
         if n:
@@ -828,6 +889,7 @@ def cmd_people(job: Job, action: str, name: str, group: str = ''):
     if action == 'add':
         names = add_name(names, name)
         save_project_people(project, add_name(project_people(project), name))
+        remember_roster(job, names)
         job.log(me(), t('log_people_add', name=name), 'speaker')
     elif action == 'remove':
         names = [n for n in names if not same_name(n, name)]      # this meeting only: the brief keeps them
@@ -1796,7 +1858,7 @@ def answer(job: Job, result: dict, html: bool = False, **extra):
     data = {'saved_at': f'{now():%H:%M}', 'conflicts': result['conflicts'], 'held': result['held'],
             'warning': result['warning'], 'todo': todo_items(job, md), 'attendees': attendees(md), 'skipped': skipped,
             'people': meeting_people(job), 'speakers': speakers_shown(job), 'silent': silent_people(job),
-            'check': check_items(job), 'attachments': attachments_listed(md), **extra}
+            'calendar': calendar_payload(job), 'check': check_items(job), 'attachments': attachments_listed(md), **extra}
     if result['reload'] or skipped or html:
         data['html'] = preview(md, result['marks'], current_anchors(job, md))
         data['shown'] = page_token(job, data['html'])
@@ -2382,6 +2444,7 @@ def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     names = add_name(names, who)
     save_speaker(job, group, who)
     save_project_people(project, add_name(project_people(project), who))
+    remember_roster(job, names)
     settled = guesses                                # the guesses about it are answered, also if it is renamed later
     if settled:
         job.state.setdefault('confirmed', []).extend(settled)
@@ -2440,7 +2503,7 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
                      'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
             'transcript': transcript(job), 'voices': voices_view(job), 'voices_off': voices_off(job),
-            'voice_names': speakers.known_names(), 'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(),
+            'voice_names': speakers.known_names(), 'attendees': attendees(md), 'people': meeting_people(job), 'people_known': known_people(), 'calendar': calendar_payload(job),
             'speakers': speakers_shown(job), 'silent': silent_people(job),
             'attach_files': len(linked_files(job, md)), 'attachments': attachments_listed(md), **ai_choice(),
             'audio': str(audio) if audio.is_file() else '',
@@ -2540,7 +2603,7 @@ def cmd_refresh(job: Job):
     job.save_state()
     md = '' if job.missing else job.md
     out({'todo': todo_items(job, md) if md else [], 'check': check_items(job), 'learned': learned,
-         'attendees': attendees(md), 'people': meeting_people(job), 'speakers': speakers_shown(job),
+         'attendees': attendees(md), 'people': meeting_people(job), 'speakers': speakers_shown(job), 'calendar': calendar_payload(job),
          'silent': silent_people(job),
          'log': job.log_entries()[:200], 'warning': warning,
          'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()})

@@ -2298,6 +2298,81 @@ class ProjectTags(Flows):
         self.assertEqual(result['tag_suggestions'], ['對外', '月會', 'y' * 20])
 
 
+class Departments(unittest.TestCase):
+    """The people a room booking's note names start the meeting's people, and the department it names remembers
+    the people the user confirmed, so the next meeting of that department starts with them
+    (prototypes/department-people.html, Vin 2026-10-20)."""
+
+    NOTE = {'title': '(ITRI-427會議室)數據課週會', 'series': '數據課週會', 'recurring': '', 'start': '2026-10-20T15:00:00+08:00',
+            'guests': [], 'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'participants': ['高聖哲(Vin)']}
+    EMPTY = {'host': '', 'departments': [], 'roster': [], 'roster_from': '', 'learned': False}
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix='dept-'))
+        self.saved_out, self.saved_sender = minutes_app.out, minutes_app.sender_name
+        self.outs = []
+        minutes_app.out = self.outs.append
+        minutes_app.sender_name = lambda: '高聖哲 Vin'            # the note's own spelling is kept, not this one
+        for f in (minutes_app.DEPARTMENTS, minutes_app.PROJECT_PEOPLE):
+            f.unlink(missing_ok=True)
+
+    def tearDown(self):
+        minutes_app.out, minutes_app.sender_name = self.saved_out, self.saved_sender
+        minutes_app.DEPARTMENTS.unlink(missing_ok=True)
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def job(self, name, calendar, md=MINUTES):
+        d = self.root / name
+        d.mkdir()
+        (d / 'minutes.md').write_text(md, encoding='utf-8')
+        (d / 'job.json').write_text(json.dumps({'started': f'2026-{name[4:6]}-{name[6:8]}T15:00:00+08:00'}))
+        (d / 'status.json').write_text(json.dumps({'step': 'done'}))
+        (d / 'result.json').write_text(json.dumps({'status': 'ok', 'title': '數據課週會', 'minutes_md': str(d / 'minutes.md')}))
+        (d / '行事曆.json').write_text(json.dumps(calendar, ensure_ascii=False), encoding='utf-8')
+        return minutes_app.Job(d)
+
+    def test_the_notes_host_and_participants_start_the_meetings_people(self):
+        job = self.job('20261020-150000', {**self.NOTE, 'participants': ['高聖哲(Vin)', '許恩碩(Eric)']})
+        self.assertEqual(minutes_app.invited(job), ['高聖哲(Vin)', '許恩碩(Eric)'])     # as the note spells them
+        self.assertEqual(minutes_app.meeting_people(job), ['高聖哲(Vin)', '許恩碩(Eric)', 'Amy', 'Ken'])
+        self.assertEqual(minutes_app.calendar_payload(job),
+                         {**self.EMPTY, 'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課']})
+
+    def test_adding_a_person_remembers_the_department(self):
+        job = self.job('20261020-150000', self.NOTE)
+        minutes_app.cmd_people(job, 'add', 'Adam')
+        people, where = minutes_app.roster(['數據經濟發展課'])
+        self.assertEqual(people, ['高聖哲(Vin)', 'Amy', 'Ken', 'Adam'])
+        self.assertEqual(where, '2026-10-20 數據課週會')
+        self.assertEqual(self.outs[-1]['calendar'],
+                         {'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'roster': people,
+                          'roster_from': '2026-10-20 數據課週會', 'learned': True})
+        minutes_app.cmd_people(job, 'remove', 'Ken')                           # the roster keeps everyone
+        self.assertEqual(minutes_app.roster(['數據經濟發展課'])[0], people)
+
+    def test_the_next_meeting_of_the_department_starts_with_the_roster(self):
+        first = self.job('20261020-150000', self.NOTE)
+        minutes_app.cmd_people(first, 'add', 'Adam')
+        later = self.job('20261027-150000', {**self.NOTE, 'start': '2026-10-27T15:00:00+08:00'},
+                         md=MINUTES.replace('Amy、Ken', '[__]'))
+        self.assertEqual(minutes_app.meeting_people(later), ['高聖哲(Vin)', 'Amy', 'Ken', 'Adam'])
+        self.assertEqual(minutes_app.calendar_payload(later),
+                         {'host': '高聖哲(Vin)', 'departments': ['數據經濟發展課'], 'roster': ['高聖哲(Vin)', 'Amy', 'Ken', 'Adam'],
+                          'roster_from': '2026-10-20 數據課週會', 'learned': False})
+        # a participant the note names who is not in the roster is added, and nobody twice
+        third = self.job('20261103-150000', {**self.NOTE, 'participants': ['高聖哲(Vin)', 'Adam', '許恩碩(Eric)']},
+                         md=MINUTES.replace('Amy、Ken', '[__]'))
+        self.assertEqual(minutes_app.meeting_people(third), ['高聖哲(Vin)', 'Adam', '許恩碩(Eric)', 'Amy', 'Ken'])
+
+    def test_a_meeting_without_a_department_writes_no_roster(self):
+        job = self.job('20261020-150000', {**self.NOTE, 'departments': []})
+        minutes_app.cmd_people(job, 'add', 'Adam')
+        self.assertFalse(minutes_app.DEPARTMENTS.exists())
+        self.assertEqual(self.outs[-1]['calendar'], {**self.EMPTY, 'host': '高聖哲(Vin)'})
+        self.assertEqual(minutes_app.calendar_payload(self.job('20261021-150000', {})), self.EMPTY)
+        self.assertEqual(minutes_app.roster(['數據經濟發展課']), ([], ''))
+
+
 class CalendarPick(unittest.TestCase):
     """workspace.pick_meeting: which calendar event a recording was. Only events on the user's own calendar that
     they have not declined count as theirs; the company calendar's rooms are only offered as maybes."""

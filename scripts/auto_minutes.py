@@ -338,6 +338,13 @@ def read_calendar(job: Path, meta: dict) -> str:
             break
     if before:
         found += '\n== 同一系列之前整理過的會議（會議名稱與專案照抄）\n' + '\n'.join(before) + '\n'
+    departments = [d for d in (match.get('departments') or []) if isinstance(d, str)]
+    if departments:                                   # a room booking named a department: who the user confirmed last time
+        import briefs
+        names, where = briefs.roster(departments)
+        if names:
+            found += ('\n== 參與部門之前確認過的名單（這個部門上次開會時使用者確認過的人，也是這場的與會人員，名字照這裡寫）\n'
+                      f'   {"、".join(departments)}：{"、".join(names)}　（{where} 確認）\n')
     return found
 
 

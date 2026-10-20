@@ -1337,7 +1337,7 @@ function peopleHTML(people) {
       ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
       : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
           <div class="mi other" data-other="1">${esc(t('people_other'))}</div>
-          ${v.name ? '' : `<div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div>`}</div>`;
+          <div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div></div>`;   // also a voice named by mistake (Vin 2026-10-20)
     return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
         <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
         <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
@@ -1347,7 +1347,14 @@ function peopleHTML(people) {
   });
   const silent = d.silent || [];                   // the server tells names apart (陳怡君（Jessie） is Jessie)
   return `${calendarHTML()}<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
-    ${silent.length ? `<div class="pmin silent">${esc(t('people_silent_list', silent.join(t('list_sep'))))}</div>` : ''}${learnedHTML()}${offHTML()}`;
+    ${silentHTML(silent, busy)}${learnedHTML()}${offHTML()}`;
+}
+
+// the people listed who did not speak, each with ✕ to take them off this meeting (a name added by mistake, Vin 2026-10-20)
+function silentHTML(names, busy) {
+  if (!names.length) return '';
+  return `<div class="pmin silent">${esc(t('people_silent_list', ''))}${names.map((n) =>
+    `<span class="tchip">${esc(n)}<button data-rmp="${esc(n)}" title="${esc(t('remove'))}" aria-label="${esc(t('remove'))}"${busy ? ' disabled' : ''}>${ICON.xs}</button></span>`).join('')}</div>`;
 }
 
 // What the calendar event's note said about the meeting (a room booking names its host and department instead of
@@ -1437,6 +1444,7 @@ function wirePeople(el) {
     choose(S.pickOpen, m.dataset.n);
   }));
   el.querySelectorAll('.pback').forEach((b) => b.addEventListener('click', () => peopleCall('dropVoice', { group: b.dataset.g, back: true })));
+  el.querySelectorAll('[data-rmp]').forEach((b) => b.addEventListener('click', () => peopleCall('people', { action: 'remove', name: b.dataset.rmp })));
   const input = $('#pIn');
   if (!input) return;
   const list = $('#pAc');

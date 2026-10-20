@@ -214,10 +214,11 @@ def core_title(title: str) -> str:
 # A room booking made in a company system (an ERP) invites nobody on Google: it writes the host, the departments
 # and the participants into the event's note instead. These are the labels such notes use, in either language.
 NOTE_LABELS = {'host': r'主持人|主席|召集人|host|organizer|chair',
-               'departments': r'參與部門|與會部門|部門|departments?|teams?',
+               'departments': r'參與部門|與會部門|部門|departments?',
                'participants': r'參與人員|與會人員|出席人員|參加人員|attendees|participants'}
 NOTE_LINE = re.compile(r'\s*(?P<label>[^:：]{1,20}?)\s*[:：]\s*(?P<value>.*?)\s*$')
 NOTE_SPLIT = re.compile(r'[、,，;；/／]+')
+NOT_A_NAME = re.compile(r'://|@|^www\.', re.I)       # a meeting link or an address on the line, not a person or a unit
 
 
 def describe(ev: dict) -> dict:
@@ -225,7 +226,7 @@ def describe(ev: dict) -> dict:
     'participants': [...]}; empty where the note says nothing."""
     import html as html_
     found = {'host': '', 'departments': [], 'participants': []}
-    text = re.sub(r'<br\s*/?>|</p>|</div>', '\n', ev.get('description') or '', flags=re.I)
+    text = re.sub(r'<br\s*/?>|</p>|</div>|</li>|</tr>|</h\d>', '\n', ev.get('description') or '', flags=re.I)
     text = html_.unescape(re.sub(r'<[^>]+>', '', text))
     for line in text.splitlines():
         m = NOTE_LINE.match(line)
@@ -234,7 +235,7 @@ def describe(ev: dict) -> dict:
         key = next((k for k, pat in NOTE_LABELS.items() if re.fullmatch(pat, m.group('label'), re.I)), None)
         if not key:
             continue
-        values = [v.strip() for v in NOTE_SPLIT.split(m.group('value')) if v.strip()]
+        values = [v.strip() for v in NOTE_SPLIT.split(m.group('value')) if v.strip() and not NOT_A_NAME.search(v)]
         if key == 'host':
             found['host'] = found['host'] or (values[0] if values else '')
         else:

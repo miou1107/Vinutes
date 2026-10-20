@@ -692,8 +692,41 @@ def attendees(md: str) -> list[str]:
     found = ATTENDEES.search(md or '')
     if not found:
         return []
-    names = [n.strip(' *') for n in re.split(r'[、，,；;]', found.group('names'))]
+    names = [plain_name(n) for n in split_names(found.group('names'))]
     return [n for n in names if n and not n.startswith('[') and len(n) <= 30][:30]
+
+
+def split_names(text: str) -> list[str]:
+    """The names on a line, cut at 、，,；; outside brackets: Alan（負責 AI SEO，逐字稿標記為講者 B） stays one."""
+    names, depth, cur = [], 0, ''
+    for ch in text:
+        if ch in '（(':
+            depth += 1
+        elif ch in '）)':
+            depth = max(0, depth - 1)
+        if ch in '、，,；;' and depth == 0:
+            names.append(cur)
+            cur = ''
+        else:
+            cur += ch
+    names.append(cur)
+    return [n.strip(' *') for n in names]
+
+
+ALIAS = re.compile(r'^(?P<name>.*?)\s*[（(](?P<inside>[^（）()]*)[）)]\s*$')
+EXPLAINS = re.compile(r'[、，,;；]|講者|speaker|逐字稿|transcript|負責|待確認|\s', re.I)
+
+
+def plain_name(name: str) -> str:
+    """Alan（負責 AI SEO，逐字稿標記為講者 B） -> Alan: a bracket that explains who someone is, is not part of the
+    name (Vin 2026-10-20: it was listed as two people under 人員). 陳怡君（Jessie） and 王小明 (Ming) stay."""
+    m = ALIAS.match(name)
+    if not m:
+        return name
+    inside = m.group('inside').strip()
+    if EXPLAINS.search(inside) or len(inside) > 12:
+        return m.group('name').strip() or name
+    return name
 
 
 # --- 人員: who was at a meeting --------------------------------------------------------------------
@@ -724,16 +757,30 @@ def job_label(job: Job) -> str:
     return f'{day} {job.result.get("title") or ""}'.strip()
 
 
-def remember_roster(job: Job, names: list[str]):
-    """The meeting's people join the roster of each department its calendar note names."""
+def confirmed_people(job: Job) -> list[str]:
+    """The meeting's people someone vouched for: the calendar's invitees and note, the voices the user named, and
+    the people the user added; each still on the meeting's list. What the AI wrote on the 與會人員 line is not."""
+    current = meeting_people(job)
+    added = [n for n in read_json(job.dir / MEETING_PEOPLE).get('added') or [] if isinstance(n, str)]
+    names = []
+    for n in invited(job) + [v['name'] for v in voices_view(job) if v['name']] + added:
+        if any(same_name(n, c) for c in current):
+            names = add_name(names, n)
+    return names
+
+
+def remember_roster(job: Job):
+    """The meeting's confirmed people go to the roster of each department its calendar note names. The meeting
+    that taught a roster still edits it (a typo, a wrong name taken off); a later meeting only adds to it."""
     for dept in calendar_of(job)['departments']:
-        briefs.save_roster(dept, names, job_label(job))
+        _, where = roster([dept])
+        briefs.save_roster(dept, confirmed_people(job), job_label(job), replace=where == job_label(job))
 
 
 def calendar_payload(job: Job) -> dict:
     """For the window's 人員: what the calendar note said, the roster it brings in, and whether this meeting taught it."""
     cal = calendar_of(job)
-    people, where = roster(cal['departments'])
+    people, where = roster(cal['departments'], before=job_label(job)[:10])
     return {'host': cal['host'], 'departments': cal['departments'], 'roster': people, 'roster_from': where,
             'learned': bool(where) and where == job_label(job)}
 
@@ -771,7 +818,7 @@ def meeting_people(job: Job) -> list[str]:
         names = [n for n in data['people'] if isinstance(n, str)]
     else:                                             # first time: from the invitation and the minutes
         names = []
-        roster_names, _ = roster(calendar_of(job)['departments'])   # the department's people, confirmed earlier
+        roster_names, _ = roster(calendar_of(job)['departments'], before=job_label(job)[:10])   # the department's people, confirmed at an earlier meeting
         for n in invited(job) + roster_names + attendees(job.md if not job.missing else ''):   # 以當場會議邀請的人為主
             names = add_name(names, n)
     for n in speakers_shown(job).values():          # a voice with a name was there
@@ -861,13 +908,18 @@ def cmd_people(job: Job, action: str, name: str, group: str = ''):
     project = project_of(job)
     names = meeting_people(job)
     renames = []
+    data = read_json(job.dir / MEETING_PEOPLE)
+    added = [n for n in data.get('added') or [] if isinstance(n, str)]   # what the user typed in, for the roster
     if action == 'add':
         names = add_name(names, name)
+        data['added'] = add_name(added, name)
+        write_json(job.dir / MEETING_PEOPLE, data)
         save_project_people(project, add_name(project_people(project), name))
-        remember_roster(job, names)
         job.log(me(), t('log_people_add', name=name), 'speaker')
     elif action == 'remove':
         names = [n for n in names if not same_name(n, name)]      # this meeting only: the brief keeps them
+        data['added'] = [n for n in added if not same_name(n, name)]
+        write_json(job.dir / MEETING_PEOPLE, data)
         for group, shown in speakers_shown(job).items():   # the voice with this name is a 講者 X again, in the minutes too
             if shown and same_name(shown, name):
                 speakers.clear_name(job.dir, group)
@@ -878,6 +930,7 @@ def cmd_people(job: Job, action: str, name: str, group: str = ''):
     if action == 'add' and group:
         renames.append((group, '', name))
     result = people_change(job, names, renames)
+    remember_roster(job)
     answer(job, result, html=bool(result.get('reload')), people=meeting_people(job), voices=voices_view(job),
            speakers=speakers_shown(job), silent=silent_people(job),
            transcript=transcript(job), log=job.log_entries()[:200])
@@ -2392,6 +2445,7 @@ def cmd_drop_voice(job: Job, group: str, back: bool = False):
             save_speaker(job, group, was['name'])
     job.save_state()
     job.log(me(), t('log_voice_back' if back else 'log_voice_off', who=who), 'speaker')
+    remember_roster(job)                              # a voice wrongly named leaves the department's roster with it
     answer(job, fresh(), transcript=transcript(job), voices=voices_view(job), voices_off=voices_off(job),
            voice_names=speakers.known_names(), people=meeting_people(job), speakers=speakers_shown(job),
            silent=silent_people(job), log=job.log_entries()[:200])
@@ -2419,12 +2473,12 @@ def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     names = add_name(names, who)
     save_speaker(job, group, who)
     save_project_people(project, add_name(project_people(project), who))
-    remember_roster(job, names)
     settled = guesses                                # the guesses about it are answered, also if it is renamed later
     if settled:
         job.state.setdefault('confirmed', []).extend(settled)
         job.save_state()
     result = people_change(job, names, [(group, before, who)])
+    remember_roster(job)
     answer(job, result, html=bool(result.get('reload')), people=meeting_people(job), speakers=speakers_shown(job),
            silent=silent_people(job), **extra)
 

@@ -44,7 +44,7 @@ import transcribe as tr  # noqa: E402  (the speech models: which one is chosen, 
 
 SPEECH = tr.MODEL                                   # Whisper, the default; on every Mac
 SPEECH_BYTES = 1_620_000_000
-QWEN_BYTES = 3_800_000_000                          # Qwen3-ASR 1.7B 8-bit with its aligner model
+QWEN_BYTES = 4_000_000_000                          # Qwen3-ASR 1.7B 8-bit (2.2 GB) with its aligner model (1.8 GB)
 VOICE = gs.CONFIG / 'models' / 'campplus.onnx'
 VOICE_URL = ('https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/'
              '3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx')

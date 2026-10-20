@@ -16,6 +16,7 @@ from pathlib import Path
 # the same temporary home as the other test modules when they were imported first: modules already loaded keep
 # the home they read at import, so a second one would make the two halves of a test disagree
 os.environ.setdefault('VINUTES_LANG', 'zh-TW')
+os.environ['MINUTES_SPEECH_MODEL'] = 'whisper'     # the real Qwen3-ASR never runs in the suite; class Qwen sets its own
 HOME = os.environ.setdefault('MINUTES_HOME', tempfile.mkdtemp(prefix='live-test-'))
 os.environ.setdefault('VINUTES_LOG_DIR', os.path.join(HOME, 'logs'))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
@@ -425,6 +426,42 @@ class Qwen(unittest.TestCase):
         words = [{'text': c, 'start': i * 0.5, 'end': i * 0.5 + 0.4} for i, c in enumerate('今天開會明天放假')]
         segs = tr.qwen_lines('今天 開會。明天，放假', words, 0)
         self.assertEqual(segs, [[0.0, 1.9, '今天 開會。'], [2.0, 3.9, '明天，放假']])
+
+    def test_punctuation_inside_a_sentence_does_not_push_the_times_late(self):
+        # the aligner keeps letters and digits only: 我們說台灣PASS好 / 成長35 / 第三句 / 第四句 as words
+        spelt = ['我', '們', '說', '台', '灣', 'PASS', '好', '成', '長', '3', '5', '第', '三', '句', '第', '四', '句']
+        words = [{'text': w, 'start': i * 1.0, 'end': i * 1.0 + 0.9} for i, w in enumerate(spelt)]
+        segs = tr.qwen_lines('我們說：「台灣 PASS」好。成長 3.5%。第三句。第四句。', words, 0)
+        self.assertEqual([s[:2] for s in segs], [[0.0, 6.9], [7.0, 10.9], [11.0, 13.9], [14.0, 16.9]])
+        self.assertEqual(segs[0][2], '我們說：「台灣 PASS」好。')
+
+    def test_no_words_and_only_punctuation_make_no_lines(self):
+        self.assertEqual(tr.qwen_lines('', [], 0), [])
+        self.assertEqual(tr.qwen_lines('。。', [{'text': '好', 'start': 0, 'end': 1}], 0), [])
+        self.assertEqual(tr.qwen_lines('好。', [], 5), [[5.0, 5.0, '好。']])
+
+    def test_qwen_failing_mid_meeting_hands_the_stretch_to_whisper(self):
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+
+        def broken(audio, **kw):
+            raise RuntimeError('weights unreadable')
+        self.fake.transcribe = broken
+        name, run = tr.recogniser('zh', fake_whisper)
+        segs = run(tone(2), 10.0)
+        self.assertEqual(name, 'qwen3-asr')
+        self.assertEqual([s[2] for s in segs], ['第0秒', '第1秒'])                   # Whisper's stand-in wrote it
+
+    def test_the_setup_checklist_reports_the_chosen_model(self):
+        import setup_check
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        self.assertEqual(setup_check.speech()['state'], 'todo')
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        got = setup_check.speech()
+        self.assertEqual((got['state'], got['model']), ('done', 'qwen3-asr'))
+        self.assertEqual(setup_check.speech_repos('qwen3-asr'), [tr.QWEN, tr.QWEN_ALIGNER])
+        os.environ['MINUTES_SPEECH_MODEL'] = 'whisper'
+        self.assertEqual(setup_check.speech()['model'], 'whisper')
 
     def test_a_piece_written_by_qwen_says_so(self):
         self.weights(tr.QWEN, tr.QWEN_ALIGNER)

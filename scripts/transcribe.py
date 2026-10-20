@@ -24,7 +24,12 @@ language and with the same hint. A piece still being transcribed when the record
 the folder) is waited for, at most three minutes.
 
 Install the two packages with recorder/install.sh, or: pip install mlx-whisper opencc-python-reimplemented
-Environment: MINUTES_WHISPER_MODEL picks another model; MINUTES_MEETING_LANG (zh, en, auto) overrides the setting.
+A second recogniser, Qwen3-ASR, takes Chinese meetings when "speech_model" in settings.json is "qwen3-asr" and its
+model and aligner are downloaded (setup_check.py download speech); it gets the glossary as its context and writes
+punctuated sentences, each line timed by the aligner's words. Whisper does everything else and is the fallback.
+
+Environment: MINUTES_WHISPER_MODEL picks another Whisper model, MINUTES_QWEN_MODEL another Qwen build;
+MINUTES_SPEECH_MODEL (whisper, qwen3-asr) and MINUTES_MEETING_LANG (zh, en, auto) override the settings.
 """
 from __future__ import annotations
 
@@ -37,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -158,11 +164,15 @@ def hub_has(repo: str) -> bool:
 
 
 def qwen_ready() -> bool:
-    """The Qwen3-ASR package is installed and its two models are downloaded, so it can run offline."""
-    try:
-        import mlx_qwen3_asr  # noqa: F401
-    except ImportError:
-        return False
+    """The Qwen3-ASR package is installed and its two models are downloaded, so it can run offline. (Asked at
+    every app and recording start: the package is looked up, not imported.)"""
+    import importlib.util
+    if 'mlx_qwen3_asr' not in sys.modules:
+        try:
+            if importlib.util.find_spec('mlx_qwen3_asr') is None:
+                return False
+        except (ImportError, ValueError):
+            return False
     return hub_has(QWEN) and hub_has(QWEN_ALIGNER)
 
 
@@ -180,14 +190,15 @@ def qwen_lines(text: str, pieces: list, offset: float) -> list[list]:
     for i, ch in enumerate(text):
         sentence += ch
         if ch in SENTENCE_END or i == len(text) - 1:
-            body = ''.join(c for c in sentence if not c.isspace() and c not in SENTENCE_END + '，、,')
+            # the aligner keeps only letters, digits and apostrophes of a word: count the sentence the same way
+            body = ''.join(c for c in sentence if c == "'" or unicodedata.category(c)[0] in 'LN')
             need = len(body)
             first = at
             taken = 0
             while at < len(words) and taken < need:
-                taken += len(words[at][0])
+                taken += sum(1 for c in words[at][0] if c == "'" or unicodedata.category(c)[0] in 'LN')
                 at += 1
-            if sentence.strip():
+            if body:
                 start = words[first][1] if first < len(words) else (words[-1][2] if words else 0.0)
                 end = words[at - 1][2] if at > first else start
                 out.append([round(start + offset, 2), round(end + offset, 2), sentence.strip()])
@@ -201,7 +212,8 @@ def qwen_range(audio, offset: float, context: str, transcribe=None) -> list[list
     converts)."""
     if transcribe is None:
         from mlx_qwen3_asr import transcribe
-    result = transcribe((audio, RATE), model=QWEN, language='Chinese', return_timestamps=True, context=context)
+    result = transcribe((audio, RATE), model=QWEN, language='Chinese', return_timestamps=True, context=context,
+                        forced_aligner=QWEN_ALIGNER)
     text = result.text if hasattr(result, 'text') else result.get('text', '')
     segs = result.segments if hasattr(result, 'segments') else result.get('segments', [])
     return qwen_lines(text or '', segs or [], offset)
@@ -211,14 +223,27 @@ def recogniser(lang: str, whisper=None):
     """(name, run) for a meeting in `lang`: run(audio, offset) -> segments. Qwen3-ASR for a Chinese meeting
     when the user chose it and it is ready; Whisper otherwise, prompted as before (`whisper` is mlx-whisper's
     transcribe, or a stand-in)."""
+    prompt = prompt_for(lang)
+
+    def with_whisper(audio, offset):
+        nonlocal whisper
+        if whisper is None:
+            import mlx_whisper
+            whisper = mlx_whisper.transcribe
+        return transcribe_range(audio, lang, prompt, offset, whisper)
+
     if lang == 'zh' and speech_model() == 'qwen3-asr' and qwen_ready():
         context = hint()
-        return 'qwen3-asr', lambda audio, offset: qwen_range(audio, offset, context)
-    if whisper is None:
-        import mlx_whisper
-        whisper = mlx_whisper.transcribe
-    prompt = prompt_for(lang)
-    return 'whisper', lambda audio, offset: transcribe_range(audio, lang, prompt, offset, whisper)
+
+        def with_qwen(audio, offset):
+            try:
+                return qwen_range(audio, offset, context)
+            except Exception as err:                    # a broken model file, a package error: this stretch by Whisper
+                import vlog
+                vlog.log(f'qwen3-asr failed at {stamp(offset)}, Whisper takes this stretch: {type(err).__name__}: {err}')
+                return with_whisper(audio, offset)
+        return 'qwen3-asr', with_qwen
+    return 'whisper', with_whisper
 
 
 def detect(audio, transcribe) -> str:

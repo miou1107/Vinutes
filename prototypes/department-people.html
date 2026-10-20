@@ -1,0 +1,248 @@
+<title>Vinutes 參與部門名單</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: one page, a short lead, the calendar entry both states read from, then the window today and after the change. */
+:root {
+  --bg: #f3f3f6; --win: #ffffff; --panel: #f6f6f8; --rail: #fafafb; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --field: #ffffff; --field-line: #cfcfd6;
+  --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee; --link: #2a6dd6;
+  --green-bg: #dff3e3; --green-ink: #14532d; --hover: #e0e0e6; --amber: #d98a00; --yellow-label: #8a6100;
+  --asis: #b42318; --asis-bg: #fdecea; --asis-line: #f1b5af;
+  --tobe: #0a64d8; --tobe-bg: #eaf2ff; --tobe-line: #a9c4ef;
+  --note: #6b4d00; --note-bg: #fff6dd; --on-accent: #ffffff;
+  --va: #dbe8ff; --va-ink: #1c4f9e; --vb: #ffe6c7; --vb-ink: #7a4200; --vc: #e2f4e4; --vc-ink: #14532d; --vd: #efe1ff; --vd-ink: #4b2a80;
+  --shadow: 0 16px 40px rgba(0,0,0,0.18);
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --rail: #202023; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --link: #7fb0ff;
+  --green-bg: #1f3a28; --green-ink: #b6e8c4; --hover: #303036; --amber: #e0a030; --yellow-label: #ffd37a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --va: #27385c; --va-ink: #a9c6ff; --vb: #4a3012; --vb-ink: #ffd09a; --vc: #1f3a28; --vc-ink: #b6e8c4; --vd: #36264f; --vd-ink: #d9c3ff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --rail: #202023; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --link: #7fb0ff;
+  --green-bg: #1f3a28; --green-ink: #b6e8c4; --hover: #303036; --amber: #e0a030; --yellow-label: #ffd37a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --va: #27385c; --va-ink: #a9c6ff; --vb: #4a3012; --vb-ink: #ffd09a; --vc: #1f3a28; --vc-ink: #b6e8c4; --vd: #36264f; --vd-ink: #d9c3ff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px; }
+.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 22px; margin: 0; text-wrap: balance; }
+.lead { margin: 6px 0 0; color: var(--text2); max-width: 62ch; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* the calendar entry, as Google shows it */
+.cal { background: var(--win); border: 1px solid var(--line2); border-radius: 12px; padding: 14px 18px; max-width: 520px; }
+.cal h2 { margin: 0 0 2px; font-size: 16px; color: var(--link); font-weight: 600; }
+.cal .when { color: var(--text2); margin-bottom: 8px; }
+.cal dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; }
+.cal dt { color: var(--muted); } .cal dd { margin: 0; }
+.cal dd.hot { background: var(--note-bg); color: var(--note); border-radius: 4px; padding: 0 6px; }
+.callab { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+
+/* the two states: red frame = today, blue frame = after the change */
+.state { border: 2px solid; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.state.asis { border-color: var(--asis-line); background: var(--asis-bg); }
+.state.tobe { border-color: var(--tobe-line); background: var(--tobe-bg); }
+.tag { align-self: flex-start; font-size: 13px; font-weight: 700; padding: 3px 12px; border-radius: 999px; color: var(--on-accent); }
+.asis .tag { background: var(--asis); } .tobe .tag { background: var(--tobe); }
+.cap { margin: 0; color: var(--text2); }
+.hint { margin: 0; font-size: 13px; color: var(--note); background: var(--note-bg); border-radius: 8px; padding: 6px 10px; align-self: flex-start; }
+.weeks { display: inline-flex; gap: 6px; }
+.wk { border: 1px solid var(--line2); background: var(--win); border-radius: 999px; padding: 3px 14px; font-size: 13px; }
+.wk.on { background: var(--blue); color: var(--on-accent); border-color: var(--blue); font-weight: 600; }
+.wk:disabled { opacity: .5; cursor: default; }
+
+/* the Vinutes window: the top bar and the right-hand rail */
+.win { background: var(--win); border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; min-width: 0; }
+.bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.crumb { color: var(--link); } .crumb b { color: var(--text); font-weight: 600; }
+.body { display: flex; min-height: 300px; }
+.doc { flex: 1; min-width: 0; background: var(--panel); padding: 16px; }
+.paper { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 18px 22px; font-size: 13px; }
+.paper h3 { font-size: 14px; margin: 0 0 8px; color: var(--blue-ink); }
+.paper ul { margin: 0; padding-left: 18px; } .paper li { margin: 2px 0; }
+.rail { width: 290px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--rail); }
+.tabs { display: flex; gap: 4px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+.tabb { display: inline-flex; align-items: center; padding: 6px 10px 8px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--muted); }
+.tabb.on { color: var(--link); font-weight: 600; border-bottom-color: var(--blue); }
+.tabb .n { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 5px; margin-left: 5px; border-radius: 8px; background: var(--amber); color: #fff; font-size: 11px; font-weight: 700; }
+.tabb .n.zero { background: var(--line2); color: var(--muted); }
+.railbody { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.phead { font-size: 12px; font-weight: 600; color: var(--muted); }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--field); display: flex; flex-direction: column; gap: 8px; }
+.card.guess { border-color: var(--amber); }
+.prow { display: flex; align-items: center; gap: 8px; }
+.pchip { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 11px; font-size: 12px; font-weight: 600; }
+.pchip.a { background: var(--va); color: var(--va-ink); } .pchip.b { background: var(--vb); color: var(--vb-ink); }
+.pchip.c { background: var(--vc); color: var(--vc-ink); } .pchip.d { background: var(--vd); color: var(--vd-ink); }
+.pmin { font-size: 12px; color: var(--muted); }
+.plink { all: unset; cursor: pointer; font-size: 12px; color: var(--link); }
+.pickwrap { position: relative; }
+.pick { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; justify-content: space-between; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--field-line); background: var(--field); font-size: 13px; }
+.pick.done { border-color: var(--line); }
+.pick .ph { color: var(--muted); } .pick .caret { color: var(--muted); font-size: 11px; }
+.pick:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.src { font-size: 11px; color: var(--muted); margin-left: 8px; font-weight: 400; }
+.menu { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); padding: 4px; box-shadow: var(--shadow); }
+.mi { padding: 7px 10px; border-radius: 6px; font-size: 13px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.mi:hover { background: var(--blue-bg); color: var(--blue); }
+.mi .gs { color: var(--yellow-label); font-size: 12px; }
+.mi.other { color: var(--blue); border-top: 1px solid var(--line); margin-top: 4px; }
+.learned { font-size: 12px; color: var(--green-ink); background: var(--green-bg); border-radius: 8px; padding: 6px 10px; }
+.fromcal { font-size: 12px; color: var(--blue-ink); background: var(--blue-bg); border-radius: 8px; padding: 6px 10px; }
+@media (max-width: 720px) { .body { flex-direction: column; } .rail { width: auto; border-left: 0; border-top: 1px solid var(--line); } .doc { min-height: 120px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Vinutes 參與部門名單</h1>
+    <p class="lead">ERP 訂會議室時會把主持人和參與部門寫進行事曆，Vinutes 改成讀這兩行。這週在人員分頁標過一次誰是誰，下週同一個部門的會議就直接帶入名單，講者用聲紋對上。</p>
+  </header>
+
+  <section>
+    <p class="callab">行事曆上這場會議的內容，ERP 訂會議室時寫進去的</p>
+    <div class="cal">
+      <h2>(ITRI-427會議室)數據課週會</h2>
+      <div class="when">10/20（星期二） 15:00 – 16:00</div>
+      <dl>
+        <dt>地點</dt><dd>ITRI-427會議室</dd>
+        <dt>主持人</dt><dd class="hot">高聖哲(Vin)</dd>
+        <dt>參與部門</dt><dd class="hot">數據經濟發展課</dd>
+        <dt>參與人員</dt><dd>高聖哲(Vin)</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="state asis" aria-label="目前的畫面">
+    <span class="tag">目前的畫面</span>
+    <div class="win">
+      <div class="bar"><span class="crumb">數據課 › 10/20 <b>（數據課週會）</b></span></div>
+      <div class="body">
+        <div class="doc"><div class="paper">
+          <h3>一、會議基本資訊</h3>
+          <ul>
+            <li>主持人：Vin</li>
+            <li>與會人員：Vin、Adam、AI SEO 成效分析開發同仁（逐字稿標記為講者 B，姓名待確認）、與會同仁（逐字稿標記為講者 D，姓名待確認）</li>
+          </ul>
+        </div></div>
+        <div class="rail">
+          <div class="tabs"><span class="tabb">待處理<b class="n">7</b></span><span class="tabb on">人員<b class="n">2</b></span><span class="tabb">紀錄</span></div>
+          <div class="railbody">
+            <div class="phead">這場錄音有 4 位講者</div>
+            <div class="card"><div class="prow"><span class="pchip a">講者 A</span><span class="pmin">21 分鐘</span><span style="flex:1"></span><span class="plink">聽錄音</span></div>
+              <div class="pickwrap"><span class="pick done"><b>Vin</b><span class="caret">▾</span></span></div></div>
+            <div class="card guess"><div class="prow"><span class="pchip b">講者 B</span><span class="pmin">14 分鐘</span><span style="flex:1"></span><span class="plink">聽錄音</span></div>
+              <div class="pickwrap"><span class="pick"><span class="ph">選擇是誰</span><span class="caret">▾</span></span></div></div>
+            <div class="card"><div class="prow"><span class="pchip c">講者 C</span><span class="pmin">12 分鐘</span><span style="flex:1"></span><span class="plink">聽錄音</span></div>
+              <div class="pickwrap"><span class="pick done"><b>Adam</b><span class="caret">▾</span></span></div></div>
+            <div class="card guess"><div class="prow"><span class="pchip d">講者 D</span><span class="pmin">6 分鐘</span><span style="flex:1"></span><span class="plink">聽錄音</span></div>
+              <div class="pickwrap"><span class="pick"><span class="ph">選擇是誰</span><span class="caret">▾</span></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap">行事曆寫了主持人是 Vin、參與部門是數據經濟發展課，Vinutes 沒有讀這兩行。Vinutes 把這場當成別人的會議，講者 B、D 要你自己選，下週同一場還要再選一次。</p>
+  </section>
+
+  <section class="state tobe" aria-label="調整後的畫面">
+    <span class="tag">調整後的畫面</span>
+    <p class="hint">先在 10/20 把講者 B、講者 D 選成 Eric、林辰，再按 10/27，看下週同一個部門的會議長什麼樣。</p>
+    <div class="weeks" role="tablist" aria-label="哪一週">
+      <button class="wk on" id="wk20" role="tab" aria-selected="true">10/20 這週</button>
+      <button class="wk" id="wk27" role="tab" aria-selected="false" disabled>10/27 下週</button>
+    </div>
+    <div class="win" id="win">
+      <div class="bar"><span class="crumb">數據課 › <span id="day">10/20</span> <b>（數據課週會）</b></span></div>
+      <div class="body">
+        <div class="doc"><div class="paper">
+          <h3>一、會議基本資訊</h3>
+          <ul>
+            <li>主持人：Vin</li>
+            <li id="attLine">與會人員：Vin、Adam、講者 B（姓名待確認）、講者 D（姓名待確認）</li>
+          </ul>
+        </div></div>
+        <div class="rail">
+          <div class="tabs"><span class="tabb">待處理<b class="n" id="todoN">7</b></span><span class="tabb on">人員<b class="n" id="peopleN">2</b></span><span class="tabb">紀錄</span></div>
+          <div class="railbody" id="railbody"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const DEPT = '數據經濟發展課';
+const VOICES = [
+  { g: 'A', cls: 'a', min: 21 }, { g: 'B', cls: 'b', min: 14 }, { g: 'C', cls: 'c', min: 12 }, { g: 'D', cls: 'd', min: 6 }
+];
+// this week: who each voice is so far; the calendar names Vin, the AI guessed Adam from the transcript
+const week20 = { A: 'Vin', B: '', C: 'Adam', D: '' };
+const guess = { B: 'Eric', D: '林辰' };          // the AI's guess from the transcript, offered first in the menu
+let week = 20, open = null;
+
+function learned() { return Object.values(week20).every(Boolean); }
+function names(w) { return VOICES.map((v) => w[v.g]); }
+
+function card(v, name, menuHTML, byVoice) {
+  const src = byVoice ? '<span class="src">聲紋對到</span>' : '';
+  return `<div class="card${name ? '' : ' guess'}"><div class="prow">
+      <span class="pchip ${v.cls}">講者 ${v.g}</span><span class="pmin">${v.min} 分鐘</span><span style="flex:1"></span><button class="plink">聽錄音</button></div>
+    <div class="pickwrap"><button class="pick${name ? ' done' : ''}" data-g="${v.g}" aria-haspopup="listbox" aria-expanded="${open === v.g}">
+      <span>${name ? `<b>${esc(name)}</b>${src}` : '<span class="ph">選擇是誰</span>'}</span><span class="caret">▾</span></button>${menuHTML}</div></div>`;
+}
+
+function render() {
+  const body = $('#railbody');
+  if (week === 20) {
+    const choices = (g) => [...new Set([guess[g], 'Vin', 'Adam', 'Eric', '林辰'].filter(Boolean))];
+    const cards = VOICES.map((v) => {
+      const menu = open !== v.g ? '' : `<div class="menu" role="listbox">${choices(v.g).map((n) =>
+        `<div class="mi" role="option" data-n="${esc(n)}">${esc(n)}${n === guess[v.g] ? '<span class="gs">推測</span>' : ''}</div>`).join('')}
+        <div class="mi other">其他人⋯</div></div>`;
+      return card(v, week20[v.g], menu, false);
+    }).join('');
+    const done = learned();
+    body.innerHTML = `<div class="fromcal">行事曆：主持人 Vin，參與部門 ${DEPT}</div><div class="phead">這場錄音有 4 位講者</div>${cards}` +
+      (done ? `<div class="learned">已記住${DEPT}的名單：${names(week20).join('、')}</div>` : '');
+    const missing = VOICES.filter((v) => !week20[v.g]).length;
+    $('#peopleN').textContent = missing; $('#peopleN').classList.toggle('zero', !missing);
+    $('#todoN').textContent = 5 + missing;
+    $('#attLine').textContent = '與會人員：' + VOICES.map((v) => week20[v.g] || `講者 ${v.g}（姓名待確認）`).join('、');
+    $('#wk27').disabled = !done;
+    body.querySelectorAll('.pick').forEach((b) => b.addEventListener('click', () => { open = open === b.dataset.g ? null : b.dataset.g; render(); }));
+    body.querySelectorAll('.mi[data-n]').forEach((m) => m.addEventListener('click', () => { week20[open] = m.dataset.n; open = null; render(); }));
+  } else {
+    const cards = VOICES.map((v) => card(v, week20[v.g], '', v.g === 'B' || v.g === 'D')).join('');
+    body.innerHTML = `<div class="fromcal">行事曆：參與部門 ${DEPT}，名單帶自 10/20 數據課週會</div><div class="phead">這場錄音有 4 位講者</div>${cards}`;
+    $('#peopleN').textContent = '0'; $('#peopleN').classList.add('zero');
+    $('#todoN').textContent = '1';
+    $('#attLine').textContent = '與會人員：' + names(week20).join('、');
+  }
+  $('#day').textContent = week === 20 ? '10/20' : '10/27';
+  $('#wk20').classList.toggle('on', week === 20); $('#wk27').classList.toggle('on', week === 27);
+  $('#wk20').setAttribute('aria-selected', week === 20); $('#wk27').setAttribute('aria-selected', week === 27);
+}
+$('#wk20').addEventListener('click', () => { week = 20; open = null; render(); });
+$('#wk27').addEventListener('click', () => { if (learned()) { week = 27; open = null; render(); } });
+document.addEventListener('click', (e) => { if (open && !e.target.closest('.pickwrap')) { open = null; render(); } });
+render();
+</script>

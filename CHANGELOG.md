@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.15 (2026-10-20)
+
+- Naming a voice, adding or removing a person under People no longer teaches Vinutes anything: the change it makes to the 與會人員 line is the app's own, not your wording, so no "照你的寫法" rule is written to notes.md for it. Your own edits right after are still learned.
+
 ## v0.4.12 (2026-10-20)
 
 - A room booking made in a company system (an ERP) that invites nobody on Google, but writes the host and the participants into the calendar event's note, now counts as your meeting when the note names you. The note's host and participants start the meeting's people, spelled as the note spells them, and the minutes AI reads them with the calendar.

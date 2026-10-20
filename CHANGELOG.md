@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.13 (2026-10-20)
+
+- Section 8 of the minutes is now 參考附件 (Attachments in English minutes) and every set of minutes has it: the AI writes 無 (None) when nothing was attached, and the first attachment you add takes the place of that line. Minutes written before this version keep their 補充資訊 heading, and attachments still go there.
+
 ## v0.4.12 (2026-10-20)
 
 - A room booking made in a company system (an ERP) that invites nobody on Google, but writes the host and the participants into the calendar event's note, now counts as your meeting when the note names you. The note's host and participants start the meeting's people, spelled as the note spells them, and the minutes AI reads them with the calendar.

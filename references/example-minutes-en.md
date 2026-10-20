@@ -1,7 +1,7 @@
 audience: agent
 
 > A fictional example: names, dates and figures are made up, only to show the layout and tone of English minutes.
-> Section 8, Supporting Materials, is written only when there is something to put in it; it is here to show how.
+> Section 8, Attachments, is in every set of minutes; it says "None" when nothing was attached. Here it has content to show how.
 
 # Member Area Redesign, Second Discussion
 
@@ -64,6 +64,6 @@ This meeting followed the first discussion on September 1. It settled which bloc
 
 The next meeting could review the final design and confirm the launch day against the long weekend; the text message decision can wait for the email's open rate.
 
-## 8. Supporting Materials
+## 8. Attachments
 
 * Ming Wang provided last quarter's member email open rates: [Open rates Q2](https://example.com/open-rates)

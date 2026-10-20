@@ -17,6 +17,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
     private let controls = NSStackView()
     private let pause = NSButton()
     private let aiNote = NSStackView()
+    private let speechNote = NSStackView()
     private let recent = NSStackView()
     private let versionRow = NSStackView()
     private let version = NSTextField(labelWithString: "")
@@ -79,7 +80,8 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         top.setCustomSpacing(10, after: hint)
         top.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 14, right: 16)
         root.addArrangedSubview(top)
-        root.addArrangedSubview(buildAiNote())
+        root.addArrangedSubview(buildNote(aiNote, title: "panel.aiTitle", text: "panel.aiText"))
+        root.addArrangedSubview(buildNote(speechNote, title: "panel.speechTitle", text: "panel.speechText"))
 
         root.addArrangedSubview(line())
         recent.orientation = .vertical
@@ -122,8 +124,9 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         return root
     }
 
-    /// 注意！ 內容生成模型尚未設定 / 需先完成 AI 設定，才能自動生成會議記錄 / 前往設定 (the prototype's words)
-    private func buildAiNote() -> NSView {
+    /// A yellow note shown while a recording runs without something: 注意！ 內容生成模型尚未設定 / 需先完成 AI 設定，
+    /// 才能自動生成會議記錄 / 前往設定 (the prototype's words), and the same shape for Qwen3-ASR not downloaded yet
+    private func buildNote(_ note: NSStackView, title titleKey: String, text textKey: String) -> NSView {
         let box = NSStackView()
         box.orientation = .vertical
         box.alignment = .leading
@@ -132,9 +135,9 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         box.wantsLayer = true
         box.layer?.cornerRadius = 8
         box.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.2).cgColor
-        let title = NSTextField(wrappingLabelWithString: tr("panel.aiTitle"))
+        let title = NSTextField(wrappingLabelWithString: tr(titleKey))
         title.font = .systemFont(ofSize: 12, weight: .semibold)
-        let text = NSTextField(wrappingLabelWithString: tr("panel.aiText"))
+        let text = NSTextField(wrappingLabelWithString: tr(textKey))
         text.font = .systemFont(ofSize: 12)
         [title, text].forEach { $0.preferredMaxLayoutWidth = 244 }
         let go = NSButton(title: tr("panel.aiSetup"), target: self, action: #selector(aiSetupClicked))
@@ -144,11 +147,11 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         [title, text, go].forEach { box.addArrangedSubview($0) }
         box.setCustomSpacing(8, after: text)                 // only once the text is in the stack
         box.widthAnchor.constraint(equalToConstant: 268).isActive = true
-        aiNote.orientation = .vertical
-        aiNote.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 14, right: 16)
-        aiNote.addArrangedSubview(box)
-        aiNote.isHidden = true
-        return aiNote
+        note.orientation = .vertical
+        note.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 14, right: 16)
+        note.addArrangedSubview(box)
+        note.isHidden = true
+        return note
     }
 
     private func line() -> NSView {
@@ -198,6 +201,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         }
         controls.isHidden = !rec
         aiNote.isHidden = !(rec && owner.aiWarned)
+        speechNote.isHidden = !(rec && owner.speechWarned)
 
         // the meeting being recorded is not a recent meeting yet (compared by folder name: the two URLs can differ
         // by a trailing slash)

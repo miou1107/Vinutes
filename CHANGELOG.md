@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `docs/bench/`: the scripts and the figures behind v0.4.16's quality check, so the next change to transcription (another model, cleaned audio) is measured the same way: pieces against the whole file, whisper-large-v3 as the judge, the model's own run-to-run noise, and how many glossary terms each transcript gets right. Measured so far: levelling the volume changes nothing, noise reduction makes every meeting worse, and the pieces find more glossary terms than the whole file because the hint reaches the model once per piece.
+
 ## v0.4.16 (2026-10-20)
 
 - The transcript is mostly done when you press Stop. While a meeting is recorded, Vinutes transcribes it in pieces of about five minutes in the background, each cut at a quiet moment so no sentence is split. After Stop only the last piece is transcribed, so the transcript takes under a minute instead of three to five, and the minutes arrive that much sooner. Each piece is transcribed exactly as a whole recording was: the same model, the same glossary hint, the same language setting. Checked on three recorded meetings (40, 58 and 44 minutes) against a transcript by the larger whisper-large-v3 model: the pieces' transcript was as close to it as the one-go transcript (25.1% vs 25.3%, 21.9% vs 20.7%, 27.7% vs 28.0% of characters differing), and the one-go transcript itself moves by 1.9 points between two runs; the figures are on issue 1. A segment where the model gets stuck repeating one character is now dropped from every transcript. Pausing needs nothing, and pieces survive a crash or a restart. `live_transcribe: false` in settings.json turns it off.

@@ -2440,7 +2440,7 @@ function renderMail() {
       <div class="field tokens" id="tokens">${m.rcpts.map((r, i) => `<span class="token${r.mail ? '' : ' missing'}"${r.mail ? '' : ` data-fill="${esc(r.name)}" title="${esc(t('add_rcpt'))}"`}><span>${esc(r.name)}</span>${r.mail && r.mail !== r.name ? `<small>${esc(r.mail)}</small>` : ''}${r.mail ? '' : `<small>${esc(t('rcpt_no_mail'))}</small>`}
         <button data-i="${i}" aria-label="${esc(t('remove_rcpt'))}">${ICON.xs}</button></span>`).join('')}
         <input id="addTo" autocomplete="off" aria-label="${esc(t('add_rcpt'))}" placeholder="${esc(t('add_rcpt'))}" value="${esc(m.typed)}">
-        ${m.sugg.length ? `<div class="ac rcpts" id="rcptAc" role="listbox">${m.sugg.map((p, i) => `<div class="aci${i === m.at ? ' on' : ''}" role="option" data-i="${i}"><span>${esc(p.name)}</span><small>${esc(p.mail)}</small><span class="src">${esc(t('rcpt_src_' + (p.src || 'mail')) || '')}</span></div>`).join('')}</div>` : ''}</div>
+        ${rcptMenuHTML()}</div>
       <label class="k" for="subj">${esc(t('mail_subject'))}</label><input class="field" id="subj" value="${esc(m.subject)}">
       <span class="k">${esc(t('mail_attachment'))}</span>
       <div style="display:flex;align-items:center;gap:10px"><div class="seg" role="radiogroup" aria-label="${esc(t('mail_attachment'))}">
@@ -2462,7 +2462,6 @@ function renderMail() {
     m.rcpts.splice(m.rcpts.findIndex((r) => r.name === c.dataset.fill && !r.mail), 1);
     m.typed = c.dataset.fill; m.sugg = []; again(); suggestRcpts();
   }));
-  $('#tokens').querySelectorAll('.aci').forEach((el) => el.addEventListener('mousedown', (e) => { e.preventDefault(); pickRcpt(Number(el.dataset.i)); }));
   const add = $('#addTo');
   const addTokens = () => {
     const parts = add.value.split(/[,，、;\s]+/).map((t) => t.trim().toLowerCase()).filter((t) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t));
@@ -2472,15 +2471,18 @@ function renderMail() {
     again();
     return true;
   };
-  add.addEventListener('input', () => { m.typed = add.value; m.at = 0; suggestRcpts(); });
+  // while an input method is composing (注音, 拼音) nothing is asked and nothing is redrawn: the menu comes after the word
+  add.addEventListener('input', (e) => { m.typed = add.value; m.at = 0; if (!inputMethod(e)) suggestRcpts(); });
+  add.addEventListener('compositionend', () => { m.typed = add.value; m.at = 0; suggestRcpts(); });
   add.addEventListener('keydown', (e) => {
     if (inputMethod(e)) return;
-    if (e.key === 'ArrowDown' && m.sugg.length) { e.preventDefault(); m.at = (m.at + 1) % m.sugg.length; again(); }
-    else if (e.key === 'ArrowUp' && m.sugg.length) { e.preventDefault(); m.at = (m.at + m.sugg.length - 1) % m.sugg.length; again(); }
+    if (e.key === 'ArrowDown' && m.sugg.length) { e.preventDefault(); m.at = (m.at + 1) % m.sugg.length; renderRcptMenu(); }
+    else if (e.key === 'ArrowUp' && m.sugg.length) { e.preventDefault(); m.at = (m.at + m.sugg.length - 1) % m.sugg.length; renderRcptMenu(); }
     else if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); if (m.sugg.length) pickRcpt(m.at); else addTokens(); }
-    else if (e.key === 'Escape' && m.sugg.length) { e.stopPropagation(); m.sugg = []; again(); }
+    else if (e.key === 'Escape' && m.sugg.length) { e.stopPropagation(); m.seq++; m.sugg = []; renderRcptMenu(); }
   });
   add.addEventListener('blur', () => { if (add.value.trim() && !m.sugg.length) addTokens(); });
+  wireRcptMenu();
   $('#subj').addEventListener('input', keep);
   $('#body').addEventListener('input', keep);
   $('#sheet').querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', async () => {
@@ -2503,14 +2505,15 @@ function renderMail() {
   $('#mailSend').addEventListener('click', sendMail);
 }
 
-// the people whose name or address holds what was typed, from contacts.py; an address being typed needs no menu
+// the people whose name or address holds what was typed, from contacts.py; an address being typed needs no menu.
+// Only the menu is redrawn (renderRcptMenu), never the box being typed in.
 let suggestTimer = null;
 function suggestRcpts() {
   const m = S.mail;
   clearTimeout(suggestTimer);
   const q = (m.typed || '').trim();
-  if (!q || q.includes('@')) { if (m.sugg.length) { m.sugg = []; renderMailKeepingFocus(); } return; }
-  const seq = ++m.seq;
+  const seq = ++m.seq;                              // an answer to an earlier question is dropped
+  if (!q || q.includes('@')) { if (m.sugg.length) { m.sugg = []; renderRcptMenu(); } return; }
   suggestTimer = setTimeout(async () => {
     try {
       const r = await call('suggest', { id: S.sel, q });
@@ -2518,9 +2521,29 @@ function suggestRcpts() {
       const have = new Set(m.rcpts.map((x) => x.mail));
       m.sugg = (r.people || []).filter((p) => !have.has(p.mail));
       m.at = 0;
-      renderMailKeepingFocus();
+      renderRcptMenu();
     } catch (e) { /* no menu: the address can still be typed */ }
   }, 150);
+}
+
+function rcptMenuHTML() {
+  const m = S.mail;
+  return m.sugg.length ? `<div class="ac rcpts" id="rcptAc" role="listbox">${m.sugg.map((p, i) => `<div class="aci${i === m.at ? ' on' : ''}" role="option" data-i="${i}"><span>${esc(p.name)}</span><small>${esc(p.mail)}</small><span class="src">${esc(t('rcpt_src_' + (p.src || 'mail')) || '')}</span></div>`).join('')}</div>` : '';
+}
+
+function renderRcptMenu() {
+  const box = $('#tokens');
+  if (!box) return;
+  const old = $('#rcptAc');
+  if (old) old.remove();
+  box.insertAdjacentHTML('beforeend', rcptMenuHTML());
+  wireRcptMenu();
+}
+
+function wireRcptMenu() {
+  const box = $('#tokens');
+  if (!box) return;
+  box.querySelectorAll('.aci').forEach((el) => el.addEventListener('mousedown', (e) => { e.preventDefault(); pickRcpt(Number(el.dataset.i)); }));
 }
 
 function renderMailKeepingFocus() {
@@ -2536,10 +2559,15 @@ function pickRcpt(i) {
   const p = m.sugg[i];
   if (!p) return;
   if (!m.rcpts.some((r) => r.mail === p.mail)) m.rcpts.push({ name: p.name, mail: p.mail });
-  m.typed = ''; m.sugg = []; m.at = 0;
+  m.typed = ''; m.sugg = []; m.at = 0; m.seq++;
   renderMailKeepingFocus();
   const input = $('#addTo'); if (input) input.focus();
 }
+
+// the menu goes when the user clicks somewhere else in the sheet
+document.addEventListener('mousedown', (e) => {
+  if (S.sheet === 'mail' && S.mail && S.mail.sugg.length && !e.target.closest('#tokens')) { S.mail.sugg = []; S.mail.seq++; renderRcptMenu(); }
+});
 
 async function sendMail() {
   const m = S.mail;
@@ -2552,7 +2580,9 @@ async function sendMail() {
   renderMail();
   const id = S.sel;
   try {
+    const sent_to = m.rcpts.filter((r) => r.mail).map((r) => ({ name: r.name === r.mail ? '' : r.name, mail: r.mail }));
     const r = await call('send', { id, to: mailTo(), subject: m.subject, body: m.body, format: m.fmt });
+    call('contacts', { id, people: sent_to }).catch(() => {});   // remembered for the next mail's menu (寄過)
     if (S.sel !== id) return;
     S.d.sent = r.sent;
     closeSheet();

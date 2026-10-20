@@ -43,6 +43,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 from google_setup import CONFIG, settings  # noqa: E402  (standard library only)
 
 MODEL = os.environ.get('MINUTES_WHISPER_MODEL') or 'mlx-community/whisper-large-v3-turbo'
+# Qwen3-ASR (Alibaba, Apache-2.0), the recogniser for Chinese meetings when "speech_model" in settings.json is
+# "qwen3-asr": on the 2026-10-20 bench it heard the far voices Whisper turned into nonsense and spelled the
+# glossary's names more often (docs/bench/README.md). Through the mlx-qwen3-asr package; its word times come
+# from Qwen's aligner model, downloaded with it. Whisper stays for every other language and as the fallback.
+QWEN = os.environ.get('MINUTES_QWEN_MODEL') or 'moona3k/mlx-qwen3-asr-1.7b-8bit'
+QWEN_ALIGNER = 'Qwen/Qwen3-ForcedAligner-0.6B'
+SPEECH_MODELS = ('whisper', 'qwen3-asr')
+SENTENCE_END = '。！？；\n'          # where a Qwen transcript is cut into lines
 SKILL_DIR = Path(__file__).resolve().parent.parent
 RATE = 16000
 HINT_HEAD = '以下是台灣公司的會議錄音，用繁體中文記錄。'
@@ -130,6 +138,87 @@ def pcm_frames(blob: bytes) -> bytes:
 def meeting_setting() -> str:
     v = (os.environ.get('MINUTES_MEETING_LANG') or str(settings().get('meeting_language') or 'auto')).strip().lower()
     return v if v in ('auto', 'zh', 'en') else 'auto'
+
+
+def speech_model() -> str:
+    """"speech_model" in settings.json (MINUTES_SPEECH_MODEL overrides): whisper unless the user chose qwen3-asr."""
+    v = (os.environ.get('MINUTES_SPEECH_MODEL') or str(settings().get('speech_model') or 'whisper')).strip().lower()
+    return v if v in SPEECH_MODELS else 'whisper'
+
+
+def hub_dir(repo: str) -> Path:
+    """Where huggingface_hub keeps a model's files on this Mac."""
+    base = os.environ.get('HF_HUB_CACHE') or os.path.join(os.environ.get('HF_HOME') or '~/.cache/huggingface', 'hub')
+    return Path(base).expanduser() / ('models--' + repo.replace('/', '--'))
+
+
+def hub_has(repo: str) -> bool:
+    """Whether a model's weights are downloaded (its snapshot links to safetensors files that exist)."""
+    return any(w.exists() for w in hub_dir(repo).glob('snapshots/*/*.safetensors'))
+
+
+def qwen_ready() -> bool:
+    """The Qwen3-ASR package is installed and its two models are downloaded, so it can run offline."""
+    try:
+        import mlx_qwen3_asr  # noqa: F401
+    except ImportError:
+        return False
+    return hub_has(QWEN) and hub_has(QWEN_ALIGNER)
+
+
+def qwen_lines(text: str, pieces: list, offset: float) -> list[list]:
+    """Qwen's transcript as sentence segments [start, end, text] in recording time. `text` is the punctuated
+    transcript, `pieces` the aligner's words (dicts or objects with text, start, end, in piece time, without
+    punctuation). Each sentence takes the times of the words that spell it."""
+    get = lambda p, k: p.get(k) if isinstance(p, dict) else getattr(p, k, None)  # noqa: E731
+    words = [(str(get(p, 'text') or '').replace(' ', ''), float(get(p, 'start') or 0), float(get(p, 'end') or 0))
+             for p in pieces]
+    words = [w for w in words if w[0]]
+    out = []
+    at = 0                                           # next word to consume
+    sentence = ''
+    for i, ch in enumerate(text):
+        sentence += ch
+        if ch in SENTENCE_END or i == len(text) - 1:
+            body = ''.join(c for c in sentence if not c.isspace() and c not in SENTENCE_END + '，、,')
+            need = len(body)
+            first = at
+            taken = 0
+            while at < len(words) and taken < need:
+                taken += len(words[at][0])
+                at += 1
+            if sentence.strip():
+                start = words[first][1] if first < len(words) else (words[-1][2] if words else 0.0)
+                end = words[at - 1][2] if at > first else start
+                out.append([round(start + offset, 2), round(end + offset, 2), sentence.strip()])
+            sentence = ''
+    return out
+
+
+def qwen_range(audio, offset: float, context: str, transcribe=None) -> list[list]:
+    """Qwen3-ASR over `audio` (16 kHz floats that begin `offset` seconds into the recording), the glossary as
+    its context: sentence segments in recording time, Simplified Chinese as the model writes it (assemble()
+    converts)."""
+    if transcribe is None:
+        from mlx_qwen3_asr import transcribe
+    result = transcribe((audio, RATE), model=QWEN, language='Chinese', return_timestamps=True, context=context)
+    text = result.text if hasattr(result, 'text') else result.get('text', '')
+    segs = result.segments if hasattr(result, 'segments') else result.get('segments', [])
+    return qwen_lines(text or '', segs or [], offset)
+
+
+def recogniser(lang: str, whisper=None):
+    """(name, run) for a meeting in `lang`: run(audio, offset) -> segments. Qwen3-ASR for a Chinese meeting
+    when the user chose it and it is ready; Whisper otherwise, prompted as before (`whisper` is mlx-whisper's
+    transcribe, or a stand-in)."""
+    if lang == 'zh' and speech_model() == 'qwen3-asr' and qwen_ready():
+        context = hint()
+        return 'qwen3-asr', lambda audio, offset: qwen_range(audio, offset, context)
+    if whisper is None:
+        import mlx_whisper
+        whisper = mlx_whisper.transcribe
+    prompt = prompt_for(lang)
+    return 'whisper', lambda audio, offset: transcribe_range(audio, lang, prompt, offset, whisper)
 
 
 def detect(audio, transcribe) -> str:
@@ -301,15 +390,17 @@ def main():
     segments = [seg for piece in pieces for seg in piece['segments']]
     from_s = pieces[-1]['end'] if pieces else 0.0
     rest = audio[int(from_s * RATE):]
+    name, run = recogniser(lang, mlx_whisper.transcribe)
     if not pieces or len(rest) >= RATE // 2:              # half a second: less than that is no speech
-        segments += transcribe_range(rest, lang, prompt_for(lang), from_s, mlx_whisper.transcribe)
+        segments += run(rest, from_s)
     lines, spans = assemble(segments, lang, OpenCC('s2twp').convert)
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-    # each line's start and end in seconds, for telling the voices apart (speakers.py)
-    out.with_suffix('.json').write_text(json.dumps({'lines': spans, 'language': lang}), encoding='utf-8')
+    # each line's start and end in seconds, for telling the voices apart (speakers.py); which recogniser wrote it
+    out.with_suffix('.json').write_text(json.dumps({'lines': spans, 'language': lang, 'recogniser': name}),
+                                        encoding='utf-8')
     reused = f', {len(pieces)} pieces reused ({stamp(from_s)[1:-1]})' if pieces else ''
     waiting = f', waited {waited:.0f}s' if waited >= 1 else ''
-    print(f'TRANSCRIPT {out} ({len(lines)} lines, language {lang}, audio {stamp(total)[1:-1]}, '
+    print(f'TRANSCRIPT {out} ({len(lines)} lines, language {lang}, {name}, audio {stamp(total)[1:-1]}, '
           f'took {time.time() - began:.0f}s{reused}{waiting})')
 
 

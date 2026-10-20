@@ -88,12 +88,17 @@ class Runner:
     (the tests put stand-ins in); `sleep` and `parent_alive` likewise."""
 
     def __init__(self, job: Path, transcribe, detect=tr.detect, sleep=time.sleep, parent_alive=None, log=None,
-                 piece: float = PIECE, search: float = SEARCH, poll: float = POLL, language: str = 'auto'):
+                 piece: float = PIECE, search: float = SEARCH, poll: float = POLL, language: str = 'auto',
+                 choose=None):
         self.job = job
         self.audio = job / '錄音.caf'
         self.folder = job / PIECES
         self.transcribe = transcribe
         self.detect = detect
+        # which recogniser writes the pieces, decided once the language is known: tr.recogniser (Qwen3-ASR for a
+        # Chinese meeting when chosen and ready, else Whisper); the tests pass a stand-in built on `transcribe`
+        self.choose = choose or (lambda lang: tr.recogniser(lang, transcribe))
+        self.name, self.recognise = '', None
         self.sleep = sleep
         self.parent_alive = parent_alive or (lambda: os.getppid() != 1)
         self.log = log or (lambda line: None)
@@ -167,14 +172,16 @@ class Runner:
             piece = audio[:at]
             if not self.language:
                 self.language = self.detect(piece, self.transcribe)
-            segments = tr.transcribe_range(piece, self.language, tr.prompt_for(self.language), self.cut, self.transcribe)
+            if self.recognise is None:
+                self.name, self.recognise = self.choose(self.language)
+            segments = self.recognise(piece, self.cut)
             end = round(self.cut + at / RATE, 2)
             self.number += 1
             write_json(self.folder / f'{self.number:04d}.json',
                        {'start': round(self.cut, 2), 'end': end, 'language': self.language, 'segments': segments,
-                        'took': round(time.time() - began, 1), 'cut': 'quiet'})
+                        'recogniser': self.name, 'took': round(time.time() - began, 1), 'cut': 'quiet'})
             self.log(f'piece {self.number}: {tr.stamp(self.cut)[1:-1]}-{tr.stamp(end)[1:-1]}, {len(segments)} segments, '
-                     f'{time.time() - began:.0f}s')
+                     f'{self.name}, {time.time() - began:.0f}s')
             self.cut = end
             self.done += 1
         finally:

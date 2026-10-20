@@ -2311,11 +2311,69 @@ class CalendarPick(unittest.TestCase):
                                   {'email': 'amy@example.com', 'responseStatus': 'accepted'}]
         return {'ev': event, 'primary': primary, 'cal': 'vinston@example.com' if primary else '範例公司'}
 
-    def pick(self, found, start='15:31', end='16:15'):
+    def pick(self, found, start='15:31', end='16:15', me=()):
         import workspace
         day = '2026-10-07'
         return workspace.pick_meeting(found, datetime.fromisoformat(f'{day}T{start}:00+08:00'),
-                                      datetime.fromisoformat(f'{day}T{end}:00+08:00'))
+                                      datetime.fromisoformat(f'{day}T{end}:00+08:00'), me=list(me))
+
+    # an ERP room booking: nobody invited, the people written in the event's note instead
+    NOTE = ('開始時間: 2026-10-07 15:00\n結束時間: 2026-10-07 16:00\n主持人: 黃建國(Vin)\n參與部門: 數據經濟發展課\n'
+            '會議連結: https://erp.example.com/meetingRoom/1\n參與人員: 黃建國(Vin)')
+
+    def booking(self, note, title='(ITRI-427會議室)數據課週會'):
+        f = self.ev(title, '15:00', '16:00', primary=False, me=None)
+        f['ev']['description'] = note
+        return f
+
+    def test_the_note_of_a_booking_is_read_whichever_wording_it_uses(self):
+        import workspace
+        self.assertEqual(workspace.describe({'description': self.NOTE}),
+                         {'host': '黃建國(Vin)', 'departments': ['數據經濟發展課'], 'participants': ['黃建國(Vin)']})
+        self.assertEqual(workspace.describe({'description': 'Host: Amy Chen\nDepartments: Data, Marketing\nAttendees: Amy Chen; Kai Lee'}),
+                         {'host': 'Amy Chen', 'departments': ['Data', 'Marketing'], 'participants': ['Amy Chen', 'Kai Lee']})
+        self.assertEqual(workspace.describe({'description': '與會人員：王小明、Amy\n主席：王小明\n與會部門：行銷部／數據部'}),
+                         {'host': '王小明', 'departments': ['行銷部', '數據部'], 'participants': ['王小明', 'Amy']})
+        empty = {'host': '', 'departments': [], 'participants': []}
+        self.assertEqual(workspace.describe({'description': '參與人員:\n主持人：\n參與部門:  '}), empty)
+        self.assertEqual(workspace.describe({}), empty)
+
+    def test_the_users_name_is_matched_by_its_parts_not_inside_another_name(self):
+        import workspace
+        me = workspace.me_tokens('黃建國 Vin')
+        self.assertEqual(me, ['黃建國', 'Vin'])
+        self.assertTrue(workspace.names_me('黃建國(Vin)', me))
+        self.assertTrue(workspace.names_me('vin kao', me))
+        self.assertFalse(workspace.names_me('Kevin Wu', me))
+        self.assertFalse(workspace.names_me('', me))
+        self.assertEqual(workspace.me_tokens('Vinston Kao'), ['Vinston', 'Kao'])
+        self.assertEqual(workspace.me_tokens(''), [])
+
+    def test_a_booking_whose_note_names_the_user_is_the_meeting(self):
+        got = self.pick([self.booking(self.NOTE), self.booking('主持人: 王小明\n參與人員: 王小明、Amy', title='(會議室D)ISMS 專案會議')],
+                        me=['黃建國', 'Vin'])
+        self.assertEqual(got['match']['ev']['summary'], '(ITRI-427會議室)數據課週會')
+        self.assertEqual([o['ev']['summary'] for o in got['others']], ['(會議室D)ISMS 專案會議'])
+
+    def test_a_booking_whose_note_names_only_others_stays_a_maybe(self):
+        got = self.pick([self.booking('主持人: 王小明\n參與部門: 數據經濟發展課\n參與人員: 王小明、Amy')], me=['黃建國', 'Vin'])
+        self.assertIsNone(got['match'])
+        self.assertEqual(len(got['others']), 1)
+        got = self.pick([self.booking('主持人:\n參與人員:')], me=['黃建國', 'Vin'])     # labels with nothing after them
+        self.assertIsNone(got['match'])
+
+    def test_the_note_lines_are_shown_for_the_agent(self):
+        import io
+        import contextlib
+        import workspace
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            workspace.show(self.booking(self.NOTE)['ev'], '範例公司')
+        lines = out.getvalue().splitlines()
+        self.assertIn('   主持人: 黃建國(Vin)', lines)
+        self.assertIn('   參與部門: 數據經濟發展課', lines)
+        self.assertIn('   參與人員: 黃建國(Vin)', lines)
+        self.assertIn('   連結: https://erp.example.com/meetingRoom/1', lines)
 
     def test_a_room_booking_the_user_is_not_on_is_never_the_meeting(self):
         got = self.pick([self.ev('(會議室A)FunTOUR月會', '15:30', '17:00', primary=False, me=None),

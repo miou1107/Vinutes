@@ -211,9 +211,60 @@ def core_title(title: str) -> str:
     return re.sub(r'^\s*[(（][^)）]*[)）]\s*', '', title or '').strip()
 
 
-def pick_meeting(found: list[dict], start: datetime, end: datetime) -> dict:
+# A room booking made in a company system (an ERP) invites nobody on Google: it writes the host, the departments
+# and the participants into the event's note instead. These are the labels such notes use, in either language.
+NOTE_LABELS = {'host': r'主持人|主席|召集人|host|organizer|chair',
+               'departments': r'參與部門|與會部門|部門|departments?|teams?',
+               'participants': r'參與人員|與會人員|出席人員|參加人員|attendees|participants'}
+NOTE_LINE = re.compile(r'\s*(?P<label>[^:：]{1,20}?)\s*[:：]\s*(?P<value>.*?)\s*$')
+NOTE_SPLIT = re.compile(r'[、,，;；/／]+')
+
+
+def describe(ev: dict) -> dict:
+    """What the event's note says about who is in the meeting: {'host': name, 'departments': [...],
+    'participants': [...]}; empty where the note says nothing."""
+    import html as html_
+    found = {'host': '', 'departments': [], 'participants': []}
+    text = re.sub(r'<br\s*/?>|</p>|</div>', '\n', ev.get('description') or '', flags=re.I)
+    text = html_.unescape(re.sub(r'<[^>]+>', '', text))
+    for line in text.splitlines():
+        m = NOTE_LINE.match(line)
+        if not m:
+            continue
+        key = next((k for k, pat in NOTE_LABELS.items() if re.fullmatch(pat, m.group('label'), re.I)), None)
+        if not key:
+            continue
+        values = [v.strip() for v in NOTE_SPLIT.split(m.group('value')) if v.strip()]
+        if key == 'host':
+            found['host'] = found['host'] or (values[0] if values else '')
+        else:
+            found[key] += [v for v in values if v not in found[key]]
+    return found
+
+
+def me_tokens(name: str) -> list[str]:
+    """The parts of the user's own name a note may use: 黃建國 Vin -> 黃建國, Vin. One Latin letter or two
+    would match inside other names, so a Latin part needs three letters, a Chinese one two characters."""
+    parts = [p for p in re.split(r'[\s()（）,，、/／]+', name or '') if p]
+    return [p for p in parts if len(p) >= (3 if re.fullmatch(r'[A-Za-z.\'-]+', p) else 2)]
+
+
+def names_me(text: str, me: list[str]) -> bool:
+    """Whether the note's text names the user: a Latin part as a whole word (Vin, not Kevin), a Chinese part anywhere."""
+    for tok in me:
+        if re.fullmatch(r'[A-Za-z.\'-]+', tok):
+            if re.search(r'(?<![A-Za-z])' + re.escape(tok) + r'(?![A-Za-z])', text or '', re.I):
+                return True
+        elif tok in (text or ''):
+            return True
+    return False
+
+
+def pick_meeting(found: list[dict], start: datetime, end: datetime, me: list[str] = ()) -> dict:
     """found: {'ev', 'primary', 'cal'} for every timed event of the day on every calendar.
-    match: the user's own event overlapping the recording most (at least MIN_OVERLAP), or None.
+    match: the user's own event overlapping the recording most (at least MIN_OVERLAP), or None. An event is the
+    user's when it is on their own calendar and not declined, or when its note (describe) names them as host or
+    participant, `me` being the parts of their name (me_tokens).
     others: events on other calendars overlapping the recording, most overlap first: only maybes.
     earlier: the user's own events that ended before the recording began, latest first."""
     seen, mine = {}, set()
@@ -225,7 +276,9 @@ def pick_meeting(found: list[dict], start: datetime, end: datetime) -> dict:
         if uid in seen:
             continue
         seen[uid] = f
-        if f['primary'] and not declined(ev):
+        note = describe(ev) if me else {'host': '', 'participants': []}
+        named = any(names_me(x, me) for x in [note['host'], *note['participants']])
+        if (f['primary'] or named) and not declined(ev):
             mine.add(uid)
 
     def overlap(f):
@@ -301,7 +354,7 @@ def meeting(start_iso: str, end_iso: str):
     cals = calendars()
     found = [{'ev': ev, 'primary': bool(c.get('primary')), 'cal': c.get('summary', '')}
              for c in cals for ev in listed(c, day, max(day + timedelta(days=1), end + timedelta(hours=1)))]
-    got = pick_meeting(found, start, end)
+    got = pick_meeting(found, start, end, me=me_tokens(SENDER_NAME))
     match = got['match']
     if match:
         print('== 這場會議（你在與會名單上、跟錄音時間重疊最多的那一場）')
@@ -330,9 +383,12 @@ def meeting(start_iso: str, end_iso: str):
     # who was invited (an ERP room booking puts its invitees here too): the meeting's people start from them
     guests = [{'name': flat(a.get('displayName'), 60), 'email': flat(a.get('email'), 100), 'self': bool(a.get('self'))}
               for a in ev.get('attendees', []) if not a.get('resource') and a.get('responseStatus') != 'declined']
+    note = describe(ev)                               # the host, departments and participants its note wrote
     print('MATCH ' + json.dumps({'title': ev.get('summary', ''), 'series': core_title(ev.get('summary', '')),
                                  'recurring': ev.get('recurringEventId', ''), 'start': ev.get('start', {}).get('dateTime', ''),
-                                 'guests': guests}, ensure_ascii=False))
+                                 'guests': guests, 'host': flat(note['host'], 60),
+                                 'departments': [flat(d, 60) for d in note['departments']],
+                                 'participants': [flat(p, 60) for p in note['participants']]}, ensure_ascii=False))
 
 
 def flat(text, most: int = 200) -> str:
@@ -346,6 +402,13 @@ def show(ev, cal_name):
     print(f'== {s[11:16] or s}–{e[11:16] or e} {flat(ev.get("summary") or "(無標題)")}' + (f'  [{flat(cal_name, 60)}]' if cal_name else ''))
     print('   地點:', flat(ev.get('location')))
     print('   主辦:', flat(ev.get('organizer', {}).get('email'), 100))
+    note = describe(ev)                               # what a room booking wrote instead of inviting people
+    if note['host']:
+        print('   主持人:', flat(note['host'], 60))
+    if note['departments']:
+        print('   參與部門:', flat('、'.join(note['departments'])))
+    if note['participants']:
+        print('   參與人員:', flat('、'.join(note['participants']), 400))
     for a in ev.get('attendees', []):
         if not a.get('resource'):
             print('   與會:', flat(a.get('displayName'), 60), flat(a.get('email'), 100), flat(a.get('responseStatus'), 20))

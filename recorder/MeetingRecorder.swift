@@ -380,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var tick: Timer?
     var poll: Timer?
     var awake: NSObjectProtocol?
+    let live = LiveTranscriber()         // transcribes the recording in pieces while it runs (issue 1)
     var notificationsAllowed = false
     var hotKeys: [EventHotKeyRef?] = []
     var manager: ManagerWindow?
@@ -700,6 +701,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             bar.show()
             refreshIcon()
             appLog("recording started: \(dir.lastPathComponent)")
+            if let cfg = recorderConfig() { live.start(job: dir, python: cfg.python, skill: cfg.skill, language: uiLanguage()) }
+            else { appLog("no recorder.json: the recording is transcribed after it stops") }
             checkAIForRecording()
         } catch {
             appLog("recording could not start: \(error.localizedDescription)")
@@ -1135,6 +1138,37 @@ final class CaptionFeed {
             p.terminate()
         }
         process = nil
+    }
+}
+
+/// Runs scripts/live_transcribe.py beside the recording: it transcribes the meeting in pieces of about five minutes
+/// while the file grows, so after Stop only the last piece is left (issue 1). It is not stopped from here: it ends by
+/// itself once job.json has the end time, and the write-up (transcribe.py --pieces) waits for the piece it may still
+/// be on. Its own log lines go to scripts.log and the meeting's log.txt.
+final class LiveTranscriber {
+    private var process: Process?
+
+    func start(job: URL, python: String, skill: String, language: String) {
+        if let p = process, p.isRunning { appLog("live transcriber \(p.processIdentifier) still running, stopping it"); p.terminate() }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-lc", "exec \"$0\" \"$@\"", python, (skill as NSString).appendingPathComponent("scripts/live_transcribe.py"), job.path]
+        var env = ProcessInfo.processInfo.environment
+        env["VINUTES_LANG"] = language
+        p.environment = env
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { done in
+            let how = done.terminationReason == .uncaughtSignal ? "signal \(done.terminationStatus)" : "exit \(done.terminationStatus)"
+            appLog("live transcriber \(done.processIdentifier) ended: \(how)")
+        }
+        do {
+            try p.run()
+            process = p
+            appLog("live transcriber \(p.processIdentifier) started: \(job.lastPathComponent)")
+        } catch {
+            appLog("live transcriber did not start: \(error.localizedDescription)")
+        }
     }
 }
 

@@ -1164,8 +1164,41 @@ def png(path: Path, w: int = 8, h: int = 6) -> Path:
     return path
 
 
+class AttachmentsSection(unittest.TestCase):
+    """「八、參考附件」 is in every set of minutes, 無 when nothing was attached (Vin 2026-10-20); the first attachment
+    takes the place of 無, and old minutes that still say 補充資訊 keep working."""
+
+    def test_the_section_is_named_and_the_first_attachment_replaces_none(self):
+        import attachments
+        self.assertEqual(attachments.SECTION, '## 八、參考附件')
+        self.assertEqual(attachments.SECTIONS['en'], '## 8. Attachments')
+        md = MINUTES + '\n## 八、參考附件\n\n無\n'
+        out = attachments.add_lines(md, ['- Amy 的報表：[a.xlsx](https://drive.google.com/file/d/1/view)'])
+        self.assertTrue(out.endswith('## 八、參考附件\n\n- Amy 的報表：[a.xlsx](https://drive.google.com/file/d/1/view)\n'))
+        self.assertNotIn('\n無\n', out)
+        out = attachments.add_lines(MINUTES + '\n## 8. Attachments\n\nNone\n', ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 8. Attachments\n\n- [a.pdf](https://x/a)\n'))
+        self.assertEqual(attachments.listed(md), [])                     # 無 is not an attachment
+        # 無 beside a link stays; a 無 in another section is not the attachments' 無
+        kept = attachments.add_lines(MINUTES + '\n## 八、參考附件\n\n無\n- [b.pdf](https://x/b)\n', ['- [a.pdf](https://x/a)'])
+        self.assertIn('無\n- [b.pdf](https://x/b)\n- [a.pdf](https://x/a)\n', kept)
+        other = MINUTES.replace('## 二、討論摘要\n\n', '## 二、討論摘要\n\n無\n\n') + '\n## 八、參考附件\n\n無\n\n## 九、備註\n\n備註一\n'
+        out = attachments.add_lines(other, ['- [a.pdf](https://x/a)'])
+        self.assertIn('## 二、討論摘要\n\n無\n\n', out)
+        self.assertIn('## 八、參考附件\n\n- [a.pdf](https://x/a)\n\n## 九、備註\n', out)
+
+    def test_minutes_without_the_section_get_it_and_old_minutes_keep_their_heading(self):
+        import attachments
+        out = attachments.add_lines(MINUTES, ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 八、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        old = MINUTES + '\n## 八、補充資訊\n\n- [b.pdf](https://x/b)\n'
+        out = attachments.add_lines(old, ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 八、補充資訊\n\n- [b.pdf](https://x/b)\n- [a.pdf](https://x/a)\n'))
+        self.assertEqual(out.count('## 八、'), 1)
+
+
 class Attach(Flows):
-    """Files, links and pictures from the box under the Doc become lines of 「八、補充資訊」."""
+    """Files, links and pictures from the box under the Doc become lines of 「八、參考附件」."""
 
     def setUp(self):
         super().setUp()
@@ -1207,7 +1240,7 @@ class Attach(Flows):
                         {'kind': 'image', 'path': str(self.files / '主視覺.png')},
                         {'kind': 'link', 'url': 'https://example.com/post'})
         md = self.md_path.read_text(encoding='utf-8')
-        self.assertIn('## 八、補充資訊', md)
+        self.assertIn('## 八、參考附件', md)
         self.assertIn('- Amy 提供的資料：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)', md)
         self.assertIn('- Amy 提供的資料：[https://example.com/post](https://example.com/post)', md)
         self.assertIn('![主視覺.png](minutes_附件/主視覺.png)', md)            # the Word file has the picture too
@@ -1221,7 +1254,7 @@ class Attach(Flows):
         self.assertIn('own_until', self.state())                          # the picture is not a colleague's edit
         self.assertIn('9月流量報表.xlsx', r['reply'])
         self.assertEqual(r['warning'], '')
-        self.assertIn('補充資訊', (self.job_dir / '操作紀錄.jsonl').read_text(encoding='utf-8'))
+        self.assertIn('參考附件', (self.job_dir / '操作紀錄.jsonl').read_text(encoding='utf-8'))
         record = json.loads(sidecar.read_text(encoding='utf-8'))      # the files the mail opens to its recipients
         self.assertEqual((record['attach_files'], record['mails']), (['id1', 'id2'], []))
 
@@ -1229,15 +1262,15 @@ class Attach(Flows):
         self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx')})
         self.attach('# Kai 會後補充', {'kind': 'link', 'url': 'https://example.com/a'})
         md = self.md_path.read_text(encoding='utf-8')
-        tail = md.split('## 八、補充資訊', 1)[1].strip().splitlines()
+        tail = md.split('## 八、參考附件', 1)[1].strip().splitlines()
         self.assertEqual(tail, ['- [9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- \\# Kai 會後補充：[https://example.com/a](https://example.com/a)'])
-        self.assertEqual(md.count('## 八、補充資訊'), 1)
+        self.assertEqual(md.count('## 八、參考附件'), 1)
 
     def test_each_item_is_led_by_its_own_note_and_the_row_above_the_minutes_lists_them(self):
         r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Pitt 要的\n各通路業績 '},
                         {'kind': 'link', 'url': 'https://example.com/post', 'note': ''})
-        tail = self.md_path.read_text(encoding='utf-8').split('## 八、補充資訊', 1)[1].strip().splitlines()
+        tail = self.md_path.read_text(encoding='utf-8').split('## 八、參考附件', 1)[1].strip().splitlines()
         self.assertEqual(tail, ['- Pitt 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- [https://example.com/post](https://example.com/post)'])
         self.assertEqual(r['attachments'], [
@@ -1246,7 +1279,7 @@ class Attach(Flows):
             {'name': 'https://example.com/post', 'link': 'https://example.com/post', 'note': '', 'kind': 'link'}])
 
     def test_the_list_reads_lines_typed_in_the_doc_and_stops_at_the_next_section(self):
-        md = (MINUTES + '\n## 八、補充資訊\n\n- Kai 的簡報：[a\\]b.pdf](https://drive.google.com/file/d/X/view)\n'
+        md = (MINUTES + '\n## 八、參考附件\n\n- Kai 的簡報：[a\\]b.pdf](https://drive.google.com/file/d/X/view)\n'
               '- 沒有連結的一行\n![主視覺.png](m_附件/主視覺.png)\n- [主視覺.png](https://drive.google.com/file/d/Y/view)\n'
               '\n## 九、其他\n\n- [不算](https://example.com)\n')
         self.assertEqual([(a['name'], a['note'], a['kind']) for a in self.at.listed(md)],
@@ -1255,7 +1288,7 @@ class Attach(Flows):
 
 
     def test_lines_go_into_an_existing_section_eight_before_whatever_follows_it(self):
-        md = MINUTES.replace('## 四、行動方案', '## 八、補充資訊\n\n- 舊的一行\n\n## 四、行動方案')
+        md = MINUTES.replace('## 四、行動方案', '## 八、參考附件\n\n- 舊的一行\n\n## 四、行動方案')
         out = self.at.add_lines(md, ['- 新的一行'])
         self.assertIn('- 舊的一行\n- 新的一行\n\n## 四、行動方案', out)
         self.assertEqual(self.at.lines_for([{'kind': 'file', 'name': 'a]b.pdf', 'link': 'https://x/(1)'}], ''),
@@ -1269,7 +1302,7 @@ class Attach(Flows):
         self.assertIn('| Amy | 先找兩位', md)
         self.assertIn('[9月流量報表.xlsx]', self.google.md)
         self.assertNotIn('刪掉一段', (self.job_dir / '操作紀錄.jsonl').read_text(encoding='utf-8'))
-        self.assertIn('補充資訊', r['reply'])
+        self.assertIn('參考附件', r['reply'])
 
     def test_lines_a_colleague_crowds_out_are_reported_not_announced(self):
         def push(doc_id, base, new):                       # the Doc refuses the new lines: both neighbours changed
@@ -1287,11 +1320,11 @@ class Attach(Flows):
     def test_new_lines_at_the_end_still_go_in_when_a_colleague_changed_the_last_paragraph(self):
         base = MINUTES + '\n## 七、其他建議\n\n建議下次再談。\n'
         doc = fake_doc(base.replace('建議下次再談。', '建議下週再談。'))       # the colleague's edit, not synced yet
-        new = base + '\n## 八、補充資訊\n\n- [a.pdf](https://x/a)\n'
+        new = base + '\n## 八、參考附件\n\n- [a.pdf](https://x/a)\n'
         plan = ds.plan_push(doc, base, new)
         self.assertEqual(plan.conflicts, [])
         after = docsim.after_push(doc, plan)
-        self.assertEqual(after[-3:], [('p', '建議下週再談。'), ('h2', '八、補充資訊'), ('li', 'a.pdf')])
+        self.assertEqual(after[-3:], [('p', '建議下週再談。'), ('h2', '八、參考附件'), ('li', 'a.pdf')])
 
     def test_a_picture_waits_while_the_doc_has_moved_on_and_goes_in_with_the_next_refresh(self):
         doc = self.google.doc()
@@ -1380,7 +1413,7 @@ class Attach(Flows):
 
     def test_a_line_added_after_a_picture_goes_under_the_picture_not_between_it_and_its_line(self):
         line_a = '- A：[p.png](https://drive.google.com/file/d/P1/view)'
-        doc = fake_doc(MINUTES + f'\n## 八、補充資訊\n\n{line_a}\n\nＰ\n')
+        doc = fake_doc(MINUTES + f'\n## 八、參考附件\n\n{line_a}\n\nＰ\n')
         pic = next(el for el in doc['body']['content']           # the picture itself, as Google Docs has it
                    if el.get('paragraph', {}).get('elements', [{}])[0].get('textRun', {}).get('content') == 'Ｐ')
         first = pic['paragraph']['elements'][0]
@@ -2165,8 +2198,8 @@ class Languages(unittest.TestCase):
                              'Deck from Amy', 'en')
         self.assertEqual(lines, ['- Deck from Amy: [Slides](https://example.com/slides)'])
         out = at.add_lines(md, lines)
-        self.assertIn('## 8. Supporting Materials\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
-        self.assertNotIn('補充資訊', out)
+        self.assertIn('## 8. Attachments\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
+        self.assertNotIn('參考附件', out)
         self.assertIn('：[Slides]', at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://e.com'}],
                                                 'Amy 的簡報', 'zh-TW')[0])
 
@@ -2436,6 +2469,137 @@ class Departments(unittest.TestCase):
         self.assertEqual(self.outs[-1]['calendar'], {**self.EMPTY, 'host': '黃建國(Vin)'})
         self.assertEqual(minutes_app.calendar_payload(self.job('20261021-150000', {})), self.EMPTY)
         self.assertEqual(minutes_app.roster(['數據經濟發展課']), ([], ''))
+
+
+class Contacts(unittest.TestCase):
+    """contacts.py: the addresses Vinutes knows (directory, calendar invitees, people mailed before), a name to an
+    address, and the people offered while typing a recipient (prototypes/mail-recipients.html, Vin 2026-10-20)."""
+
+    def setUp(self):
+        import contacts
+        self.c = contacts
+        contacts.CONTACTS.unlink(missing_ok=True)
+        contacts.learn('evanhsu@example.com', '許志明 Evan', 'directory')
+        contacts.learn('alan.wang@example.com', '李大同 Alan', 'directory')
+        contacts.learn('phyllis@example.com', '周美玲 Phyllis', 'directory')
+        contacts.learn('chen@partner.example.com', '陳小姐', 'mail')
+
+    def tearDown(self):
+        self.c.CONTACTS.unlink(missing_ok=True)
+
+    def test_a_name_finds_its_address_whichever_part_of_the_name_is_used(self):
+        self.assertEqual(self.c.address_of('Evan'), 'evanhsu@example.com')
+        self.assertEqual(self.c.address_of('許志明'), 'evanhsu@example.com')
+        self.assertEqual(self.c.address_of('許志明(Evan)'), 'evanhsu@example.com')
+        self.assertEqual(self.c.address_of('alan'), 'alan.wang@example.com')
+        self.assertEqual(self.c.address_of('Kai'), '')                        # nobody of that name
+        self.assertEqual(self.c.address_of('林'), '')                          # one character matches too many
+        self.assertEqual(self.c.address_of('Amy（悠遊卡）'), '')               # an explanation beside a name is not an alias
+        self.c.learn('amy@example.com', 'Amy Chen', 'directory')
+        self.assertEqual(self.c.address_of('Amy（悠遊卡）'), '')               # still not the company's Amy
+        self.assertEqual(self.c.address_of('Amy Chen'), 'amy@example.com')
+        self.assertEqual(self.c.address_of('Amy'), 'amy@example.com')
+        self.assertEqual(self.c.address_of('陳小姐（台灣 PASS）'), '')
+        self.c.learn('evan.lee@example.com', 'Evan Lee', 'calendar')
+        self.assertEqual(self.c.address_of('Evan'), '')                        # two Erics: the user picks
+
+    def test_typing_offers_people_by_name_or_address_and_not_those_already_added(self):
+        self.assertEqual([p['mail'] for p in self.c.suggest('ph')], ['phyllis@example.com'])
+        self.assertEqual([p['mail'] for p in self.c.suggest('許')], ['evanhsu@example.com'])
+        self.assertEqual([p['mail'] for p in self.c.suggest('example.com', exclude=['phyllis@example.com'])],
+                         ['alan.wang@example.com', 'chen@partner.example.com', 'evanhsu@example.com'])
+        self.assertEqual(self.c.suggest('陳')[0], {'name': '陳小姐', 'mail': 'chen@partner.example.com', 'src': 'mail'})
+        self.assertEqual(self.c.suggest(''), [])
+
+    def test_learning_again_keeps_the_directorys_name_and_a_mail_remembers_new_people(self):
+        self.c.learn('evanhsu@example.com', 'Evan Hsu the Great', 'calendar')     # longer, but the directory's name wins
+        self.assertEqual(self.c.suggest('evan')[0]['name'], '許志明 Evan')
+        self.assertEqual(self.c.suggest('evan')[0]['src'], 'directory')
+        self.c.learn('new@example.com', '', 'mail')                            # an address without a name
+        self.assertEqual(self.c.suggest('new')[0]['name'], 'new@example.com')
+        self.c.learn_many([('guest@partner.example.com', '王小姐', 'mail'), ('bad address', 'x', 'mail')])
+        self.assertIn({'name': '王小姐', 'mail': 'guest@partner.example.com', 'src': 'mail'}, self.c.suggest('王'))
+        self.assertEqual(self.c.suggest('e')[0]['mail'], 'evanhsu@example.com')   # a name part starting with it comes first
+
+
+MINUTES_WITH_PURPOSE = MINUTES.replace('## 二、討論摘要', '## 二、會議目的\n\n確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n## 三、討論摘要')
+
+
+class MailDefaults(Flows):
+    """What the mail sheet opens with: the meeting's people as recipients with their addresses, who has none, and
+    a body with the meeting's purpose and highlights (prototypes/mail-recipients.html, Vin 2026-10-20)."""
+
+    def setUp(self):
+        super().setUp()
+        import contacts
+        self.c = contacts
+        contacts.CONTACTS.unlink(missing_ok=True)
+        self.saved_refresh = contacts.refresh_directory
+        contacts.refresh_directory = lambda: None
+        contacts.learn('kai@example.com', '李國豪 Kai', 'directory')
+        (self.job_dir / '行事曆.json').write_text(json.dumps({
+            'title': '週會', 'guests': [{'name': 'Amy Chen', 'email': 'amy@example.com', 'self': False},
+                                      {'name': '', 'email': 'vinston@example.com', 'self': True}],
+            'host': '', 'departments': [], 'participants': []}, ensure_ascii=False), encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text('Hi，\n\n週會的會議紀錄整理好了：\n{文件網址}\n\n內容有需要調整的地方再跟我說。\n\nVin\n', encoding='utf-8')
+        self.saved_owner, self.saved_sender = minutes_app.owner, minutes_app.sender_name
+        minutes_app.owner = lambda: 'vinston@example.com'
+        minutes_app.sender_name = lambda: '黃建國 Vin'
+        result = json.loads((self.job_dir / 'result.json').read_text(encoding='utf-8'))
+        result['mail'] = {'to': [], 'subject': '週會會議紀錄'}
+        (self.job_dir / 'result.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+
+    def tearDown(self):
+        self.c.refresh_directory = self.saved_refresh
+        self.c.CONTACTS.unlink(missing_ok=True)
+        minutes_app.owner, minutes_app.sender_name = self.saved_owner, self.saved_sender
+        super().tearDown()
+
+    def test_the_meetings_people_are_the_recipients_and_the_calendar_teaches_addresses(self):
+        self.md_path.write_text(MINUTES_WITH_PURPOSE.replace('Amy、Kai', 'Vin、Amy、Kai'), encoding='utf-8')
+        self.c.learn('vinston@example.com', 'Vinston Kao', 'directory')       # the directory's name for the user
+        mail = minutes_app.mail_defaults(self.job())
+        # the invitation's Amy Chen and the minutes' Amy are one address: one chip; the user, Vin in the minutes and
+        # 黃建國 Vin on the invitation, is one too, whatever the directory calls them
+        self.assertEqual(mail['people'], [{'name': 'Amy Chen', 'mail': 'amy@example.com'}, {'name': '黃建國 Vin', 'mail': 'vinston@example.com'},
+                                          {'name': 'Kai', 'mail': 'kai@example.com'}])
+        self.assertEqual(mail['missing'], [])
+        self.assertEqual(mail['to'], ['amy@example.com', 'vinston@example.com', 'kai@example.com'])
+        self.assertEqual(self.c.address_of('Amy Chen'), 'amy@example.com')     # learned from the invitation
+
+    def test_a_person_without_an_address_or_with_two_is_listed_as_missing(self):
+        self.c.learn('evan.lee@example.com', 'Evan Lee', 'directory')
+        self.c.learn('evanhsu@example.com', '許志明 Evan', 'directory')
+        self.md_path.write_text(MINUTES.replace('Amy、Kai', 'Amy、Kai、陳小姐、Evan'), encoding='utf-8')
+        mail = minutes_app.mail_defaults(self.job())
+        self.assertEqual([p['name'] for p in mail['people']], ['Amy Chen', '黃建國 Vin', 'Kai', '陳小姐', 'Evan'])
+        self.assertEqual(mail['people'][3], {'name': '陳小姐', 'mail': ''})
+        self.assertEqual(mail['missing'], ['陳小姐', 'Evan'])                 # two Erics: the user picks one
+        self.assertNotIn('', mail['to'])
+
+    def test_the_body_gets_the_purpose_and_the_highlights_after_the_link(self):
+        self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        body = minutes_app.mail_defaults(self.job())['body']
+        self.assertIn('{文件網址}\n\n會議目的：確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n重點：\n'
+                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作：Kai\n\n內容有需要調整的地方再跟我說。', body)   # the row whose owner is still [__] stays in the Doc
+        again = minutes_app.with_summary(body, MINUTES_WITH_PURPOSE, 'zh-TW')
+        self.assertEqual(again, body)                                          # not twice
+        self.assertEqual(minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', '# x\n\n## 一、會議基本資訊\n\n- 主持人：Vin\n', 'zh-TW'),
+                         'Hi\n\n{文件網址}\n\nVin')                               # nothing to take: unchanged
+
+    def test_english_minutes_get_purpose_and_highlights(self):
+        md = ('# Weekly\n\n## 1. Meeting Details\n\n- Host: Vin\n\n## 2. Purpose\n\nSettle the October budget.\n\n'
+              '## 4. Agreements\n\n- Budget is 100k.\n  - detail that stays in the Doc\n- Two KOLs first.\n- Venue [__] to confirm.\n\n'
+              '## 6. Action Items\n\n'
+              '| No. | Action | Owner | Notes |\n|---|---|---|---|\n| 1 | Book the venue | Amy | by Friday |\n| 2 | 確認合約付款事項 | Kai | |\n')
+        out = minutes_app.with_summary('Hi,\n\nThe minutes:\n{doc_url}\n\nVin', md, 'en')
+        self.assertIn('{doc_url}\n\nPurpose: Settle the October budget.\n\nHighlights:\n1. Budget is 100k.\n2. Two KOLs first.\n'
+                      '3. Book the venue: Amy\n4. 確認合約付款事項: Kai\n\nVin', out)      # the header row is not an item, nor a sub-point or a blank
+        long = '## 二、會議目的\n\n' + '這是一句很長的話，' * 12 + '最後一句。\n'
+        got = minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', long, 'zh-TW')
+        self.assertLessEqual(len(got.split('會議目的：')[1].split('\n')[0]), 160)
+        self.assertTrue(got.split('會議目的：')[1].split('\n')[0].endswith(('，', '。', '…')))
+        self.assertEqual(minutes_app.with_summary('Hi\n\n會議目的: x\n\n{文件網址}', long, 'zh-TW'), 'Hi\n\n會議目的: x\n\n{文件網址}')
 
 
 class CalendarPick(unittest.TestCase):
@@ -3099,7 +3263,7 @@ class McpServer(unittest.TestCase):
         done, err = self.ask('add_note', meeting='20261014-103000', text='報價確定為每人 1,200 元。')
         self.assertFalse(err, done)
         md = self.md_path.read_text(encoding='utf-8')
-        self.assertRegex(md, r'## 八、補充資訊\n\n- 報價確定為每人 1,200 元。\n$')
+        self.assertRegex(md, r'## 八、參考附件\n\n- 報價確定為每人 1,200 元。\n$')
 
     def test_minutes_already_mailed_say_so(self):
         r = json.loads((self.job_dir / 'result.json').read_text())

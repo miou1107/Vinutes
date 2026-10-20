@@ -47,7 +47,11 @@ The prompt gives you the job folder (written `job` below), the recording's start
    use only `job/參考/舊紀錄/` (earlier minutes), the calendar and the project's brief.
 4. Prepare the mail: recipients are the attendees in the 「這場會議」 section on the user's own company domain, plus
    the user; when no meeting matched or it lists nobody, only the user. People in the other sections are not
-   recipients. Write the text in the tone of a short note to colleagues, with the line
+   recipients (the app adds the meeting's people from its own contacts when the user opens the mail). After the
+   paragraph with the link, add `Purpose:` with one sentence from section 2 and `Highlights:` with three to five
+   numbered lines (the agreements of section 4, then the action items of section 6 with the owner after each), so
+   a reader knows what the meeting was about without opening the Doc; the app fills these two in from the minutes
+   when they are missing. Write the text in the tone of a short note to colleagues, with the line
    `The minutes are ready:` and on the next line, alone, `{doc_url}`; the program puts the Doc's address there, and
    when the user sends a Word or PDF file instead it turns those two lines into "The minutes are ready; please see
    the attached file." Save it as `job/信件內文.txt`. Do not sign it unless `使用者設定.json` has a `sender_name`.
@@ -126,7 +130,7 @@ Our company is always `our_company` from `使用者設定.json`; if it is missin
   people's names as the transcript writes them, keep amounts in their own currency (e.g. "¥150,000"), and keep a
   short original term in parentheses when the English is a guess.
 
-## Layout: seven sections, plus an eighth when there is supporting material
+## Layout: eight sections, the eighth saying "None" when nothing was attached
 
 Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Markdown, two `#` headings.
 
@@ -147,12 +151,12 @@ Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Mark
 6. **## 6. Action Items**: a table `No. | Action | Owner | Details and next steps`; put dates in the details,
    `[__]` when none was given.
 7. **## 7. Other Suggestions**: one paragraph: what the next meeting should focus on, what can wait.
-8. **## 8. Supporting Materials** (only when there is something; otherwise leave the section out, never write
-   "None"): material mentioned that belongs nowhere above, e.g. figures a colleague sent after the meeting,
+8. **## 8. Attachments** (in every set of minutes; when there is nothing, the section's only line is "None"):
+   material mentioned that belongs nowhere above, e.g. figures a colleague sent after the meeting,
    reference sites, screenshots. One line each: who provided what, then the link; pictures as `![caption](file or address)`.
-   The app adds files and links the user attaches later to the end of this section.
+   The app adds files and links the user attaches later to the end of this section, in place of "None".
 
-Keep these heading texts exactly ("## 1. Meeting Details" … "## 8. Supporting Materials"): the app finds sections
+Keep these heading texts exactly ("## 1. Meeting Details" … "## 8. Attachments"): the app finds sections
 by them.
 
 ## Tone and wording

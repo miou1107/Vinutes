@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.16 (2026-10-20)
+
+- The transcript is mostly done when you press Stop. While a meeting is recorded, Vinutes transcribes it in pieces of about five minutes in the background, each cut at a quiet moment so no sentence is split, each told the last words of the piece before so names keep their spelling. After Stop only the last piece is transcribed, so the transcript takes about a minute instead of four or more, and the minutes arrive that much sooner. The model, the glossary hint and the language setting are the same as before; on three recorded meetings the transcript came out the same as a one-go transcript to within the run-to-run noise of the model (the figures are in issue 1). Pausing needs nothing, and pieces survive a crash or a restart. `live_transcribe: false` in settings.json turns it off.
+
 ## v0.4.15 (2026-10-20)
 
 - Naming a voice, adding or removing a person under People no longer teaches Vinutes anything: the change it makes to the 與會人員 line is the app's own, not your wording, so no "照你的寫法" rule is written to notes.md for it. Your own edits right after are still learned.

@@ -53,6 +53,7 @@ from ai_runner import EXTRA_PATH  # noqa: E402  (where claude, codex and agy are
 import usage  # noqa: E402
 BODY = '信件內文.txt'
 WORK = '整理'                   # the agent's folder inside the job
+PIECES = '分段'                 # pieces transcribed during the recording (live_transcribe.py), until the transcript is written
 DRAFT = '紀錄.md'               # the minutes as the agent writes them there; the program copies them out
 LINKS = ('{文件網址}', '{doc_url}')    # where the Doc's address goes in the mail (Chinese / English guide)
 # the guide the agent writes from, by the minutes' language: (guide, example) in the Vinutes folder
@@ -211,7 +212,8 @@ def transcribe(job: Path, meta: dict):
     status(job, 'transcribing', t('status_transcribing'))
     began = time.time()
     try:
-        done = script('transcribe.py', audio, job / '逐字稿.txt', timeout=4 * 3600)
+        # the pieces live_transcribe.py wrote during the recording are reused; only the rest is transcribed now
+        done = script('transcribe.py', audio, job / '逐字稿.txt', '--pieces', job / PIECES, timeout=4 * 3600)
     except subprocess.TimeoutExpired:
         raise Failed(t('transcribe_timeout'))
     log(job, (done.stdout + done.stderr).strip()[-1000:])
@@ -220,6 +222,7 @@ def transcribe(job: Path, meta: dict):
     if not (job / '逐字稿.txt').read_text(encoding='utf-8').strip():
         raise Failed(t('no_speech'))
     log(job, f'transcribed in {time.time() - began:.0f}s')
+    shutil.rmtree(job / PIECES, ignore_errors=True)   # the transcript has everything the pieces had
     length = re.search(r'audio (\d+(?::\d\d){1,2})', done.stdout)
     usage.record('transcribe', s=round(time.time() - began, 1),
                  audio=sum(int(n) * 60 ** i for i, n in enumerate(reversed(length[1].split(':')))) if length else None)

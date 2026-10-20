@@ -82,14 +82,14 @@ of Whisper gains a point at best and often loses ([EUSIPCO 2024](https://arxiv.o
 ["When De-noising Hurts", Dec 2025](https://arxiv.org/pdf/2512.17562)); Whisper's training data is noisy enough.
 Neither is in the app.
 
-## Other recognisers (measured 2026-10-20, not shipped)
+## Other recognisers (measured 2026-10-20; Qwen3-ASR shipped as a choice in v0.4.17)
 
 For Chinese meetings Whisper is the weak link, not the audio: on the WenetSpeech meeting subset the published
 character error rates are 18.9% for whisper-large-v3, 6.7% for SenseVoice-L, 7.0% for Paraformer-large and
 lower still for Qwen3-ASR and FireRedASR (all reported by the model makers,
 [FireRedASR's table](https://github.com/FireRedTeam/FireRedASR), [Qwen3-ASR report](https://arxiv.org/pdf/2601.21337)).
 Two of them run on a Mac and were tried on the same three meetings: Qwen3-ASR 1.7B through MLX
-(`mlx-qwen3-asr`, the 8-bit build, about 2.5 GB, Apache-2.0) and SenseVoice through sherpa-onnx on the CPU
+(`mlx-qwen3-asr`, the 8-bit build, 2.2 GB plus a 1.8 GB aligner for timestamps, Apache-2.0) and SenseVoice through sherpa-onnx on the CPU
 (FunASR model licence). FireRedASR's best model is an 8B LLM and too heavy for a laptop. A Whisper judge cannot
 rank them, so they are compared on what they write.
 
@@ -118,6 +118,30 @@ punctuation, long run-on lines (the minutes AI copes), a name it has never seen 
 Taiwan PASS) because the glossary hint was not given to it, and it is slow: 559, 490 and 330 s for the three
 meetings on this Mac (while SenseVoice ran beside it) against 148, 152 and 132 s for Whisper turbo. In pieces
 during the recording that is about a minute per five-minute piece, which the background still absorbs.
+
+### Qwen3-ASR with the glossary as its context (the shipped path, measured 2026-10-21)
+
+v0.4.17 gives Qwen3-ASR the glossary hint as its `context`, the way Whisper gets it as a prompt, and writes one
+line per sentence with the aligner's times. The three meetings again through `scripts/transcribe.py` with
+`MINUTES_SPEECH_MODEL=qwen3-asr`, glossary terms found:
+
+| Meeting | Whisper whole | Whisper pieces | Qwen3-ASR, no context | Qwen3-ASR, glossary context |
+|---|---|---|---|---|
+| 10/19, 40 min | 64 | 81 | 88 | 97 |
+| 10/20, 58 min | 2 | 2 | 3 | 8 |
+| 10/20, 44 min | 13 | 22 | 26 | 35 |
+
+With the context Taiwan PASS comes out as the glossary spells it, and the lines are punctuated. One thing to
+know before trusting a count like this: over a quiet stretch Qwen3-ASR sometimes writes its context down as a
+sentence, the whole term list joined by 、 as if someone had read it out (four times in the 44-minute meeting,
+once in the 58-minute one). Counted naively those two meetings read 131 and 32. `transcribe.echoes()` drops a
+sentence that runs through four or more of the context's terms in the context's own order; the table above is
+after that filter, and a sentence that names three people in passing is kept. Any jump in a term count should
+be checked that way first: open the transcript and look at the lines the extra hits are on.
+
+Timing alone on this Mac: 572 s for the 40-minute meeting and 295 s for the 44-minute one; the 58-minute meeting
+took 1214 s but a browser and a Swift build ran beside it. A clean five-minute piece is about 50 s with Qwen3-ASR
+against 40 s with Whisper turbo, so the pieces during a recording keep pace.
 
 Conclusion: the next quality step for Chinese meetings is Qwen3-ASR as the transcriber (with the glossary given
 to it as context, and Whisper kept for other languages or as a fallback), not audio cleaning. Not built yet; it

@@ -87,7 +87,7 @@ mkdir -p "$MINUTES_HOME"; chmod 700 "$MINUTES_HOME"
 VPY="$MINUTES_HOME/venv/bin/python"
 "$VPY" -m pip install --quiet --upgrade pip
 "$VPY" -m pip install --quiet mlx-whisper opencc-python-reimplemented python-docx markdown-it-py google-auth-oauthlib \
-  sherpa-onnx soundfile numpy
+  sherpa-onnx soundfile numpy mlx-qwen3-asr
 echo "ok"
 
 step "Speech model (about 1.6 GB, downloaded once)"

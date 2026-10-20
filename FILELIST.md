@@ -28,7 +28,7 @@
 | `scripts/contacts.py` | The addresses Vinutes knows for the mail's recipients: the company directory (once a day), calendar invitees, people mailed before; a name to its address, and the people offered while typing |
 | `scripts/minutes_app.py` | Everything the meeting window asks for: the list, syncing the Doc, saving edits, AI rewrites, comments, history, learning from the user's edits, archiving and deleting meetings, projects and tags |
 | `scripts/ai_runner.py` | Runs Claude Code, Codex or Antigravity, each sandboxed to one meeting's folder; installs each with its maker's own script |
-| `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper); audio is not uploaded. Reuses the pieces transcribed during the recording and does only the rest |
+| `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper, or Qwen3-ASR for Chinese meetings when the user chose it and downloaded it); audio is not uploaded. Reuses the pieces transcribed during the recording and does only the rest |
 | `scripts/live_transcribe.py` | Runs beside the recording: transcribes it in pieces of about five minutes, cut at quiet moments, while the meeting goes on, so little is left to do after Stop |
 | `scripts/connect_agents.py` | Adds Vinutes' MCP server to the AI tools installed on the Mac (Claude Code, Codex, Gemini CLI, Claude's app, Antigravity, Cursor); install.sh runs it |
 | `scripts/mcp_server.py` | Vinutes as an MCP server: Claude Code searches and reads past meetings, and names speakers, adds notes, changes words, tags and projects when asked |
@@ -37,7 +37,7 @@
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |
 | `scripts/attachments.py` | Files, links and pictures from Add attachments: uploads them to Google Drive and lists them, each with its note, in the minutes' last section; reads that section back for the row under the title |
 | `scripts/references.py` | Files and links handed to the AI with a sentence: copied or read as text into its folder (Word, Excel, PowerPoint, web pages, Google files) |
-| `scripts/setup_check.py` | The setup checklist: models, the AI (installed, signed in, one test answer), Google connection |
+| `scripts/setup_check.py` | The setup checklist: the speech model (Whisper, or Qwen3-ASR chosen and downloaded from its model page), the voice model, the AI (installed, signed in, one test answer), Google connection |
 | `scripts/i18n.py` | Which language the app speaks (the user's pick, else the Mac's) and which language the minutes are written in |
 | `scripts/strings.py` | Every message the Python scripts show, in English and Traditional Chinese |
 | `scripts/google_setup.py` | Google sign-in and the user's `settings.json` |

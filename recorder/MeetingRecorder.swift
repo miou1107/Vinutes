@@ -103,6 +103,8 @@ let STRINGS: [String: [String: String]] = [
         "panel.aiTitle": "Note: the AI isn't set up",
         "panel.aiText": "Set up the AI first to have the minutes written automatically",
         "panel.aiSetup": "Set Up",
+        "panel.speechTitle": "Note: Qwen3-ASR isn't downloaded yet",
+        "panel.speechText": "This meeting is transcribed with Whisper",
         "update.failTitle": "Vinutes didn't update",
         "app.hide": "Hide %@",
         "app.quit": "Quit %@",
@@ -211,6 +213,8 @@ let STRINGS: [String: [String: String]] = [
         "panel.aiTitle": "注意！ 內容生成模型尚未設定",
         "panel.aiText": "需先完成 AI 設定，才能自動生成會議記錄",
         "panel.aiSetup": "前往設定",
+        "panel.speechTitle": "注意！ Qwen3-ASR 尚未下載完成",
+        "panel.speechText": "這一場會先用 Whisper 轉逐字稿",
         "update.failTitle": "更新沒有完成",
         "app.hide": "隱藏 %@",
         "app.quit": "結束 %@",
@@ -374,6 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var recorder: MeetingCapture?
     var currentJob: URL?
     var aiWarned = false                 // this recording started while the AI could not write its minutes
+    var speechWarned = false             // this recording started with Qwen3-ASR chosen but not downloaded: Whisper transcribes it
     var startedAt: Date?
     var pausedAt: Date?
     var pausedTotal: TimeInterval = 0
@@ -726,15 +731,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshIcon()
     }
 
-    /// A recording started while the AI is not installed or signed out: the panel opens once with a note and a way
-    /// to set it up. The recording goes on either way, and the minutes can be written later (Vin 2026-10-18).
+    /// A recording started while the AI is not installed or signed out, or with Qwen3-ASR chosen but not downloaded:
+    /// the panel opens once with a note and a way to set it up. The recording goes on either way; the minutes can be
+    /// written later, and Whisper transcribes this meeting (Vin 2026-10-18, 2026-10-20).
     func checkAIForRecording() {
         runScript("setup_check.py", ["status", "--quick"]) { [weak self] code, out in
             guard let self, self.recording, code == 0, let obj = lastObject(out, prefix: "JSON ") else { return }
             let state = (obj["ai"] as? [String: Any])?["state"] as? String ?? ""
-            guard ["install", "installing", "login", "plan"].contains(state) else { return }   // not 'unknown'
-            appLog("recording without a ready AI: \(state)")
-            self.aiWarned = true
+            let speech = obj["speech"] as? [String: Any]
+            let noAI = ["install", "installing", "login", "plan"].contains(state)               // not 'unknown'
+            let noQwen = (speech?["model"] as? String) == "qwen3-asr" && (speech?["state"] as? String) != "done"
+            guard noAI || noQwen else { return }
+            appLog("recording without \(noAI ? "a ready AI: \(state)" : "")\(noAI && noQwen ? ", " : "")\(noQwen ? "Qwen3-ASR downloaded" : "")")
+            self.aiWarned = noAI
+            self.speechWarned = noQwen
             if self.panel.isShown { self.panel.refresh() }
             else if let button = self.statusItem.button { self.panel.toggle(from: button) }
         }
@@ -742,7 +752,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func endRecording() -> URL? {
         guard let rec = recorder, let dir = currentJob else { return nil }
-        aiWarned = false
+        aiWarned = false; speechWarned = false
         if let since = pausedAt { pausedTotal += Date().timeIntervalSince(since) }
         rec.stop()                          // the file is complete once the recorder is let go, just below
         tick?.invalidate()
@@ -961,7 +971,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let mic = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
             // an AI that did not answer the sign-in question in time ('unknown') is not counted as missing
             let ai = state("ai")
-            if !mic || state("speech") != "done" || (ai != "done" && ai != "unknown") { self?.showManager(select: nil, setup: true) }
+            // Qwen3-ASR chosen but not downloaded is not missing: Whisper is there and transcribes meanwhile
+            let whisper = (obj["speech"] as? [String: Any])?["whisper"] as? Bool ?? false
+            if !mic || (state("speech") != "done" && !whisper) || (ai != "done" && ai != "unknown") { self?.showManager(select: nil, setup: true) }
         }
     }
 
@@ -1784,6 +1796,11 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                 if code == 0 { return done(true, [:]) }
                 done(false, ["message": lastLine(out).isEmpty ? tr("err.tryAgain") : lastLine(out)])
             }
+        case "setupSpeechModel":
+            // item 3's model page: the choice is kept at once, the download is its own step
+            let model = args["model"] as? String ?? ""
+            guard ["whisper", "qwen3-asr"].contains(model) else { return done(false, ["message": tr("err.noSetupItem")]) }
+            setupScript(["speech_model", model], done)
         case "setupAI":
             let key = args["ai"] as? String ?? ""
             guard ["claude", "codex", "antigravity"].contains(key) else { return done(false, ["message": tr("err.noAI")]) }
@@ -2111,6 +2128,9 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
                     guard ok, var all = data as? [String: Any] else { return done(ok, data) }
                     if ((all["ai"] as? [String: Any])?["state"] as? String) == "done" {
                         self.owner?.aiWarned = false             // set up while recording: the panel's note goes
+                    }
+                    if ((all["speech"] as? [String: Any])?["state"] as? String) == "done" {
+                        self.owner?.speechWarned = false
                     }
                     all["mic"] = ["state": mic]
                     all["notify"] = ["state": notify]

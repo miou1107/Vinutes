@@ -704,12 +704,9 @@ def attendees(md: str) -> list[str]:
 # (Vin 2026-10-19: the brief lists the project's people, not each meeting's, so it starts no meeting's list either).
 PROJECT_PEOPLE = briefs.PEOPLE                    # the project's people are also its brief's (專案小抄)
 MEETING_PEOPLE = '人員.json'
-# A room booking made in a company system names a department instead of inviting people. Who that department's
-# people are is learned from the meetings the user confirmed: every name under 人員 in a meeting whose calendar
-# note names the department, kept here as {department: {'people': [...], 'from': '2026-10-20 數據課週會'}}. The
-# next meeting that names the department starts with them (prototypes/department-people.html, Vin 2026-10-20).
-# Nothing is ever taken off a roster by the app; taking someone off a meeting only says they weren't there.
-DEPARTMENTS = CONFIG / 'departments.json'
+# A room booking's note may name a department instead of inviting people; the department's roster (briefs.py)
+# is learned from the meetings the user confirmed and starts the next meeting that names it.
+DEPARTMENTS, roster = briefs.DEPARTMENTS, briefs.roster
 
 
 def calendar_of(job: Job) -> dict:
@@ -718,19 +715,6 @@ def calendar_of(job: Job) -> dict:
     return {'host': data.get('host') if isinstance(data.get('host'), str) else '',
             'departments': [d for d in (data.get('departments') or []) if isinstance(d, str) and d],
             'participants': [p for p in (data.get('participants') or []) if isinstance(p, str) and p]}
-
-
-def roster(departments: list[str]) -> tuple[list[str], str]:
-    """The people these departments' earlier meetings confirmed, and which meeting the first of them was learned at."""
-    data = read_json(DEPARTMENTS)
-    names, where = [], ''
-    for dept in departments:
-        entry = data.get(dept) if isinstance(data.get(dept), dict) else {}
-        for n in entry.get('people') or []:
-            if isinstance(n, str):
-                names = add_name(names, n)
-        where = where or (entry.get('from') if isinstance(entry.get('from'), str) else '')
-    return names, where
 
 
 def job_label(job: Job) -> str:
@@ -742,17 +726,8 @@ def job_label(job: Job) -> str:
 
 def remember_roster(job: Job, names: list[str]):
     """The meeting's people join the roster of each department its calendar note names."""
-    departments = calendar_of(job)['departments']
-    if not departments:
-        return
-    data = read_json(DEPARTMENTS)
-    for dept in departments:
-        entry = data.get(dept) if isinstance(data.get(dept), dict) else {}
-        merged = [n for n in (entry.get('people') or []) if isinstance(n, str)]
-        for n in names:
-            merged = add_name(merged, n)
-        data[dept] = {'people': merged, 'from': job_label(job)}
-    write_json(DEPARTMENTS, data)
+    for dept in calendar_of(job)['departments']:
+        briefs.save_roster(dept, names, job_label(job))
 
 
 def calendar_payload(job: Job) -> dict:

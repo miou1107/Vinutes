@@ -2610,6 +2610,26 @@ class CalendarForTheAgent(unittest.TestCase):
         self.answer('', code=1)
         self.assertTrue(self.am.read_calendar(job, {'started': '2026-10-07T15:31:11+08:00'}).startswith('（讀不到行事曆'))
 
+    def test_the_roster_of_the_department_the_note_names_is_handed_to_the_agent(self):
+        minutes_app.DEPARTMENTS.write_text(json.dumps({'數據經濟發展課': {'people': ['高聖哲(Vin)', 'Adam', 'Eric'],
+                                                                     'from': '2026-10-13 數據課週會'}}, ensure_ascii=False))
+        try:
+            job = self.root / '20261020-150051'
+            job.mkdir()
+            self.answer('== 這場會議\nMATCH {"title": "(ITRI-427會議室)數據課週會", "series": "數據課週會", "recurring": "", "start": "",'
+                        ' "host": "高聖哲(Vin)", "departments": ["數據經濟發展課"], "participants": ["高聖哲(Vin)"]}\n')
+            text = self.am.read_calendar(job, {'started': '2026-10-20T15:00:51+08:00'})
+            self.assertIn('== 參與部門之前確認過的名單', text)
+            self.assertIn('數據經濟發展課：高聖哲(Vin)、Adam、Eric', text)
+            self.assertIn('2026-10-13 數據課週會', text)
+            self.assertEqual(json.loads((job / '行事曆.json').read_text())['departments'], ['數據經濟發展課'])
+            other = self.root / '20261021-150051'
+            other.mkdir()
+            self.answer('== 這場會議\nMATCH {"title": "週會", "series": "週會", "recurring": "", "start": "", "departments": ["行銷部"]}\n')
+            self.assertNotIn('參與部門之前確認過的名單', self.am.read_calendar(other, {'started': '2026-10-21T15:00:51+08:00'}))
+        finally:
+            minutes_app.DEPARTMENTS.unlink(missing_ok=True)
+
 
 class ScriptLog(unittest.TestCase):
     """vlog: every script run is two lines in scripts.log, never the user's words, and the file stays bounded."""

@@ -163,17 +163,21 @@ def hub_has(repo: str) -> bool:
     return any(w.exists() for w in hub_dir(repo).glob('snapshots/*/*.safetensors'))
 
 
-def qwen_ready() -> bool:
-    """The Qwen3-ASR package is installed and its two models are downloaded, so it can run offline. (Asked at
-    every app and recording start: the package is looked up, not imported.)"""
+def qwen_package() -> bool:
+    """Whether the Qwen3-ASR package is installed (install.sh adds it; a Mac installed before it needs the
+    installer again). Asked at every app and recording start: the package is looked up, not imported."""
     import importlib.util
-    if 'mlx_qwen3_asr' not in sys.modules:
-        try:
-            if importlib.util.find_spec('mlx_qwen3_asr') is None:
-                return False
-        except (ImportError, ValueError):
-            return False
-    return hub_has(QWEN) and hub_has(QWEN_ALIGNER)
+    if 'mlx_qwen3_asr' in sys.modules:
+        return True
+    try:
+        return importlib.util.find_spec('mlx_qwen3_asr') is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def qwen_ready() -> bool:
+    """The Qwen3-ASR package is installed and its two models are downloaded, so it can run offline."""
+    return qwen_package() and hub_has(QWEN) and hub_has(QWEN_ALIGNER)
 
 
 def qwen_lines(text: str, pieces: list, offset: float) -> list[list]:
@@ -206,24 +210,52 @@ def qwen_lines(text: str, pieces: list, offset: float) -> list[list]:
     return out
 
 
+def echoes(text: str, context: str) -> bool:
+    """Whether a sentence is the context read back: over a quiet stretch Qwen3-ASR sometimes writes its context's
+    term list down as if someone had said it (four times in one recorded meeting, once in another). The sentence
+    runs through four or more of the context's terms in the context's own order, one after the other, and those
+    terms are at least half of the sentence; a sentence that names a few people in passing is not that."""
+    split = lambda s: [p.strip() for p in re.split(r'[、，,。．.！？；!?;\s]+', s) if p.strip()]  # noqa: E731
+    parts = split(text)
+    if len(parts) < 4:
+        return False
+    order = {}
+    for i, p in enumerate(split(context)):
+        order.setdefault(p.lower(), i)
+    where = [order.get(p.lower(), -1) for p in parts]
+    hits = sum(1 for w in where if w >= 0)
+    run = best = 0
+    for prev, now in zip([-9] + where, where):
+        run = run + 1 if now >= 0 and now == prev + 1 else (1 if now >= 0 else 0)
+        best = max(best, run)
+    return best >= 4 and hits * 2 >= len(parts)
+
+
 def qwen_range(audio, offset: float, context: str, transcribe=None) -> list[list]:
     """Qwen3-ASR over `audio` (16 kHz floats that begin `offset` seconds into the recording), the glossary as
     its context: sentence segments in recording time, Simplified Chinese as the model writes it (assemble()
-    converts)."""
+    converts). A sentence that only reads the context back is left out."""
     if transcribe is None:
         from mlx_qwen3_asr import transcribe
     result = transcribe((audio, RATE), model=QWEN, language='Chinese', return_timestamps=True, context=context,
                         forced_aligner=QWEN_ALIGNER)
     text = result.text if hasattr(result, 'text') else result.get('text', '')
     segs = result.segments if hasattr(result, 'segments') else result.get('segments', [])
-    return qwen_lines(text or '', segs or [], offset)
+    lines = qwen_lines(text or '', segs or [], offset)
+    kept = [line for line in lines if not echoes(line[2], context)]
+    if len(kept) < len(lines):
+        import vlog
+        vlog.log(f'qwen3-asr read its context back {len(lines) - len(kept)} time(s) after {stamp(offset)}; dropped')
+    return kept
 
 
-def recogniser(lang: str, whisper=None):
+def recogniser(lang: str, whisper=None, want: str = ''):
     """(name, run) for a meeting in `lang`: run(audio, offset) -> segments. Qwen3-ASR for a Chinese meeting
     when the user chose it and it is ready; Whisper otherwise, prompted as before (`whisper` is mlx-whisper's
-    transcribe, or a stand-in)."""
+    transcribe, or a stand-in). `want` is the model the recording's earlier pieces were written with: the rest
+    follows them even if the setting changed during the meeting, so one transcript comes from one model."""
     prompt = prompt_for(lang)
+    chosen = want if want in SPEECH_MODELS else speech_model()
 
     def with_whisper(audio, offset):
         nonlocal whisper
@@ -232,7 +264,7 @@ def recogniser(lang: str, whisper=None):
             whisper = mlx_whisper.transcribe
         return transcribe_range(audio, lang, prompt, offset, whisper)
 
-    if lang == 'zh' and speech_model() == 'qwen3-asr' and qwen_ready():
+    if lang == 'zh' and chosen == 'qwen3-asr' and qwen_ready():
         context = hint()
 
         def with_qwen(audio, offset):
@@ -415,7 +447,7 @@ def main():
     segments = [seg for piece in pieces for seg in piece['segments']]
     from_s = pieces[-1]['end'] if pieces else 0.0
     rest = audio[int(from_s * RATE):]
-    name, run = recogniser(lang, mlx_whisper.transcribe)
+    name, run = recogniser(lang, mlx_whisper.transcribe, str(pieces[0].get('recogniser', '')) if pieces else '')
     if not pieces or len(rest) >= RATE // 2:              # half a second: less than that is no speech
         segments += run(rest, from_s)
     lines, spans = assemble(segments, lang, OpenCC('s2twp').convert)

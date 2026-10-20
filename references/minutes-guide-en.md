@@ -22,7 +22,10 @@ The prompt gives you the job folder (written `job` below), the recording's start
    `專案小抄.md` (each project's people, terms and background, as the user confirmed them).
 2. Find the meeting: the program has already picked it in `job/行事曆.txt` (its headings are in Chinese).
    - 「這場會議」: the event the user is invited to that overlaps the recording most. Take its name, place, attendees
-     and attachment names.
+     and attachment names. A room booking may list the host (主持人) and participants (參與人員) in its note instead
+     of inviting them: take those too, spelled as the note spells them; 參與部門 names a department, not a person.
+   - 「參與部門之前確認過的名單」: the people the user confirmed at that department's last meeting; they are
+     attendees too, and the transcript's speakers are matched against this list first.
    - 「同一系列的下一次會議」: the next meeting of the same series; fill `next_meeting` from its date and time, unless
      the meeting clearly moved it (e.g. "next time on Nov 4"), then from the transcript.
    - 「同一時段公司行事曆上的其他會議」: events the user is not invited to that only overlap in time (mostly rooms

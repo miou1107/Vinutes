@@ -259,6 +259,8 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
              border-radius: 6px; background: var(--field); outline: none; font-size: 12.5px; }
 .fix input:focus { border-color: var(--blue); }
 .phead { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.fromcal { font-size: 12px; color: var(--link); background: var(--blue-bg); border-radius: 8px; padding: 6px 10px; }   /* what the calendar note said */
+.learned { font-size: 12px; color: var(--green-ink, var(--text)); background: var(--green-bg, var(--panel)); border-radius: 8px; padding: 6px 10px; }
 .card.person { display: flex; flex-direction: column; gap: 8px; }
 .card.person.guess { border-color: var(--yellow-bg); }
 .card.person .text { margin-top: 0; font-size: 13px; }

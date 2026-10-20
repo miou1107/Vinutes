@@ -185,7 +185,7 @@ function refreshDoc(id = S.sel, again = false) {
   const seq = S.editSeq;
   const p = call('refresh', { id }).then((r) => {
     if (r.busy || S.sel !== id || !S.d || !docsMode()) return;
-    const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent]);
+    const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent, S.d.calendar]);
     const before = seen();
     if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = checkShown(r.check, id); }   // not over a confirm made meanwhile
     if (r.attendees) S.d.attendees = r.attendees;
@@ -193,6 +193,7 @@ function refreshDoc(id = S.sel, again = false) {
     if (r.people && !S.peopleBusy) S.d.people = r.people;
     if (r.speakers && !S.peopleBusy) S.d.speakers = r.speakers;
     if (r.silent && !S.peopleBusy) S.d.silent = r.silent;
+    if (r.calendar && !S.peopleBusy) S.d.calendar = r.calendar;
     S.d.log = r.log || [];
     if ('can_undo' in r && !S.busy && !aiBusy(id)) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
@@ -1144,6 +1145,7 @@ function afterEdit(r) {
   if (r.attachments) setAttachments(r.attachments);
   if (r.people) S.d.people = r.people;
   if (r.speakers) S.d.speakers = r.speakers;
+  if (r.calendar) S.d.calendar = r.calendar;
   if (r.check) S.d.check = checkShown(r.check);
   if (r.todo) { S.d.todo = r.todo; renderFoot(); renderRail(); }
   if ('can_undo' in r) S.canUndo = !!r.can_undo;
@@ -1323,7 +1325,7 @@ function peopleHTML(people) {
   const busy = S.peopleBusy || S.busy || aiBusy();
   if (!voices.length) {
     const names = d.people || [];
-    return `<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}${offHTML()}`;
+    return `${calendarHTML()}<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}${learnedHTML()}${offHTML()}`;
   }
   const cards = voices.map((v) => {
     const name = v.name || shown[v.group] || '';
@@ -1335,7 +1337,7 @@ function peopleHTML(people) {
       ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
       : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
           <div class="mi other" data-other="1">${esc(t('people_other'))}</div>
-          ${v.name ? '' : `<div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div>`}</div>`;
+          <div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div></div>`;   // also a voice named by mistake (Vin 2026-10-20)
     return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
         <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
         <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
@@ -1344,8 +1346,34 @@ function peopleHTML(people) {
         ${name ? `<b>${esc(name)}</b>` : `<span class="ph">${esc(t('people_pick'))}</span>`}<span class="caret">▾</span></button>${menu}</div></div>`;
   });
   const silent = d.silent || [];                   // the server tells names apart (陳怡君（Jessie） is Jessie)
-  return `<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
-    ${silent.length ? `<div class="pmin silent">${esc(t('people_silent_list', silent.join(t('list_sep'))))}</div>` : ''}${offHTML()}`;
+  return `${calendarHTML()}<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
+    ${silentHTML(silent, busy)}${learnedHTML()}${offHTML()}`;
+}
+
+// the people listed who did not speak, each with ✕ to take them off this meeting (a name added by mistake, Vin 2026-10-20)
+function silentHTML(names, busy) {
+  if (!names.length) return '';
+  return `<div class="pmin silent">${esc(t('people_silent_list', ''))}${names.map((n) =>
+    `<span class="tchip">${esc(n)}<button data-rmp="${esc(n)}" title="${esc(t('remove'))}" aria-label="${esc(t('remove'))}"${busy ? ' disabled' : ''}>${ICON.xs}</button></span>`).join('')}</div>`;
+}
+
+// What the calendar event's note said about the meeting (a room booking names its host and department instead of
+// inviting people), and where the people it brought in were learned (prototypes/department-people.html).
+function calendarHTML() {
+  const c = (S.d && S.d.calendar) || {};
+  const depts = (c.departments || []).join(t('list_sep'));
+  const parts = [];
+  if (c.host) parts.push(t('people_cal_host', c.host));
+  if (depts) parts.push(t('people_cal_dept', depts));
+  if (c.roster_from && !c.learned) parts.push(t('people_cal_from', c.roster_from));
+  return parts.length ? `<div class="fromcal">${esc(t('people_calendar', parts.join(t('people_cal_sep'))))}</div>` : '';
+}
+
+// this meeting taught the department's roster: the names it will bring into the next meeting of that department
+function learnedHTML() {
+  const c = (S.d && S.d.calendar) || {};
+  if (!c.learned || !(c.roster || []).length) return '';
+  return `<div class="learned">${esc(t('people_learned', (c.departments || []).join(t('list_sep')), c.roster.join(t('list_sep'))))}</div>`;
 }
 
 // voices taken off (移除講者 X), each with 復原 (Vin 2026-10-19)
@@ -1358,7 +1386,7 @@ function offHTML() {
 // what the server sends back after a change to the people: who each voice is, the voices, the minutes
 function peopleDone(r) {
   if (!S.d) return;
-  for (const k of ['people', 'speakers', 'silent', 'voices', 'voices_off', 'transcript', 'voice_names', 'log', 'check']) if (r[k]) S.d[k] = r[k];
+  for (const k of ['people', 'speakers', 'silent', 'calendar', 'voices', 'voices_off', 'transcript', 'voice_names', 'log', 'check']) if (r[k]) S.d[k] = r[k];
   afterEdit(r);
 }
 
@@ -1416,6 +1444,7 @@ function wirePeople(el) {
     choose(S.pickOpen, m.dataset.n);
   }));
   el.querySelectorAll('.pback').forEach((b) => b.addEventListener('click', () => peopleCall('dropVoice', { group: b.dataset.g, back: true })));
+  el.querySelectorAll('[data-rmp]').forEach((b) => b.addEventListener('click', () => peopleCall('people', { action: 'remove', name: b.dataset.rmp })));
   const input = $('#pIn');
   if (!input) return;
   const list = $('#pAc');

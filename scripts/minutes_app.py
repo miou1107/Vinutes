@@ -20,13 +20,13 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py drop_voice <job> <letter> [back]  移除講者 X under 人員 (a voice that is no one), or put it back
   minutes_app.py correct <job> <item> <right>      the user puts a guess right: Claude changes the minutes to it
   minutes_app.py ask_many <job> <json>             requests still waiting when the window closed, one after another
-  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、補充資訊」, each led by
+  minutes_app.py attach <job> <note> <items JSON>  files, links and pictures as lines of 「八、參考附件」, each led by
                                                    its own note or else <note> (attachments.py)
   minutes_app.py log <job>                         the activity log, newest first
   minutes_app.py refresh <job>                     what was typed into the Google Doc the window shows -> the minutes;
                                                    learns the user's own edits; the side panel's lists again
   minutes_app.py locate <job> <words>              how far down the Doc those words are ({"at": 0.0–1.0})
-  minutes_app.py note <job> <text>                 a paragraph at the end of 「八、補充資訊」, written by someone else
+  minutes_app.py note <job> <text>                 a paragraph at the end of 「八、參考附件」, written by someone else
                                                    than the user (an agent through mcp_server.py)
   minutes_app.py replace <job> <old> <new>         the words `old`, which the minutes have exactly once, become `new`
   minutes_app.py speaker <job> <group> <name> [line]  the user named a voice (講者 A -> Alex), or one line's
@@ -95,7 +95,7 @@ AI_TIMEOUT = 10 * 60
 # the preset requests under the box: what the AI is told, in the minutes' language (the window shows the names)
 QUICK = {
     'zh-TW': {
-        'short': '把整份紀錄改得精簡：每一節只留結論、決定和數字，刪掉重複的說明。七節的標題和表格的欄位不變。',
+        'short': '把整份紀錄改得精簡：每一節只留結論、決定和數字，刪掉重複的說明。八節的標題和表格的欄位不變，第八節參考附件不動。',
         'detail': '照 逐字稿.txt 把討論摘要寫完整：補回討論過程、每個人的說法和理由。其他節不變。',
         'formal': '把用語改成正式的書面語氣，口語說法全部換掉。內容和格式不變。',
         'visual': '能做成表格的內容改成表格，例如決議、負責人與時程；時程照時間先後排。',
@@ -1075,7 +1075,7 @@ REJECTED_OPEN = t('rejected_open')
 
 
 def linked_files(job: Job, md: str) -> list[str]:
-    """The Drive files 「八、補充資訊」 still links to (cmd_attach keeps their ids in the Doc's record): the mail opens
+    """The Drive files 「八、參考附件」 still links to (cmd_attach keeps their ids in the Doc's record): the mail opens
     these to its recipients (workspace.linked_files)."""
     record = read_json(job.md_path.with_name(job.md_path.name + '.gdoc.json')) if job.md_path else {}
     return [f for f in record.get('attach_files', []) if f'/file/d/{f}/' in md]
@@ -1273,7 +1273,7 @@ def after_sync(job: Job, doc: dict | None) -> list[str]:
 
 
 def place_pictures(job: Job) -> list[str]:
-    """Pictures from 「八、補充資訊」 that are not in the Doc yet (cmd_attach): each one in a paragraph of its own under
+    """Pictures from 「八、參考附件」 that are not in the Doc yet (cmd_attach): each one in a paragraph of its own under
     its line. One that fails for now waits for the next sync; after three tries its line keeps just the link."""
     import attachments
     warnings, left = [], []
@@ -1927,7 +1927,7 @@ def current_anchors(job: Job, md: str) -> list[dict]:
         return []
 
 
-# --- files, links and pictures for 「八、補充資訊」 ---------------------------------------------------
+# --- files, links and pictures for 「八、參考附件」 ---------------------------------------------------
 
 def attachments_listed(md: str) -> list[dict]:
     import attachments
@@ -2493,19 +2493,121 @@ def finished_body(body: str) -> str:
 
 
 def mail_defaults(job: Job) -> dict | None:
+    """What the mail sheet opens with. The recipients are the meeting's people (人員), each with the address the
+    calendar invitation, the company directory or an earlier mail gave them (contacts.py), plus the user; a person
+    without one is listed under `missing`. The body gets the meeting's purpose and highlights (with_summary)."""
     mail = job.result.get('mail')
     if not isinstance(mail, dict):
         return None
+    import contacts
     mine = (owner() or '').lower()
     known = set(calendar_people(job))
-    # only the user and people on that day's calendar; anything else Claude wrote is left for the user to add
+    contacts.refresh_directory()                      # once a day; nothing when offline
+    if mine:
+        contacts.learn(mine, sender_name() or mine.split('@')[0], 'self')
+    for g in read_json(job.dir / '行事曆.json').get('guests') or []:
+        if isinstance(g, dict) and g.get('email'):
+            contacts.learn(g['email'], g.get('name') or '', 'calendar')
+    people, missing, seen = [], [], set()
+    me_parts = contacts.tokens(sender_name()) | {mine.split('@')[0]}   # Vin, 高聖哲, vincent: the user, whatever the directory calls them
+    for name in meeting_people(job):
+        parts = contacts.tokens(name)                 # the user when every part of the name is theirs (Vin, 高聖哲(Vin); not Kevin Kao)
+        address = mine if mine and parts and parts <= me_parts else contacts.address_of(name)
+        if address in seen:
+            continue                                  # Amy Chen on the invitation and Amy in the minutes: one chip
+        if address:
+            seen.add(address)
+        else:
+            missing.append(name)
+        people.append({'name': name, 'mail': address})
+    # the AI's own list only where it names the user or someone on that day's calendar
     to = [a.lower() for a in mail.get('to', []) if a.lower() == mine or a.lower() in known]
-    if mine and mine not in to:
-        to.append(mine)
+    for address in [p['mail'] for p in people if p['mail']] + [mine]:
+        if address and address not in to:
+            to.append(address)
     body = (job.dir / '信件內文.txt').read_text(encoding='utf-8').strip() if (job.dir / '信件內文.txt').is_file() else ''
-    body = finished_body(body)
-    return {'to': to, 'subject': mail.get('subject', ''), 'body': body,
+    body = with_summary(finished_body(body), '' if job.missing else job.md, job.lang)
+    return {'to': to, 'people': people, 'missing': missing, 'subject': mail.get('subject', ''), 'body': body,
             'from': f'{sender_name()} <{owner()}>' if sender_name() else owner()}
+
+
+# the mail says what the meeting was for and what came out of it, taken from the minutes (Vin 2026-10-20)
+SUMMARY = {'zh-TW': {'purpose': '會議目的', 'decisions': '初步共識', 'actions': '行動方案',
+                     'purpose_label': '會議目的：', 'highlights': '重點：', 'owner_sep': '：'},
+           'en': {'purpose': 'Purpose', 'decisions': 'Agreements', 'actions': 'Action Items',
+                  'purpose_label': 'Purpose: ', 'highlights': 'Highlights:', 'owner_sep': ': '}}
+MOST_HIGHLIGHTS = 5
+
+
+def section_text(md: str, word: str) -> str:
+    """The lines of the minutes' section whose heading holds `word` (## 二、會議目的, ## 2. Purpose)."""
+    lines = (md or '').split('\n')
+    start = next((i for i, l in enumerate(lines) if re.match(r'^##\s+(?:[一二三四五六七八九十]+、|\d+\.)?\s*' + re.escape(word), l)), None)
+    if start is None:
+        return ''
+    end = next((i for i in range(start + 1, len(lines)) if re.match(r'^##\s', lines[i])), len(lines))
+    return '\n'.join(lines[start + 1:end])
+
+
+def plain_text(text: str) -> str:
+    """One line without Markdown marks: **bold**, [a link](url), `code`."""
+    text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', text)
+    text = re.sub(r'[*`]+', '', text)
+    return ' '.join(text.split())
+
+
+def with_summary(body: str, md: str, lang: str) -> str:
+    """The body with 會議目的 (one line, the minutes' section 二) and 重點 (up to five lines: the agreements of
+    section 四, then the action items of section 六, owner after each) after the paragraph with the Doc link.
+    Unchanged when the body already has them, or the minutes give nothing to take."""
+    words = SUMMARY['en' if lang == 'en' else 'zh-TW']
+    if not body or re.search(r'(?m)^\s*(會議目的|重點|Purpose|Highlights)\s*[:：]', body):
+        return body
+    purpose = next((plain_text(p) for p in re.split(r'\n\s*\n', section_text(md, words['purpose'])) if plain_text(p)), '')
+    if len(purpose) > 160:                            # cut at the end of a sentence, else with an ellipsis
+        stop = max(purpose.rfind(c, 0, 160) for c in '。！？，.!?')
+        purpose = purpose[:stop + 1] if stop >= 40 else purpose[:159] + '…'
+    items = []
+    for line in section_text(md, words['decisions']).split('\n'):
+        m = re.match(r'^(?:\d+[.、)]|[-*])\s+(.*\S)', line)       # the top level only; an indented sub-point is detail
+        if m:
+            items.append(plain_text(m.group(1)))
+    rows = [r.strip() for r in section_text(md, words['actions']).split('\n') if r.strip().startswith('|')]
+    header = next((i - 1 for i, r in enumerate(rows) if re.fullmatch(r'\|?[\s:|-]+\|?', r)), None)   # the row above |---|
+    for i, row in enumerate(rows):
+        cells = [plain_text(c) for c in row.strip('|').split('|')]
+        if i == header or len(cells) < 3 or re.fullmatch(r'[-:\s]*', cells[0]):
+            continue
+        owner_name = cells[2]
+        items.append(f'{cells[1]}{words["owner_sep"]}{owner_name}' if owner_name else cells[1])
+    items = [i for i in items if i and BLANK not in i][:MOST_HIGHLIGHTS]   # a line still to fill in is not said in the mail
+    if not purpose and not items:
+        return body
+    block = (f'{words["purpose_label"]}{purpose}' if purpose else '')
+    if items:
+        block += ('\n\n' if block else '') + words['highlights'] + '\n' + '\n'.join(f'{n}. {i}' for n, i in enumerate(items, 1))
+    paragraphs = re.split(r'\n\s*\n', body.strip())
+    at = next((i for i, p in enumerate(paragraphs) if re.search(r'https?://|\{文件網址\}|\{doc_url\}', p)), None)
+    at = len(paragraphs) - 2 if at is None else at              # no link paragraph: before the sign-off
+    paragraphs.insert(max(at, 0) + 1, block)
+    return '\n\n'.join(paragraphs)
+
+
+def cmd_suggest(job: Job, query: str):
+    """People for the mail sheet's recipient box, from what was typed (contacts.py)."""
+    import contacts
+    out({'people': contacts.suggest(query)})
+
+
+def cmd_contacts(job: Job, raw: str):
+    """The recipients a mail just went to, kept with their names for the next mail's menu (contacts.py)."""
+    import contacts
+    try:
+        rows = json.loads(raw)
+    except ValueError:
+        rows = []
+    contacts.learn_many([(r.get('mail', ''), r.get('name', ''), 'mail') for r in rows if isinstance(r, dict)])
+    out({'ok': True})
 
 
 def neighbours(job: Job) -> dict:
@@ -2719,6 +2821,8 @@ def main():
     job = Job(Path(argv[1]))
     os.environ['VINUTES_MEETING'] = job.id           # what this command uses (AI, Google) is this meeting's
     rest = argv[2:]
+    if cmd == 'suggest':                             # only reads the contacts: answers while the AI works on the meeting
+        return cmd_suggest(job, ' '.join(rest))
     if cmd == 'locate':                              # only reads the Doc: no turn to wait for
         return cmd_locate(job, ' '.join(rest).strip())
     if cmd in ('archive', 'unarchive'):              # only a marker file: no turn to wait for either
@@ -2792,6 +2896,8 @@ def main():
         cmd_replace(job, rest[0], rest[1])
     elif cmd == 'speaker' and len(rest) >= 2:
         cmd_speaker(job, rest[0], rest[1], rest[2] if len(rest) > 2 else '')
+    elif cmd == 'contacts' and rest:
+        cmd_contacts(job, rest[0])
     elif cmd == 'delete':
         cmd_delete(job)
     else:

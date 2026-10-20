@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s tests
 import json
 import os
 import struct
+import types
 import subprocess
 import sys
 import tempfile
@@ -356,6 +357,89 @@ class FinalRun(unittest.TestCase):
         self.assertEqual(len(lines), 7)
         self.assertEqual(meta['lines'][4], [4.0, 5.0])
         self.assertIn('2 pieces reused', said)
+
+
+class Qwen(unittest.TestCase):
+    """Qwen3-ASR as the recogniser for Chinese meetings: chosen by the setting, used only when its files are here,
+    its punctuated text cut into sentence lines that take the aligner's word times."""
+
+    def setUp(self):
+        self.hub = Path(tempfile.mkdtemp(prefix='hub-'))
+        self.env = {k: os.environ.get(k) for k in ('HF_HUB_CACHE', 'MINUTES_SPEECH_MODEL')}
+        os.environ['HF_HUB_CACHE'] = str(self.hub)
+        self.fake = types.ModuleType('mlx_qwen3_asr')
+        self.calls = []
+
+        def transcribe(audio, model='', language=None, return_timestamps=False, context='', **kw):
+            self.calls.append({'model': model, 'language': language, 'context': context, 'seconds': len(audio[0]) / RATE})
+            return {'text': '第一句。第二句？', 'segments': [{'text': '第', 'start': 0.5, 'end': 0.6}, {'text': '一', 'start': 0.6, 'end': 0.7},
+                                                      {'text': '句', 'start': 0.7, 'end': 0.9}, {'text': '第二', 'start': 1.5, 'end': 1.8},
+                                                      {'text': '句', 'start': 1.8, 'end': 2.0}]}
+        self.fake.transcribe = transcribe
+        self.had = sys.modules.get('mlx_qwen3_asr')
+        sys.modules['mlx_qwen3_asr'] = self.fake
+
+    def tearDown(self):
+        for k, v in self.env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if self.had is None:
+            sys.modules.pop('mlx_qwen3_asr', None)
+        else:
+            sys.modules['mlx_qwen3_asr'] = self.had
+
+    def weights(self, *repos):
+        for repo in repos:
+            folder = self.hub / ('models--' + repo.replace('/', '--')) / 'snapshots' / 'abc'
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / 'weights.safetensors').write_bytes(b'0')
+
+    def test_whisper_unless_the_user_chose_qwen(self):
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        os.environ['MINUTES_SPEECH_MODEL'] = 'whisper'
+        self.assertEqual(tr.recogniser('zh', fake_whisper)[0], 'whisper')
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        self.assertEqual(tr.recogniser('zh', fake_whisper)[0], 'qwen3-asr')
+        self.assertEqual(tr.recogniser('en', fake_whisper)[0], 'whisper')             # other languages stay with Whisper
+
+    def test_whisper_when_qwens_files_are_not_here(self):
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        self.weights(tr.QWEN)                                                        # the aligner is missing
+        self.assertFalse(tr.qwen_ready())
+        self.assertEqual(tr.recogniser('zh', fake_whisper)[0], 'whisper')
+
+    def test_qwen_gets_the_glossary_as_context_and_writes_sentence_lines(self):
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        name, run = tr.recogniser('zh')
+        segs = run(tone(3), 100.0)
+        self.assertEqual(name, 'qwen3-asr')
+        self.assertEqual(self.calls[0]['model'], tr.QWEN)
+        self.assertEqual(self.calls[0]['language'], 'Chinese')
+        self.assertTrue(self.calls[0]['context'].startswith(tr.HINT_HEAD))
+        self.assertEqual(segs, [[100.5, 100.9, '第一句。'], [101.5, 102.0, '第二句？']])  # recording time, with punctuation
+
+    def test_lines_are_cut_at_sentence_ends_and_keep_pace_with_the_words(self):
+        words = [{'text': c, 'start': i * 0.5, 'end': i * 0.5 + 0.4} for i, c in enumerate('今天開會明天放假')]
+        segs = tr.qwen_lines('今天 開會。明天，放假', words, 0)
+        self.assertEqual(segs, [[0.0, 1.9, '今天 開會。'], [2.0, 3.9, '明天，放假']])
+
+    def test_a_piece_written_by_qwen_says_so(self):
+        self.weights(tr.QWEN, tr.QWEN_ALIGNER)
+        os.environ['MINUTES_SPEECH_MODEL'] = 'qwen3-asr'
+        job = Path(tempfile.mkdtemp(prefix='job-'))
+        (job / 'job.json').write_text(json.dumps({'audio': 'x.caf', 'started': 't', 'ended': None}), encoding='utf-8')
+        file = live.Runner(job, fake_whisper).audio
+        file.write_bytes(caf_header() + pcm(tone(5.5)))
+        meta = json.loads((job / 'job.json').read_text())
+        runner = live.Runner(job, fake_whisper, detect=lambda a, t: 'zh', piece=2.0, search=0.5, poll=0.0)
+        runner.sleep = lambda _: (job / 'job.json').write_text(json.dumps({**meta, 'ended': 'now'}), encoding='utf-8')
+        runner.run()
+        piece = json.loads((job / live.PIECES / '0001.json').read_text(encoding='utf-8'))
+        self.assertEqual(piece['recogniser'], 'qwen3-asr')
+        self.assertEqual(piece['segments'][0][2], '第一句。')
 
 
 if __name__ == '__main__':

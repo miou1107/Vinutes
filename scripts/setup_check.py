@@ -5,6 +5,10 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   setup_check.py status [--quick]           the items 3 to 10; --quick does not ask Google (for the app's start
                                             and a recording's start); the AI's sign-in is asked either way
   setup_check.py download speech|voice      fetch a model in the background; status tells how far it got
+                                            (speech fetches the chosen speech model: Whisper, or Qwen3-ASR with
+                                            its aligner)
+  setup_check.py speech_model whisper|qwen3-asr   the speech model from now on (settings.json "speech_model");
+                                            Qwen3-ASR is used for Chinese meetings once downloaded
   setup_check.py login                      Google's consent page in the browser, in the background
   setup_check.py client <file.json>         take the OAuth client the user downloaded from Google Cloud
   setup_check.py ai claude|codex|antigravity   the AI that writes the minutes from now on
@@ -36,8 +40,11 @@ import ai_runner  # noqa: E402
 import google_setup as gs  # noqa: E402
 from i18n import t  # noqa: E402
 
-SPEECH = os.environ.get('MINUTES_WHISPER_MODEL') or 'mlx-community/whisper-large-v3-turbo'
+import transcribe as tr  # noqa: E402  (the speech models: which one is chosen, where each one's files are)
+
+SPEECH = tr.MODEL                                   # Whisper, the default; on every Mac
 SPEECH_BYTES = 1_620_000_000
+QWEN_BYTES = 3_800_000_000                          # Qwen3-ASR 1.7B 8-bit with its aligner model
 VOICE = gs.CONFIG / 'models' / 'campplus.onnx'
 VOICE_URL = ('https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/'
              '3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx')
@@ -102,17 +109,33 @@ def start(what: str, args: list[str]):
 # --- each item -----------------------------------------------------------------------------------------------
 
 def hub() -> Path:
-    base = os.environ.get('HF_HUB_CACHE') or os.path.join(os.environ.get('HF_HOME') or '~/.cache/huggingface', 'hub')
-    return Path(base).expanduser() / ('models--' + SPEECH.replace('/', '--'))
+    return tr.hub_dir(SPEECH)
+
+
+def speech_repos(model: str) -> list[str]:
+    """the model files a speech model needs: Whisper one, Qwen3-ASR its model and its aligner"""
+    return [tr.QWEN, tr.QWEN_ALIGNER] if model == 'qwen3-asr' else [SPEECH]
+
+
+def downloaded(repo: Path) -> int:
+    """bytes of a model's files on disk so far (the blobs, whole or still being written)"""
+    folder = repo / 'blobs'
+    return sum(f.stat().st_size for f in folder.glob('*') if f.is_file()) if folder.is_dir() else 0
 
 
 def speech() -> dict:
-    jobs = running()
-    if 'speech' in jobs:
-        got = sum(f.stat().st_size for f in (hub() / 'blobs').glob('*') if f.is_file()) if (hub() / 'blobs').is_dir() else 0
-        return {'state': 'loading', 'pct': min(99, int(got * 100 / SPEECH_BYTES))}
-    weights = [w for w in hub().glob('snapshots/*/*.safetensors') if w.exists()]
-    return {'state': 'done'} if weights else {'state': 'todo', 'failed': 'speech' in failed()}
+    """The chosen speech model (whisper or qwen3-asr) and whether its files are here: done, loading with a
+    percentage while the download runs, or todo. A Mac without Qwen3-ASR's files transcribes with Whisper."""
+    model = tr.speech_model()
+    repos = speech_repos(model)
+    total = QWEN_BYTES if model == 'qwen3-asr' else SPEECH_BYTES
+    if 'speech' in running():
+        got = sum(downloaded(tr.hub_dir(r)) for r in repos)
+        return {'state': 'loading', 'model': model, 'pct': min(99, int(got * 100 / total))}
+    ready = all(tr.hub_has(r) for r in repos) and (model != 'qwen3-asr' or tr.qwen_ready())
+    whisper = tr.hub_has(SPEECH)
+    return {'state': 'done' if ready else 'todo', 'model': model, 'whisper': whisper,
+            **({} if ready else {'failed': 'speech' in failed()})}
 
 
 def voice() -> dict:
@@ -291,7 +314,8 @@ def fetch(what: str):
     try:
         if what == 'speech':
             from huggingface_hub import snapshot_download
-            snapshot_download(SPEECH)
+            for repo in speech_repos(tr.speech_model()):
+                snapshot_download(repo)
         else:
             VOICE.parent.mkdir(parents=True, exist_ok=True)
             part = VOICE.with_suffix('.onnx.part')
@@ -368,6 +392,10 @@ def main():
     if cmd == 'client' and len(args) > 1:
         take_client(Path(args[1]))
         return out(status(True))
+    if cmd == 'speech_model' and len(args) > 1 and args[1] in tr.SPEECH_MODELS:
+        from i18n import save                       # the choice, kept in settings.json; the download is a second step
+        save('speech_model', args[1])
+        return out({'speech': speech()})
     if cmd == 'ais':
         return out({'ais': ai_runner.states()})
     if cmd == 'ai' and len(args) > 1:

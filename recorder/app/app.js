@@ -1705,7 +1705,7 @@ async function switchAi(key) {
   }
 }
 
-// --- 附件: files, links and pictures for 「八、補充資訊」 ------------------------------------------
+// --- 附件: files, links and pictures for 「八、參考附件」 ------------------------------------------
 
 function renderAttachMenu() {
   const menu = $('#attachMenu');
@@ -1778,7 +1778,7 @@ async function pickRef(kind) {
 
 // ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): shown small above
 // the box and sent with the next sentence for the AI to look at; it does not go into the minutes (Vin 2026-10-19: a
-// screenshot pasted to show what to change had become an attachment). Pictures for 「八、補充資訊」 come from the
+// screenshot pasted to show what to change had become an attachment). Pictures for 「八、參考附件」 come from the
 // picture button. Text pastes as text.
 async function pastePicture(e) {
   const clip = e.clipboardData;
@@ -1803,7 +1803,7 @@ async function pastePicture(e) {
   } catch (err) { showAlert(err.message); } finally { S.pasting = false; }
 }
 
-// --- 加入會議附件: files, links and pictures for 「八、補充資訊」, each with its own 說明 ---------------------
+// --- 加入會議附件: files, links and pictures for 「八、參考附件」, each with its own 說明 ---------------------
 
 // in the tag bar: what section 8 holds (a click opens it) and 加入會議附件, when the minutes have a Google Doc
 function attachmentsHTML() {
@@ -1907,7 +1907,7 @@ async function pickAttach(kind) {
   } catch (e) { m.err = e.message; renderAttachSheet(); }
 }
 
-// 加入: one line each in 「八、補充資訊」, led by its note. The sheet stays open while the files go to Drive, and
+// 加入: one line each in 「八、參考附件」, led by its note. The sheet stays open while the files go to Drive, and
 // opens again with what was typed if they could not
 async function sendAttach() {
   const m = S.att, id = S.sel;

@@ -520,7 +520,7 @@ def send(to: str, subject: str, body_file: Path, really: bool, minutes: Path | N
             editors = [e for e in rcpts if same_company(e, COMPANY) and e != OWNER]
             print('editors on send:', ', '.join(editors) or '(none)')
     if files and readers:
-        print(f'ATTACHMENTS {len(files)}: the files 「八、補充資訊」 links to open for every recipient on send')
+        print(f'ATTACHMENTS {len(files)}: the files 「八、參考附件」 links to open for every recipient on send')
     print('確認碼:', code)
     if not really:
         print('(preview only; after the user approves, rerun with --send --confirm ' + code + ')')
@@ -541,7 +541,7 @@ def send(to: str, subject: str, body_file: Path, really: bool, minutes: Path | N
 
 
 def linked_files(minutes: Path | None) -> list[str]:
-    """The Drive files the minutes' 「八、補充資訊」 links to (the recorder app keeps their ids in the record)."""
+    """The Drive files the minutes' 「八、參考附件」 links to (the recorder app keeps their ids in the record)."""
     if not minutes or minutes.suffix != '.md' or not minutes.is_file():
         return []
     try:

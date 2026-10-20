@@ -130,7 +130,7 @@ Our company is always `our_company` from `使用者設定.json`; if it is missin
   people's names as the transcript writes them, keep amounts in their own currency (e.g. "¥150,000"), and keep a
   short original term in parentheses when the English is a guess.
 
-## Layout: seven sections, plus an eighth when there is supporting material
+## Layout: eight sections, the eighth saying "None" when nothing was attached
 
 Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Markdown, two `#` headings.
 
@@ -151,12 +151,12 @@ Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Mark
 6. **## 6. Action Items**: a table `No. | Action | Owner | Details and next steps`; put dates in the details,
    `[__]` when none was given.
 7. **## 7. Other Suggestions**: one paragraph: what the next meeting should focus on, what can wait.
-8. **## 8. Supporting Materials** (only when there is something; otherwise leave the section out, never write
-   "None"): material mentioned that belongs nowhere above, e.g. figures a colleague sent after the meeting,
+8. **## 8. Attachments** (in every set of minutes; when there is nothing, the section's only line is "None"):
+   material mentioned that belongs nowhere above, e.g. figures a colleague sent after the meeting,
    reference sites, screenshots. One line each: who provided what, then the link; pictures as `![caption](file or address)`.
-   The app adds files and links the user attaches later to the end of this section.
+   The app adds files and links the user attaches later to the end of this section, in place of "None".
 
-Keep these heading texts exactly ("## 1. Meeting Details" … "## 8. Supporting Materials"): the app finds sections
+Keep these heading texts exactly ("## 1. Meeting Details" … "## 8. Attachments"): the app finds sections
 by them.
 
 ## Tone and wording

@@ -156,7 +156,7 @@ person, a voice they removed was no one, a voice left as 講者 X is a person th
 
 Measured on 2026-10-21 on the last seven meetings, before and after the three rules of v0.4.19 (a group within
 0.25 of a named person's voice at this meeting is that person; a new voice needs 20 s of lines of 3 s or more; a
-kept voice matched only in shorter lines is not there):
+known voice heard in under 20 s of lines of 1.5 s or more is not there):
 
 | Meeting | People kept by the user | Voices before | Voices after |
 |---|---|---|---|

@@ -815,7 +815,10 @@ def invited(job: Job) -> list[str]:
 def meeting_people(job: Job) -> list[str]:
     data = read_json(job.dir / MEETING_PEOPLE)
     if isinstance(data.get('people'), list):
-        names = [n for n in data['people'] if isinstance(n, str)]
+        names = []
+        for n in data['people']:                      # a list kept before two spellings of one person matched
+            if isinstance(n, str):
+                names = add_name(names, n)
     else:                                             # first time: from the invitation and the minutes
         names = []
         roster_names, _ = roster(calendar_of(job)['departments'], before=job_label(job)[:10])   # the department's people, confirmed at an earlier meeting

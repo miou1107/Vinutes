@@ -37,12 +37,16 @@ def one_line(text, limit: int) -> str:
 
 
 def name_keys(name: str) -> set[str]:
-    """陳怡君（Jessie） -> {陳怡君（jessie）, 陳怡君, jessie}: the ways the same person is written in minutes."""
+    """陳怡君（Jessie） -> {陳怡君（jessie）, 陳怡君, jessie}: the ways the same person is written in minutes.
+    A company calendar writes 高聖哲(Vin(Vincent)): every part of a bracket inside a bracket counts too, so the
+    voice Vinutes knows as Vin is this person (2026-10-21)."""
     whole = name.strip().casefold()
     keys = {whole}
     found = re.match(r'^(.*?)\s*[（(]\s*(.*?)\s*[）)]\s*$', whole)
     if found:
-        keys |= {k for k in found.groups() if k}
+        for part in found.groups():
+            if part:
+                keys |= name_keys(part)
     return keys
 
 

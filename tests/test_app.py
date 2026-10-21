@@ -2029,6 +2029,77 @@ class Voices(unittest.TestCase):
         self.assertEqual({named[g] for g in amy}, {'Amy'})
         self.assertEqual(sorted(n for n in named.values() if n), ['Amy'])     # the others stay 講者 X
 
+    def test_a_named_persons_second_voice_joins_them(self):
+        """Vin 2026-10-21: a two-person meeting listed seven speakers. 小婷's short lines missed her kept prints and
+        were grouped on their own as 講者 C (0.11 from her voice), so the minutes listed a third person."""
+        np, rng = self.np, self.np.random.default_rng(3)
+        away = self.unit(rng.normal(size=192))
+        self.sp.remember('Amy', np.array([self.unit(self.people['amy'] + 1.0 * away)]), ['old:1'])   # last month's mic
+        # amy's lines again, heard from the other side: too far from the kept print to be matched line by line,
+        # alike enough to be grouped, and together 30 seconds, so they used to become a speaker of their own
+        again = [self.unit(self.people['amy'] - 0.6 * away + 0.2 * self.unit(rng.normal(size=192))) for _ in range(6)]
+        V = np.concatenate([self.V, np.array(again, dtype=np.float32)])
+        ok = np.ones(len(V), dtype=bool)
+        spans = self.spans + [(300 + i * 6.0, 305 + i * 6.0) for i in range(6)]
+        result = self.sp.label(V, ok, spans, self.sp.library())
+        amy = {result['lines'][i] for i, w in enumerate(self.who) if w == 'amy'}
+        self.assertEqual(len(amy), 1)
+        self.assertEqual({result['lines'][i] for i in range(len(self.who), len(V))}, amy)   # the same voice, not 講者 C
+        self.assertEqual(result['groups'][amy.pop()]['name'], 'Amy')
+        self.assertEqual(len(result['groups']), 3)
+
+    def test_short_acknowledgements_do_not_make_a_speaker(self):
+        """嗯, 對, 好: prints of lines under three seconds are noise. Fifteen of them, alike and 24 seconds
+        together, used to be 講者 D; now they go to the nearest voice."""
+        np, rng = self.np, self.np.random.default_rng(5)
+        noise = self.unit(rng.normal(size=192))
+        short = [self.unit(noise + 0.3 * self.unit(rng.normal(size=192))) for _ in range(15)]
+        V = np.concatenate([self.V, np.array(short, dtype=np.float32)])
+        ok = np.ones(len(V), dtype=bool)
+        spans = self.spans + [(300 + i * 2.0, 301.6 + i * 2.0) for i in range(15)]
+        result = self.sp.label(V, ok, spans, {})
+        self.assertEqual(len(result['groups']), 3)
+        self.assertEqual(self.groups_by_person(result), {'vin': {'A'}, 'amy': {'B'}, 'kai': {'C'}})
+
+    def test_a_person_heard_only_in_short_lines_is_not_there(self):
+        """A kept voice matched by three two-second lines (Alma, at the meeting of 2026-10-21, 7 seconds) is a
+        mishearing, not a person at the meeting: those lines go to the nearest voice."""
+        np, rng = self.np, self.np.random.default_rng(9)
+        alma = self.unit(rng.normal(size=192))
+        self.sp.remember('Alma', np.array([alma]), ['old:1'])
+        brief = [self.unit(alma + 0.1 * self.unit(rng.normal(size=192))) for _ in range(3)]
+        V = np.concatenate([self.V, np.array(brief, dtype=np.float32)])
+        ok = np.ones(len(V), dtype=bool)
+        spans = self.spans + [(300 + i * 3.0, 302 + i * 3.0) for i in range(3)]
+        result = self.sp.label(V, ok, spans, self.sp.library())
+        self.assertNotIn('Alma', [g['name'] for g in result['groups'].values()])
+        self.assertEqual(len(result['groups']), 3)
+
+    def test_a_known_person_who_speaks_in_short_sentences_is_still_there(self):
+        """Review of v0.4.19: Amy, known, says fifteen things of 2.9 seconds each. Those are not noise; she is
+        at the meeting and named, not folded into vin."""
+        np, rng = self.np, self.np.random.default_rng(11)
+        self.sp.remember('Amy', np.array([self.people['amy']]), ['old:1'])
+        who = ['vin'] * 20 + ['amy'] * 15
+        V = np.array([self.unit(self.people[w] + rng.normal(size=192) * 0.05) for w in who], dtype=np.float32)
+        ok = np.ones(len(V), dtype=bool)
+        spans = [(i * 6.0, i * 6.0 + (5.0 if w == 'vin' else 2.9)) for i, w in enumerate(who)]
+        result = self.sp.label(V, ok, spans, self.sp.library())
+        amy = {result['lines'][i] for i, w in enumerate(who) if w == 'amy'}
+        self.assertEqual(len(amy), 1)
+        self.assertEqual(result['groups'][amy.pop()]['name'], 'Amy')
+        self.assertEqual(len(result['groups']), 2)
+
+    def test_a_recording_of_short_sentences_only_still_has_a_speaker(self):
+        """Forty lines of 2.5 seconds, one person, nobody known: 講者 A, not an empty result."""
+        np, rng = self.np, self.np.random.default_rng(13)
+        V = np.array([self.unit(self.people['vin'] + rng.normal(size=192) * 0.05) for _ in range(40)], dtype=np.float32)
+        ok = np.ones(40, dtype=bool)
+        spans = [(i * 3.0, i * 3.0 + 2.5) for i in range(40)]
+        result = self.sp.label(V, ok, spans, {})
+        self.assertEqual(list(result['groups']), ['A'])
+        self.assertEqual(set(result['lines']), {'A'})
+
     def test_naming_a_voice_and_moving_one_line(self):
         job = Path(tempfile.mkdtemp(prefix='voices-'))
         lines = '\n'.join(f'[00:{i:02d}] 第 {i} 句' for i in range(len(self.who)))

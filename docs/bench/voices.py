@@ -23,7 +23,8 @@ RECORDINGS = speakers.CONFIG / 'recordings'
 
 
 def library_without(job: str) -> dict:
-    """The voice library as it would have been before this meeting taught it anything."""
+    """The voice library without what this meeting taught it (what later meetings taught stays, so the
+    before-and-after of one rule change is a fair pair, not what the app saw on the day)."""
     out = {}
     for name, file in speakers._index().items():
         rows, tags = speakers._rows(file)
@@ -47,7 +48,10 @@ def main():
             continue
         dur = np.array([b - a for a, b in spans])
         kept = json.loads((job / '講者.json').read_text(encoding='utf-8'))
-        groups = kept['groups']
+        groups = kept.get('groups') or {}
+        if not groups:
+            print(job.name, 'skipped: no voices were kept for it')
+            continue
         truth = [groups[k].get('name') or ('removed' if groups[k].get('off') else 'unnamed ' + k) for k in kept['lines']]
         print(f"\n{job.name}  kept by the user: " + ', '.join(
             f"{k}: {v.get('name') or ('removed' if v.get('off') else 'unnamed')} {v['seconds']}s" for k, v in groups.items()))

@@ -2075,6 +2075,31 @@ class Voices(unittest.TestCase):
         self.assertNotIn('Alma', [g['name'] for g in result['groups'].values()])
         self.assertEqual(len(result['groups']), 3)
 
+    def test_a_known_person_who_speaks_in_short_sentences_is_still_there(self):
+        """Review of v0.4.19: Amy, known, says fifteen things of 2.9 seconds each. Those are not noise; she is
+        at the meeting and named, not folded into vin."""
+        np, rng = self.np, self.np.random.default_rng(11)
+        self.sp.remember('Amy', np.array([self.people['amy']]), ['old:1'])
+        who = ['vin'] * 20 + ['amy'] * 15
+        V = np.array([self.unit(self.people[w] + rng.normal(size=192) * 0.05) for w in who], dtype=np.float32)
+        ok = np.ones(len(V), dtype=bool)
+        spans = [(i * 6.0, i * 6.0 + (5.0 if w == 'vin' else 2.9)) for i, w in enumerate(who)]
+        result = self.sp.label(V, ok, spans, self.sp.library())
+        amy = {result['lines'][i] for i, w in enumerate(who) if w == 'amy'}
+        self.assertEqual(len(amy), 1)
+        self.assertEqual(result['groups'][amy.pop()]['name'], 'Amy')
+        self.assertEqual(len(result['groups']), 2)
+
+    def test_a_recording_of_short_sentences_only_still_has_a_speaker(self):
+        """Forty lines of 2.5 seconds, one person, nobody known: 講者 A, not an empty result."""
+        np, rng = self.np, self.np.random.default_rng(13)
+        V = np.array([self.unit(self.people['vin'] + rng.normal(size=192) * 0.05) for _ in range(40)], dtype=np.float32)
+        ok = np.ones(40, dtype=bool)
+        spans = [(i * 3.0, i * 3.0 + 2.5) for i in range(40)]
+        result = self.sp.label(V, ok, spans, {})
+        self.assertEqual(list(result['groups']), ['A'])
+        self.assertEqual(set(result['lines']), {'A'})
+
     def test_naming_a_voice_and_moving_one_line(self):
         job = Path(tempfile.mkdtemp(prefix='voices-'))
         lines = '\n'.join(f'[00:{i:02d}] 第 {i} 句' for i in range(len(self.who)))

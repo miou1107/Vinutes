@@ -3088,7 +3088,22 @@ class MeetingPeople(unittest.TestCase):
         job = self.job()
         minutes_app.save_meeting_people(job, ['黃建國(Vin(Vinston))', 'Amy', 'Vin'])
         self.assertEqual(minutes_app.meeting_people(job), ['黃建國(Vin(Vinston))', 'Amy'])
-        self.assertNotIn('Vin', minutes_app.silent_people(job))
+        minutes_app.save_meeting_people(job, ['Vin', 'Amy', '黃建國(Vin(Vinston))'])   # the fuller spelling stays
+        self.assertEqual(minutes_app.meeting_people(job), ['黃建國(Vin(Vinston))', 'Amy'])
+
+    def test_naming_a_voice_by_a_nickname_of_an_invitee_does_not_list_the_invitee_as_silent(self):
+        # the meeting of 2026-10-21: the calendar note said 黃建國(Vin(Vinston)), the voice was named Vin
+        (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [
+            {'name': '黃建國(Vin(Vinston))', 'email': 'vin@example.com', 'self': False},
+            {'name': 'Amy', 'email': 'amy@example.com', 'self': False}]}, ensure_ascii=False))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Vin')
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['黃建國(Vin(Vinston))', 'Amy', 'Kai'])
+        self.assertEqual(minutes_app.silent_people(self.job()), ['Amy', 'Kai'])
+        minutes_app.cmd_speaker(self.job(), 'B', '黃建國')      # the same person by another of the spellings
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['黃建國(Vin(Vinston))', 'Amy', 'Kai'])
+        self.assertIn('與會人員：黃建國(Vin(Vinston))、Amy、Kai', self.md_path.read_text(encoding='utf-8'))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')          # someone else: the first name goes
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Amy', 'Kai', 'Mia'])
 
     def test_renaming_a_named_voice_swaps_the_name_in_the_minutes(self):
         minutes_app.cmd_speaker(self.job(), 'B', 'Mia')

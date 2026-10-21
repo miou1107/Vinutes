@@ -146,3 +146,35 @@ against 40 s with Whisper turbo, so the pieces during a recording keep pace.
 Conclusion: the next quality step for Chinese meetings is Qwen3-ASR as the transcriber (with the glossary given
 to it as context, and Whisper kept for other languages or as a fallback), not audio cleaning. Not built yet; it
 needs the model in install.sh (2.5 GB), the pieces path in live_transcribe.py, and the same bench run again.
+
+## Fewer phantom speakers (v0.4.19)
+
+`voices.py` runs the voice grouping of `scripts/speakers.py` again on the meetings recorded on this Mac, from
+the line prints each meeting kept, without the prints that meeting itself taught the voice library, and matches
+every voice it makes to the person who owns most of its seconds under People: a voice the user named is that
+person, a voice they removed was no one, a voice left as 講者 X is a person they did not name.
+
+Measured on 2026-10-21 on the last seven meetings, before and after the three rules of v0.4.19 (a group within
+0.25 of a named person's voice at this meeting is that person; a new voice needs 20 s of lines of 3 s or more; a
+kept voice matched only in shorter lines is not there):
+
+| Meeting | People kept by the user | Voices before | Voices after |
+|---|---|---|---|
+| 2026-10-16 15:30 | Vin, Phoebe, 采瑤 | 7 (Vin split in two, 采瑤 in three, Ally 26 s, a second Vin 20 s) | 3 |
+| 2026-10-19 10:53 | Phoebe, 采瑤, Vin, Ally, two unnamed | 8 (Vin split in two, a third Vin 16 s, Phoebe's 87 s apart) | 5 (one of the unnamed was Phoebe, 0.13 from her) |
+| 2026-10-19 17:04 | Vin, Pitt, one removed | 4 | 3 |
+| 2026-10-20 11:03 | Vin, Adam, one removed | 4 | 3 |
+| 2026-10-20 15:00 | Vin, Adam, Eric, two removed | 5 | 4 (Adam, 0.33 from Vin, stays apart) |
+| 2026-10-21 10:07 | adam, Ally, Vin, two unnamed, one removed | 6 | 3 (the 967 s unnamed voice was Ally, 0.09 from her) |
+| 2026-10-21 13:44 | 采瑤, Vin, five removed | 7 | 3 |
+
+What the distances look like: a person's own voice cut in two was 0.01 to 0.16 apart (0.24 once, 24 s), two
+different people were never closer than 0.33 (Vin and Adam) and usually 0.5 to 0.85. The removed voices that
+remain (51 to 90 s, long lines, far from everyone) are another sound in the room, such as a video played during
+the meeting; nothing in the prints tells them from a person who spoke for a minute, so they stay 講者 X to be
+removed by hand. The 2026-10-20 11:03 meeting shows a library problem the rules do not touch: Adam's kept prints
+match 59% of Vin's lines there.
+
+```bash
+~/.config/vin-meeting-minutes-zh/venv/bin/python docs/bench/voices.py 7
+```

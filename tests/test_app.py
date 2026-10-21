@@ -3077,6 +3077,34 @@ class MeetingPeople(unittest.TestCase):
         self.assertEqual(minutes_app.with_people(job, '與會人員：Vin。\n', ['Vin', 'Amy']), '與會人員：Vin、Amy。\n')
         self.assertTrue(minutes_app.same_name('陳怡君（Jessie）', 'jessie'))
 
+    def test_a_name_with_a_nickname_inside_the_nickname_is_the_same_person(self):
+        # the company's calendar writes 高聖哲(Vin(Vincent)); the voice Vinutes knows is Vin (2026-10-21)
+        self.assertTrue(minutes_app.same_name('高聖哲(Vin(Vincent))', 'Vin'))
+        self.assertTrue(minutes_app.same_name('高聖哲(Vin(Vincent))', 'Vincent'))
+        self.assertTrue(minutes_app.same_name('高聖哲(Vin(Vincent))', '高聖哲'))
+        self.assertFalse(minutes_app.same_name('高聖哲(Vin(Vincent))', 'Vinnie'))
+
+    def test_the_same_person_written_twice_on_the_list_is_listed_once(self):
+        job = self.job()
+        minutes_app.save_meeting_people(job, ['高聖哲(Vin(Vincent))', 'Amy', 'Vin'])
+        self.assertEqual(minutes_app.meeting_people(job), ['高聖哲(Vin(Vincent))', 'Amy'])
+        minutes_app.save_meeting_people(job, ['Vin', 'Amy', '高聖哲(Vin(Vincent))'])   # the fuller spelling stays
+        self.assertEqual(minutes_app.meeting_people(job), ['高聖哲(Vin(Vincent))', 'Amy'])
+
+    def test_naming_a_voice_by_a_nickname_of_an_invitee_does_not_list_the_invitee_as_silent(self):
+        # the meeting of 2026-10-21: the calendar note said 高聖哲(Vin(Vincent)), the voice was named Vin
+        (self.job_dir / '行事曆.json').write_text(json.dumps({'guests': [
+            {'name': '高聖哲(Vin(Vincent))', 'email': 'vin@example.com', 'self': False},
+            {'name': 'Amy', 'email': 'amy@example.com', 'self': False}]}, ensure_ascii=False))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Vin')
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['高聖哲(Vin(Vincent))', 'Amy', 'Ken'])
+        self.assertEqual(minutes_app.silent_people(self.job()), ['Amy', 'Ken'])
+        minutes_app.cmd_speaker(self.job(), 'B', '高聖哲')      # the same person by another of the spellings
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['高聖哲(Vin(Vincent))', 'Amy', 'Ken'])
+        self.assertIn('與會人員：高聖哲(Vin(Vincent))、Amy、Ken', self.md_path.read_text(encoding='utf-8'))
+        minutes_app.cmd_speaker(self.job(), 'B', 'Mia')          # someone else: the first name goes
+        self.assertEqual(minutes_app.meeting_people(self.job()), ['Amy', 'Ken', 'Mia'])
+
     def test_renaming_a_named_voice_swaps_the_name_in_the_minutes(self):
         minutes_app.cmd_speaker(self.job(), 'B', 'Mia')
         minutes_app.cmd_speaker(self.job(), 'B', 'Nina')

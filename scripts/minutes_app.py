@@ -83,7 +83,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import briefs  # noqa: E402
 import doc_sync  # noqa: E402
 import speakers  # noqa: E402
-from briefs import add_name, same_name  # noqa: E402
+from briefs import add_name, name_keys, same_name  # noqa: E402
 from google_setup import CONFIG, owner, sender_name  # noqa: E402
 from i18n import t  # noqa: E402
 from strings import EN, ZH  # noqa: E402
@@ -815,7 +815,15 @@ def invited(job: Job) -> list[str]:
 def meeting_people(job: Job) -> list[str]:
     data = read_json(job.dir / MEETING_PEOPLE)
     if isinstance(data.get('people'), list):
-        names = [n for n in data['people'] if isinstance(n, str)]
+        names = []
+        for n in data['people']:                      # a list kept before two spellings of one person matched
+            if not isinstance(n, str):
+                continue
+            twin = next((i for i, m in enumerate(names) if same_name(m, n)), None)
+            if twin is None:
+                names = add_name(names, n)
+            elif len(name_keys(n)) > len(name_keys(names[twin])):   # Vin, then 高聖哲(Vin(Vincent)): the fuller one stays
+                names[twin] = n
     else:                                             # first time: from the invitation and the minutes
         names = []
         roster_names, _ = roster(calendar_of(job)['departments'], before=job_label(job)[:10])   # the department's people, confirmed at an earlier meeting
@@ -2471,7 +2479,7 @@ def cmd_speaker(job: Job, group: str, name: str, line: str = ''):
     project = project_of(job)                        # the whole voice: the person was there, the minutes say so
     names = meeting_people(job)
     if before and not same_name(before, who):         # the voice had another name: that one goes, in the minutes too
-        names = [n for n in names if not same_name(n, before)]
+        names = [n for n in names if not same_name(n, before) or same_name(n, who)]   # Vin -> 高聖哲 keeps 高聖哲(Vin(Vincent))
     names = add_name(names, who)
     save_speaker(job, group, who)
     save_project_people(project, add_name(project_people(project), who))

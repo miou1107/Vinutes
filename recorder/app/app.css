@@ -297,7 +297,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 #askTop { display: flex; flex-direction: column; gap: 8px; }
 #askTop:empty { display: none; }
 .busy { color: var(--muted); }
-.replyline .asked { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.replyline .asked { color: var(--muted); flex: 0 1 auto; max-width: 45%; overflow-wrap: anywhere; }   /* a long quote wraps in its half, the answer keeps the rest */
 .replyline .said { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .replyline.err .said { color: var(--red); }
 .learn { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 8px; background: var(--blue-bg); border: 1px solid var(--blue-line); font-size: 12px; }

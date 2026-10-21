@@ -7,7 +7,9 @@ Usage:
 
 Each transcript line gets a voice print (3D-Speaker CAM++, through sherpa-onnx) from the stretch of audio
 transcribe.py noted for it in 逐字稿.json. Lines that sound like someone the user named before take that name;
-the rest are grouped by how alike they sound into 講者 A, 講者 B, ... (no head count needed). Naming a group
+the rest are grouped by how alike they sound into 講者 A, 講者 B, ... (no head count needed). A group that is
+that person's own voice again joins them; a new voice needs 20 seconds of lines of 3 seconds or more, since the
+prints of 嗯 and 對 are noise; and a known voice heard in under 20 seconds of lines is not counted as there. Naming a group
 keeps a few of its prints in $MINUTES_HOME/voices/, so the next meeting knows that voice. Nothing leaves the Mac.
 
 Files:
@@ -39,6 +41,13 @@ GROUP_APART = 0.4          # cosine distance: two groups closer than this are on
 KNOWN = 0.5                # a line this close to a named person's prints is that person
 MARGIN = 0.05              # ... and clearly closer to that person than to anyone else named
 MIN_GROUP = 20.0           # seconds of talk before a voice becomes 講者 X; smaller ones join the nearest voice
+LONG_LINE = 3.0            # ... counted, for a new voice, from lines at least this long: the prints of 嗯 / 對 / 好 are
+                           # noise, and a group made of them is no one (seven meetings of 2026-10: every such group
+                           # was removed). A known voice needs MIN_GROUP of lines of 1.5 s or more (the grouping's pool)
+SAME_VOICE = 0.25          # cosine distance: a group of unnamed lines this close to a named person's voice at this
+                           # meeting is that person again (their short lines missed KNOWN; measured 0.01 to 0.16 on
+                           # seven meetings, while two different people were never under 0.33)
+SAME_MARGIN = 0.1          # ... and this much closer to them than to any other named person
 KEEP = 300                 # prints kept per person, newest first
 
 
@@ -194,20 +203,44 @@ def label(V, ok, spans, people: dict) -> dict:
         scores = sorted(((closeness(V[i], people[n]), n) for n in names), reverse=True)
         if scores[0][0] >= KNOWN and (len(scores) == 1 or scores[0][0] - scores[1][0] >= MARGIN):
             who[i] = 'P:' + scores[0][1]
-    unknown = [i for i in range(len(spans)) if ok[i] and not who[i] and dur[i] >= 1.5]
+    def talk(idx, at_least: float) -> float:
+        return sum(dur[i] for i in idx if dur[i] >= at_least)
+
     voices = {}                                       # key -> centroid
-    for g in group(V, unknown, dur):
-        if sum(dur[i] for i in g) >= MIN_GROUP:
-            key = f'G{len(voices)}'
-            c = sum(V[i] * dur[i] for i in g)
-            voices[key] = c / np.linalg.norm(c)
-            for i in g:
-                who[i] = key
     for n in names:
         mine = [i for i in range(len(spans)) if who[i] == 'P:' + n]
-        if mine:
-            c = sum(V[i] * dur[i] for i in mine)
-            voices['P:' + n] = c / np.linalg.norm(c)
+        if not mine:
+            continue
+        if talk(mine, 1.5) < MIN_GROUP:               # a few short lines that sound like someone: not them, this time
+            for i in mine:
+                who[i] = ''
+            continue
+        c = sum(V[i] * dur[i] for i in mine)
+        voices['P:' + n] = c / np.linalg.norm(c)
+    named = list(voices)
+    unknown = [i for i in range(len(spans)) if ok[i] and not who[i] and dur[i] >= 1.5]
+    groups, left = group(V, unknown, dur), []
+    for g in groups:
+        c = sum(V[i] * dur[i] for i in g)
+        c = c / np.linalg.norm(c)
+        near = sorted((1 - float(voices[k] @ c), k) for k in named)
+        if near and near[0][0] <= SAME_VOICE and (len(near) == 1 or near[1][0] - near[0][0] >= SAME_MARGIN):
+            for i in g:                               # the named person's own voice, cut off by their short lines
+                who[i] = near[0][1]
+        elif talk(g, LONG_LINE) >= MIN_GROUP:
+            key = f'G{len(voices)}'
+            voices[key] = c
+            for i in g:
+                who[i] = key
+        else:
+            left.append((g, c))
+    if not voices:                                    # nobody said three seconds in a row: the long groups still count
+        for g, c in left:
+            if talk(g, 0) >= MIN_GROUP:
+                key = f'G{len(voices)}'
+                voices[key] = c
+                for i in g:
+                    who[i] = key
     if not voices:
         return {'groups': {}, 'lines': [''] * len(spans), 'fixed': {}}
     keys = list(voices)

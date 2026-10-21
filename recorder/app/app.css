@@ -220,7 +220,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .okc { all: unset; cursor: pointer; display: flex; padding: 2px; }
 .logrow { display: flex; gap: 10px; font-size: 12px; line-height: 1.55; }
 .logrow .when { flex: none; width: 72px; color: var(--faint); font-variant-numeric: tabular-nums; }
-.logrow .what { flex: 1; min-width: 0; -webkit-user-select: text; user-select: text; }
+.logrow .what { flex: 1; min-width: 0; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }   /* a long link wraps instead of running out of the rail */
 .logrow .what b { font-weight: 600; }
 .logrow.sent .what { color: var(--green); }
 .logrow.warn .what { color: var(--red); }
@@ -297,8 +297,8 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 #askTop { display: flex; flex-direction: column; gap: 8px; }
 #askTop:empty { display: none; }
 .busy { color: var(--muted); }
-.replyline .asked { color: var(--muted); }
-.replyline .said { flex: 1; }
+.replyline .asked { color: var(--muted); flex: 0 1 auto; max-width: 45%; overflow-wrap: anywhere; }   /* a long quote wraps in its half, the answer keeps the rest */
+.replyline .said { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .replyline.err .said { color: var(--red); }
 .learn { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 8px; background: var(--blue-bg); border: 1px solid var(--blue-line); font-size: 12px; }
 .learn .lh { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--blue-ink); }

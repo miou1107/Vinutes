@@ -2733,8 +2733,21 @@ def mail_body(job: Job, block: str = '') -> tuple[str, bool]:
         fresh = bool(block)
     body = with_signature(with_summary(body, md, job.lang, block))
     if summary_text(body) not in offered:
-        write_json(job.dir / SUMMARY_FILE, {**kept, 'offered': (offered + [summary_text(body)])[-20:]})
+        keep_summary(job, {**kept, 'offered': (offered + [summary_text(body)])[-100:]})
     return body, fresh
+
+
+def keep_summary(job: Job, data: dict):
+    """信件重點.json, written outside the meeting's turn (the sheet's AI run, a meeting opening at the same time): each
+    writer has its own temporary file, and a failed write only costs an AI run later, never the meeting."""
+    import tempfile
+    try:
+        fd, tmp = tempfile.mkstemp(prefix='.信件重點-', suffix='.tmp', dir=job.dir)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, job.dir / SUMMARY_FILE)
+    except OSError:
+        pass
 
 
 def ai_summary(job: Job, md: str) -> str:
@@ -2790,7 +2803,7 @@ def cmd_mail_summary(job: Job):
         md = job.md
         block = ai_summary(job, md)
         if block:
-            write_json(job.dir / SUMMARY_FILE, {**read_json(job.dir / SUMMARY_FILE), 'minutes': minutes_key(md), 'block': block})
+            keep_summary(job, {**read_json(job.dir / SUMMARY_FILE), 'minutes': minutes_key(md), 'block': block})
             body, fresh = mail_body(job, block)
     out({'body': body, 'summary': summary_text(body), 'summary_fresh': fresh})
 

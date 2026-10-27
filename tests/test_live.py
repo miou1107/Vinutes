@@ -178,7 +178,7 @@ class Assemble(unittest.TestCase):
         self.assertEqual(len(lines), 1)
 
 
-class Live(unittest.TestCase):
+class Recording(unittest.TestCase):
     """A recording that grows between looks, transcribed by a stand-in Whisper two seconds at a time."""
 
     def setUp(self):
@@ -205,6 +205,8 @@ class Live(unittest.TestCase):
     def pieces(self):
         return [json.loads(p.read_text(encoding='utf-8')) for p in sorted((self.job / live.PIECES).glob('[0-9]*.json'))]
 
+
+class Live(Recording):
     def test_pieces_are_cut_in_the_quiet_and_the_helper_stops_at_the_end(self):
         import numpy as np
         # 1.8 s of talk, a 0.4 s gap, then on: the cut should land in the gap at about 2.0 s
@@ -295,6 +297,104 @@ class Live(unittest.TestCase):
         self.assertGreater(len(after), len(before))
         self.assertEqual(after[len(before)]['start'], before[-1]['end'])    # the new ones go on from there
         self.assertEqual(again.number, len(after))
+
+
+class VoicePrints(Recording):
+    """The voice prints of each piece's lines, made during the recording and reused by speakers.py after Stop."""
+
+    def setUp(self):
+        super().setUp()
+        import numpy as np
+        import speakers
+        self.np, self.sp = np, speakers
+        self.calls = [0]
+
+        def embed(samples):                          # a stand-in print that changes with every sample it is given
+            self.calls[0] += 1
+            x = np.asarray(samples, dtype=np.float64)
+            return [len(x), x.sum(), (x * x).sum(), x[0], x[-1], (x * np.arange(len(x))).sum() / len(x)]
+        self.model = (embed, 6)
+
+    def record(self, seconds: float, voices):
+        sound = self.np.random.default_rng(7).uniform(-0.5, 0.5, int(seconds * RATE)).astype(self.np.float32)
+        self.grow(sound)
+        runner = self.runner(voices=voices)
+        runner.sleep = lambda _: self.end()
+        runner.run()
+        return runner
+
+    def spans(self):
+        return [(s[0], s[1]) for p in self.pieces() for s in p['segments']] + [(7.0, 7.8)]
+
+    def test_prints_made_during_the_recording_are_the_ones_made_after_stop(self):
+        self.record(8, lambda a, start, spans: self.sp.piece_prints(a, start, spans, self.model))
+        made = sorted((self.job / live.PIECES).glob('[0-9]*.npz'))
+        self.assertEqual(len(made), len(self.pieces()))
+        self.assertGreaterEqual(len(made), 2)
+        spans = self.spans()
+        known = self.sp.made_live(self.job)
+        self.calls[0] = 0
+        V, ok = self.sp.prints(self.file, spans, known, self.model)
+        after_stop = self.calls[0]
+        self.calls[0] = 0
+        V0, ok0 = self.sp.prints(self.file, spans, None, self.model)
+        self.assertEqual(ok.tolist(), ok0.tolist())
+        self.np.testing.assert_allclose(V, V0, rtol=1e-6, atol=1e-6)
+        self.assertEqual(after_stop, 1)              # only the line after the last piece is made after Stop
+        self.assertEqual(self.calls[0], len(spans))
+
+    def test_a_line_running_past_its_piece_is_left_for_after_stop(self):
+        samples = self.np.ones(2 * RATE, dtype=self.np.float32)
+        S, V, ok = self.sp.piece_prints(samples, 4.0, [(4.0, 5.0), (5.5, 6.4), (4.2, 4.5)], self.model)
+        self.assertEqual(S.tolist(), [[4.0, 5.0], [4.2, 4.5]])
+        self.assertEqual(ok.tolist(), [True, False])       # too short for a print: the same answer after Stop
+
+    def test_without_the_voice_model_the_pieces_are_as_before(self):
+        self.record(5.5, None)
+        self.assertTrue(self.pieces())
+        self.assertFalse(list((self.job / live.PIECES).glob('*.npz')))
+
+    def test_a_print_that_fails_keeps_the_piece(self):
+        def broken(*_):
+            raise RuntimeError('model gone')
+        self.record(5.5, broken)
+        self.assertTrue(self.pieces())
+        self.assertFalse(list((self.job / live.PIECES).glob('*.npz')))
+        self.assertTrue(any('no voice prints (model gone)' in line for line in self.logged))
+
+    def test_a_broken_print_file_or_another_models_prints_are_made_again(self):
+        self.record(8, lambda a, start, spans: self.sp.piece_prints(a, start, spans, self.model))
+        folder = self.job / live.PIECES
+        first = folder / '0001.npz'
+        first.write_bytes(first.read_bytes()[:200])                         # cut short by a disk error: BadZipFile
+        S, V, ok = self.sp.piece_prints(self.np.zeros(RATE * 9, dtype=self.np.float32), 0.0, [(2.0, 3.0)],
+                                        (lambda x: [1.0, 2.0], 2))          # a print of another length
+        with open(folder / '0002.npz', 'wb') as f:
+            self.np.savez(f, S=S, V=V, ok=ok)
+        spans = self.spans()
+        V1, ok1 = self.sp.prints(self.file, spans, self.sp.made_live(self.job), self.model)
+        V0, ok0 = self.sp.prints(self.file, spans, None, self.model)
+        self.np.testing.assert_allclose(V1, V0, rtol=1e-6, atol=1e-6)
+
+    def test_every_line_printed_during_the_recording_needs_no_model(self):
+        spans = [(0.0, 1.0), (1.0, 2.0)]
+        known = {self.sp.key(a, b): (self.np.ones(6, dtype=self.np.float32), True) for a, b in spans}
+        loaded = []
+        self.sp.extractor, real = (lambda *a, **k: loaded.append(1)), self.sp.extractor
+        try:
+            V, ok = self.sp.prints(self.job / 'none.caf', spans, known)
+        finally:
+            self.sp.extractor = real
+        self.assertEqual((V.shape, ok.tolist(), loaded), ((2, 6), [True, True], []))
+
+    def test_a_voice_package_that_fails_to_load_leaves_the_pieces_alone(self):
+        said = []
+        self.sp.available, real = (lambda: (_ for _ in ()).throw(OSError('dylib'))), self.sp.available
+        try:
+            self.assertIsNone(live.voice_printer(said.append))
+        finally:
+            self.sp.available = real
+        self.assertIn('dylib', said[0])
 
 
 class FinalRun(unittest.TestCase):

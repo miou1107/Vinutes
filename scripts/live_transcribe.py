@@ -13,6 +13,8 @@ fixes it.
 Each finished piece is <job>/分段/0001.json, 0002.json, ...:
   {"start", "end": seconds from the recording's beginning, "language", "segments": [[start, end, text], ...],
    "took": seconds, "cut": "quiet" | "end"}
+Beside each piece, 0001.npz holds the voice print of each of its lines (speakers.piece_prints), so after Stop
+speakers.py only makes the last piece's prints; without the voice model there are none and nothing else changes.
 While a piece is being transcribed, <job>/分段/working.json says so ({"pid", "start", "end"}). transcribe.py --pieces
 reuses the pieces and waits for that one. A pause in the recording needs nothing: the file stops growing.
 
@@ -89,7 +91,7 @@ class Runner:
 
     def __init__(self, job: Path, transcribe, detect=tr.detect, sleep=time.sleep, parent_alive=None, log=None,
                  piece: float = PIECE, search: float = SEARCH, poll: float = POLL, language: str = 'auto',
-                 choose=None):
+                 choose=None, voices=None):
         self.job = job
         self.audio = job / '錄音.caf'
         self.folder = job / PIECES
@@ -99,6 +101,7 @@ class Runner:
         # Chinese meeting when chosen and ready, else Whisper); the tests pass a stand-in built on `transcribe`
         self.choose = choose or (lambda lang: tr.recogniser(lang, transcribe))
         self.name, self.recognise = '', None
+        self.voices = voices                          # (piece audio, start, spans) -> (S, V, ok): speakers.piece_prints
         self.sleep = sleep
         self.parent_alive = parent_alive or (lambda: os.getppid() != 1)
         self.log = log or (lambda line: None)
@@ -182,11 +185,29 @@ class Runner:
                         'recogniser': self.name, 'took': round(time.time() - began, 1), 'cut': 'quiet'})
             self.log(f'piece {self.number}: {tr.stamp(self.cut)[1:-1]}-{tr.stamp(end)[1:-1]}, {len(segments)} segments, '
                      f'{self.name}, {time.time() - began:.0f}s')
+            self.voice_prints(piece, segments)
             self.cut = end
             self.done += 1
         finally:
             marker.unlink(missing_ok=True)
         return True
+
+    def voice_prints(self, piece, segments):
+        """The piece's voice prints, before working.json goes, so the final run's wait covers them. A failure
+        costs only the time: speakers.py makes those prints after Stop."""
+        if not self.voices:
+            return
+        import numpy as np
+        began = time.time()
+        try:
+            S, V, ok = self.voices(piece, self.cut, [(s[0], s[1]) for s in segments])
+            tmp = self.folder / f'{self.number:04d}.npz.tmp'
+            with open(tmp, 'wb') as f:
+                np.savez(f, S=S, V=V, ok=ok)
+            tmp.replace(self.folder / f'{self.number:04d}.npz')
+            self.log(f'piece {self.number}: {len(S)} voice prints, {time.time() - began:.0f}s')
+        except Exception as err:                    # noqa: BLE001
+            self.log(f'piece {self.number}: no voice prints ({err})')
 
     def run(self) -> int:
         """Until the recording ends. The number of pieces written."""
@@ -216,6 +237,28 @@ class Runner:
         return self.done
 
 
+VOICE_THREADS = 2       # the voice model's threads during a recording (8 after Stop): the call comes first
+
+
+def voice_printer(log=lambda line: None):
+    """speakers.piece_prints with the voice model, loaded at the first piece; None without the model, or when its
+    packages fail to load, so the pieces are transcribed as before."""
+    try:
+        import speakers
+        if not speakers.available():
+            return None
+    except Exception as err:                        # noqa: BLE001  a broken package must not stop the transcribing
+        log(f'no voice prints during the recording ({err})')
+        return None
+    model = []
+
+    def prints(samples, start, spans):
+        if not model:
+            model.append(speakers.extractor(threads=VOICE_THREADS))
+        return speakers.piece_prints(samples, start, spans, model[0])
+    return prints
+
+
 def main():
     import vlog
     if len(sys.argv) < 2:
@@ -243,7 +286,7 @@ def main():
         except OSError:
             pass
 
-    runner = Runner(job, mlx_whisper.transcribe, log=log, language=tr.meeting_setting())
+    runner = Runner(job, mlx_whisper.transcribe, log=log, language=tr.meeting_setting(), voices=voice_printer(log))
     done = runner.run()
     print(f'LIVE {job.name}: {done} pieces, up to {tr.stamp(runner.cut)[1:-1]}')
 

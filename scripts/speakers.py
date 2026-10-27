@@ -49,6 +49,7 @@ SAME_VOICE = 0.25          # cosine distance: a group of unnamed lines this clos
                            # seven meetings, while two different people were never under 0.33)
 SAME_MARGIN = 0.1          # ... and this much closer to them than to any other named person
 KEEP = 300                 # prints kept per person, newest first
+RATE = 16000               # samples a second, the recording's own (live_transcribe.py reads it the same way)
 
 
 def lines_of(job: Path) -> list[tuple[float, float]]:
@@ -67,32 +68,114 @@ def lines_of(job: Path) -> list[tuple[float, float]]:
     return [(s, starts[i + 1] if i + 1 < len(starts) else s + 5) for i, s in enumerate(starts)]
 
 
-def prints(audio: Path, spans: list) -> tuple:
-    import numpy as np
+def extractor(rate: int = RATE, threads: int = 8):
+    """The voice model, as (embed: samples -> print, the print's length). During a recording live_transcribe.py
+    asks for fewer threads, so the call on the same Mac keeps its share."""
     import sherpa_onnx
+    ex = sherpa_onnx.SpeakerEmbeddingExtractor(
+        sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(MODEL), num_threads=threads))
+
+    def embed(samples):
+        s = ex.create_stream()
+        s.accept_waveform(rate, samples)
+        s.input_finished()
+        return ex.compute(s)
+    return embed, ex.dim
+
+
+def window(a: float, b: float, rate: int = RATE) -> tuple[int, int] | None:
+    """The samples a line's print is made from, or None when the line is too short for one."""
+    if b - a < 0.6:
+        return None
+    if b - a > 20:                                   # a long line: its middle 20 seconds are enough
+        a, b = (a + b) / 2 - 10, (a + b) / 2 + 10
+    return int(a * rate), int(b * rate)
+
+
+def one_print(embed, samples, dim: int):
+    import numpy as np
+    v = np.array(embed(samples), dtype=np.float32)
+    n = np.linalg.norm(v)
+    return (v / n, True) if n > 0 else (np.zeros(dim, dtype=np.float32), False)
+
+
+def key(a: float, b: float) -> tuple[float, float]:
+    """A line's span as transcribe.py writes it into the transcript's JSON (assemble), so a print made during
+    the recording finds its line."""
+    return round(float(a), 2), round(float(b), 2)
+
+
+def prints(audio: Path, spans: list, known: dict | None = None, model=None) -> tuple:
+    """Every line's print. known: prints made during the recording (piece_prints), by key(span); those lines are
+    not made again, and the audio is not read when none is left. model: (embed, dim) in place of the voice model."""
+    import numpy as np
+    known = known or {}
+    have = [known.get(key(a, b)) for a, b in spans]
+    if model is None and spans and all(have) and len({len(g[0]) for g in have}) == 1:
+        model = (None, len(have[0][0]))              # every line was printed during the recording: no model needed
+    embed, dim = model or extractor()
+    V = np.zeros((len(spans), dim), dtype=np.float32)
+    ok = np.zeros(len(spans), dtype=bool)
+    todo = []
+    for i, got in enumerate(have):
+        if got is not None and len(got[0]) == dim:   # a print of another model's length is made again
+            V[i], ok[i] = got
+        else:
+            todo.append(i)
+    if not todo:
+        return V, ok
     import soundfile as sf
     wav = Path(tempfile.mkdtemp()) / 'a.wav'
     subprocess.run(['afconvert', '-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', str(audio), str(wav)],
                    check=True, capture_output=True)
     x, rate = sf.read(str(wav), dtype='float32')
     wav.unlink(missing_ok=True)
-    ex = sherpa_onnx.SpeakerEmbeddingExtractor(
-        sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(MODEL), num_threads=8))
-    V = np.zeros((len(spans), ex.dim), dtype=np.float32)
-    ok = np.zeros(len(spans), dtype=bool)
-    for i, (a, b) in enumerate(spans):
-        if b - a < 0.6:
-            continue
-        if b - a > 20:                               # a long line: its middle 20 seconds are enough
-            a, b = (a + b) / 2 - 10, (a + b) / 2 + 10
-        s = ex.create_stream()
-        s.accept_waveform(rate, x[int(a * rate):int(b * rate)])
-        s.input_finished()
-        v = np.array(ex.compute(s))
-        n = np.linalg.norm(v)
-        if n > 0:
-            V[i], ok[i] = v / n, True
+    for i in todo:
+        w = window(*spans[i], rate)
+        if w:
+            V[i], ok[i] = one_print(embed, x[w[0]:w[1]], dim)
     return V, ok
+
+
+def piece_prints(samples, start: float, spans: list, model) -> tuple:
+    """The prints of one piece's lines, made during the recording (live_transcribe.py), so that after Stop only
+    the last piece's lines are left to do. samples: the piece's audio from second `start` of the recording, as
+    16 kHz floats read straight from the recording's CAF file, which is what prints() reads after Stop too (the
+    audio becomes AAC only once the voices are told apart). A line whose stretch runs past the piece is left out:
+    prints() makes it from the whole recording. -> (S: the lines' key spans, V, ok), for the piece's .npz"""
+    import numpy as np
+    embed, dim = model
+    base = round(start * RATE)                       # the piece's first sample in the recording, as Runner.read cuts it
+    S, V, ok = [], [], []
+    for a, b in spans:
+        a, b = key(a, b)
+        w = window(a, b)
+        if w is None:
+            v, good = np.zeros(dim, dtype=np.float32), False
+        elif w[0] < base or w[1] > base + len(samples):
+            continue
+        else:
+            v, good = one_print(embed, samples[w[0] - base:w[1] - base], dim)
+        S.append((a, b))
+        V.append(v)
+        ok.append(good)
+    return (np.array(S, dtype=np.float64).reshape(-1, 2), np.array(V, dtype=np.float32).reshape(-1, dim),
+            np.array(ok, dtype=bool))
+
+
+def made_live(job: Path) -> dict:
+    """The prints live_transcribe.py made during the recording (0001.npz, ... beside its pieces), by key(span)."""
+    import numpy as np
+    from live_transcribe import PIECES
+    out = {}
+    for path in sorted((job / PIECES).glob('[0-9]*.npz')):
+        try:
+            with np.load(path) as d:
+                for (a, b), v, good in zip(d['S'], d['V'], d['ok']):
+                    out[key(a, b)] = (v, bool(good))
+        except Exception:                           # noqa: BLE001  a broken file (zip, EOF, ...): those lines are made again
+            continue
+    return out
 
 
 # --- people the user named ---------------------------------------------------------------------
@@ -276,11 +359,12 @@ def run(job: Path) -> dict:
     spans = lines_of(job)
     if not spans or not audio.exists():
         raise SystemExit(t('speakers_no_input'))
-    V, ok = prints(audio, spans)
+    known = made_live(job)
+    V, ok = prints(audio, spans, known)
     np.savez(job / '聲紋.npz', V=V, ok=ok)
     result = label(V, ok, spans, library())
     (job / '講者.json').write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
-    return result
+    return {**result, 'made_live': sum(1 for a, b in spans if key(a, b) in known)}
 
 
 def load(job: Path) -> dict:
@@ -550,7 +634,9 @@ def main():
     if not available():
         sys.exit('NOT INSTALLED: run recorder/install.sh (sherpa-onnx and the voice model)')
     result = run(job)
-    print('SPEAKERS', ', '.join(f'{k} {g["name"] or "?"} {g["seconds"]}s' for k, g in result['groups'].items()))
+    live = result.pop('made_live', 0)
+    print('SPEAKERS', ', '.join(f'{k} {g["name"] or "?"} {g["seconds"]}s' for k, g in result['groups'].items())
+          + (f'; {live} lines printed during the recording' if live else ''))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,186 @@
+<title>Vinutes 會議紀錄評分</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a short lead, the window as it is today, the same window after the change in its two states (just
+   written / edited by the user), then the two kinds of score side by side on one meeting. */
+:root {
+  --bg: #f3f3f6; --win: #ffffff; --panel: #f6f6f8; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --chip: #eef0f4;
+  --blue: #0a64d8; --link: #2a6dd6; --amber: #8a5a00;
+  --asis: #b42318; --asis-bg: #fdecea; --asis-line: #f1b5af;
+  --tobe: #0a64d8; --tobe-bg: #eaf2ff; --tobe-line: #a9c4ef;
+  --note: #6b4d00; --note-bg: #fff6dd; --on-accent: #ffffff;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --chip: #2c2c32;
+  --blue: #2f7ef0; --link: #7fb0ff; --amber: #ffd27a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --chip: #2c2c32;
+  --blue: #2f7ef0; --link: #7fb0ff; --amber: #ffd27a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff; color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px; }
+.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 17px; margin: 0; }
+.lead { margin: 6px 0 0; color: var(--text2); max-width: 62ch; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.state { border: 2px solid; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.state.asis { border-color: var(--asis-line); background: var(--asis-bg); }
+.state.tobe { border-color: var(--tobe-line); background: var(--tobe-bg); }
+.tag { align-self: flex-start; font-size: 13px; font-weight: 700; padding: 3px 12px; border-radius: 999px; color: var(--on-accent); }
+.asis .tag { background: var(--asis); } .tobe .tag { background: var(--tobe); }
+.cap { margin: 0; color: var(--text2); }
+.hint { margin: 0; font-size: 13px; color: var(--note); background: var(--note-bg); border-radius: 8px; padding: 6px 10px; align-self: flex-start; }
+
+/* the meeting window */
+.win { background: var(--win); border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; min-width: 0; }
+.bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.crumb { color: var(--link); } .crumb b { color: var(--text); font-weight: 600; }
+.spacer { flex: 1; }
+.sent { color: #1e7b34; font-weight: 600; font-size: 13px; }
+.sendbtn { background: var(--blue); color: var(--on-accent); border: 0; border-radius: 8px; padding: 5px 14px; font-weight: 600; font-size: 13px; }
+.tags { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; font-size: 13px; }
+.tags .k { color: var(--muted); }
+.chip { background: var(--chip); border-radius: 999px; padding: 1px 10px; }
+.addtag { color: var(--muted); }
+.score { all: unset; cursor: pointer; margin-left: auto; color: var(--muted); font-size: 13px; padding: 1px 8px; border-radius: 6px; }
+.score:hover, .score.on { background: var(--chip); color: var(--text); }
+.score:focus-visible { outline: 2px solid var(--blue); }
+.body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 260px; }
+.doc { padding: 18px; color: var(--muted); font-size: 13px; }
+.side { border-left: 1px solid var(--line); background: var(--panel); min-width: 0; }
+.tabs { display: flex; gap: 14px; padding: 10px 14px 0; border-bottom: 1px solid var(--line); font-size: 13px; overflow-x: auto; }
+.tabs span { padding-bottom: 8px; color: var(--muted); white-space: nowrap; }
+.tabs span.on { color: var(--blue); border-bottom: 2px solid var(--blue); font-weight: 600; }
+.pane { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+.big { display: flex; align-items: baseline; gap: 8px; }
+.big b { font-size: 28px; line-height: 1; }
+.big small { color: var(--muted); }
+.cats { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+.cats .n { font-variant-numeric: tabular-nums; color: var(--muted); }
+.cats .n.lost { color: var(--amber); }
+.lost-h { font-weight: 600; border-top: 1px solid var(--line); padding-top: 10px; }
+.item { display: flex; flex-direction: column; gap: 2px; }
+.item b { font-weight: 500; }
+.item small { color: var(--muted); }
+.quiet { color: var(--muted); }
+@media (max-width: 720px) { .body { grid-template-columns: 1fr; } .side { border-left: 0; border-top: 1px solid var(--line); } }
+
+/* the two kinds of score */
+.compare { display: flex; flex-direction: column; gap: 10px; }
+.compare p { margin: 0; color: var(--text2); max-width: 70ch; }
+table { border-collapse: collapse; width: 100%; background: var(--win); font-size: 13px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; background: var(--panel); }
+tr:last-child td { border-bottom: 0; }
+.wrap { overflow-x: auto; border: 1px solid var(--line2); border-radius: 10px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Vinutes 會議紀錄評分</h1>
+    <p class="lead">寄出前看一眼分數，就知道這份紀錄要多仔細讀。寄出之前，分數是 AI 拿逐字稿核對的結果。寄出信件時，分數換成依你修改算的結果。點一下分數，右邊會列出每個扣分的地方，和下次怎麼避免。</p>
+  </header>
+
+  <section class="state asis" aria-label="目前的畫面">
+    <span class="tag">目前的畫面</span>
+    <div class="win">
+      <div class="bar"><span class="crumb">春季活動 › 10/06 <b>（專案週會）</b></span><span class="spacer"></span><button class="sendbtn" tabindex="-1">發送信件</button></div>
+      <div class="tags"><span class="k">標籤</span><span class="chip">週會</span><span class="addtag">＋ 加標籤</span></div>
+      <div class="body">
+        <div class="doc">（會議紀錄）</div>
+        <div class="side"><div class="tabs"><span>留言</span><span>待補充</span><span>待確認</span><span class="on">紀錄</span></div>
+          <div class="pane quiet">10/06 14:00　AI 整理好會議紀錄</div></div>
+      </div>
+    </div>
+    <p class="cap">寄出前看不出這份紀錄哪裡可能寫錯，只能整份讀一遍。</p>
+  </section>
+
+  <section class="state tobe" aria-label="調整後的畫面，剛整理好">
+    <span class="tag">調整後的畫面：剛整理好</span>
+    <p class="hint">點標籤列最右邊的 82，可以打開或收起評分。</p>
+    <div class="win">
+      <div class="bar"><span class="crumb">春季活動 › 10/06 <b>（專案週會）</b></span><span class="spacer"></span><button class="sendbtn" tabindex="-1">發送信件</button></div>
+      <div class="tags"><span class="k">標籤</span><span class="chip">週會</span><span class="addtag">＋ 加標籤</span>
+        <button class="score on" data-pane="a" aria-expanded="true">82</button></div>
+      <div class="body">
+        <div class="doc">（會議紀錄）</div>
+        <div class="side" id="side-a"><div class="tabs"><span>留言</span><span>待補充</span><span>待確認</span><span>紀錄</span><span class="on">評分</span></div>
+          <div class="pane">
+            <div class="big"><b>82</b><small>AI 核對逐字稿</small></div>
+            <div class="cats">
+              <span>會議資訊</span><span class="n lost">19 / 25</span>
+              <span>人名與講者</span><span class="n lost">16 / 20</span>
+              <span>數字與日期</span><span class="n">20 / 20</span>
+              <span>決議</span><span class="n">15 / 15</span>
+              <span>待辦事項</span><span class="n lost">12 / 20</span>
+            </div>
+            <div class="lost-h">扣分</div>
+            <div class="item"><b>講者 B 沒有名字</b><small>到人員分頁替講者 B 取名</small></div>
+            <div class="item"><b>待辦「報價單」沒寫期限</b><small>逐字稿 32:10 講到 10/31，已列入待確認</small></div>
+            <div class="item"><b>下次會議沒寫日期</b><small>行事曆上把這場會設成週期性會議</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap">剛整理好的紀錄，由 AI 拿逐字稿再核對一次給分。</p>
+  </section>
+
+  <section class="state tobe" aria-label="調整後的畫面，寄出信件之後">
+    <span class="tag">調整後的畫面：寄出信件之後</span>
+    <div class="win">
+      <div class="bar"><span class="crumb">春季活動 › 10/06 <b>（專案週會）</b></span><span class="spacer"></span><span class="sent">✓ 已寄出 9 人</span></div>
+      <div class="tags"><span class="k">標籤</span><span class="chip">週會</span><span class="addtag">＋ 加標籤</span>
+        <button class="score on" data-pane="b" aria-expanded="true">65</button></div>
+      <div class="body">
+        <div class="doc">（會議紀錄）</div>
+        <div class="side" id="side-b"><div class="tabs"><span>留言</span><span>待補充</span><span>待確認</span><span>紀錄</span><span class="on">評分</span></div>
+          <div class="pane">
+            <div class="big"><b>65</b><small>依你的修改</small></div>
+            <div class="cats">
+              <span>會議資訊</span><span class="n lost">6 / 25</span>
+              <span>人名與講者</span><span class="n lost">14 / 20</span>
+              <span>數字與日期</span><span class="n">20 / 20</span>
+              <span>決議</span><span class="n">15 / 15</span>
+              <span>待辦事項</span><span class="n lost">10 / 20</span>
+            </div>
+            <div class="lost-h">扣分</div>
+            <div class="item"><b>少了主持人和 8 位與會人員</b><small>把這 9 位加進小抄的人員</small></div>
+            <div class="item"><b>講者 C 寫成 Kai，你改成 Kent</b><small>下次會照你改的寫</small></div>
+            <div class="item"><b>兩項待辦的負責人是你補上的</b><small>小抄的人員寫上每個人負責什麼</small></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap">寄出信件時，分數換成依你修改算的結果。這場你補上主持人和 8 位與會人員，所以拿 65 分。</p>
+  </section>
+</div>
+
+<script>
+document.querySelectorAll('.score').forEach((b) => b.addEventListener('click', () => {
+  const side = document.getElementById('side-' + b.dataset.pane);
+  const pane = side.querySelector('.pane');
+  const tabs = side.querySelectorAll('.tabs span');
+  const open = pane.hidden;
+  pane.hidden = !open;
+  tabs[3].classList.toggle('on', !open);
+  tabs[4].classList.toggle('on', open);
+  b.classList.toggle('on', open);
+  b.setAttribute('aria-expanded', String(open));
+}));
+</script>

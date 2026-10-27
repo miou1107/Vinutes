@@ -35,7 +35,7 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py tags <job> <tags JSON>            the meeting's tags, as the user left them
   minutes_app.py rename_project <old> <new>        every meeting of a project, archived ones too, gets the new name;
                                                    a name already in use puts the two projects together
-  minutes_app.py brief <project>                   the project's brief (專案小抄, briefs.py): people, terms, background
+  minutes_app.py brief <project>                   the project's brief (專案背景, briefs.py): people, terms, background
   minutes_app.py save_brief <project> <brief JSON> the brief as the user left it in 專案設定
   minutes_app.py move_learned <job> <id> <brief|glossary>  a learned word goes to the project's brief or the glossary
   minutes_app.py delete <job>                      刪除: the Doc and the meeting's Drive folder (only its own files
@@ -768,7 +768,7 @@ def plain_name(name: str) -> str:
 # takes off is kept in the meeting's 人員.json. Someone added or named also joins the project's list (people.json,
 # the people of its brief); taking someone off a meeting only says they weren't there, and they stay in the brief
 # (Vin 2026-10-19: the brief lists the project's people, not each meeting's, so it starts no meeting's list either).
-PROJECT_PEOPLE = briefs.PEOPLE                    # the project's people are also its brief's (專案小抄)
+PROJECT_PEOPLE = briefs.PEOPLE                    # the project's people are also its brief's (專案背景)
 MEETING_PEOPLE = '人員.json'
 # A room booking's note may name a department instead of inviting people; the department's roster (briefs.py)
 # is learned from the meetings the user confirmed and starts the next meeting that names it.
@@ -1651,7 +1651,7 @@ def remember(job: Job, kind: str, before: str, after: str, source: str) -> dict:
 
 def public(item: dict) -> dict:
     shown = {k: item[k] for k in ('id', 'kind', 'text', 'off')}
-    if item.get('project') and item.get('kind') == 'term':   # the window offers 專案小抄 or 詞彙表 for it
+    if item.get('project') and item.get('kind') == 'term':   # the window offers 專案背景 or 詞彙表 for it
         shown.update(where=item.get('where', 'glossary'), project=item['project'])
     return shown
 
@@ -2171,7 +2171,7 @@ def edit_prompt(lang: str, request: str, pictures: list[str] = (), refs: list[tu
             '- Edit 紀錄.md directly and change only what the request is about; leave every other paragraph exactly as it is.\n'
             '- Keep the layout: headings with #, ##, ###, lists with - or 1., tables with |.\n'
             '- Do not add anything the request does not say; write [__] for anything uncertain.\n'
-            '- Follow 使用者規則.md (the user\'s rules), 公司詞彙表.md (the company glossary) and 專案小抄.md (the '
+            '- Follow 使用者規則.md (the user\'s rules), 公司詞彙表.md (the company glossary) and 專案背景.md (the '
             'project\'s people and terms) if present; read 逐字稿.txt '
             '(the transcript) when you need what was actually said.\n'
             f'- When done, write in 說明.txt {reply}.\n'
@@ -2190,7 +2190,7 @@ def edit_prompt(lang: str, request: str, pictures: list[str] = (), refs: list[tu
         '- 直接修改 紀錄.md，只改要求提到的地方，其他段落一個字都不要動。\n'
         '- 保留原本的格式：標題用 #、##、###，條列用 - 或 1.，表格用 |。\n'
         '- 要求裡沒有說的事不要自己補，不確定的資訊寫 [__]。\n'
-        '- 用語照 使用者規則.md、公司詞彙表.md 與 專案小抄.md（有的話）；需要原話時看 逐字稿.txt。\n'
+        '- 用語照 使用者規則.md、公司詞彙表.md 與 專案背景.md（有的話）；需要原話時看 逐字稿.txt。\n'
         f'- 改完在 說明.txt 寫{reply}。\n'
         '- 這個要求做不到時不要改 紀錄.md，在 說明.txt 寫做不到的原因。\n'
         '這個模式不能執行指令也不能連網，只能讀寫這個資料夾裡的檔案。')

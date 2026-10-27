@@ -82,6 +82,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import briefs  # noqa: E402
 import doc_sync  # noqa: E402
+import scores  # noqa: E402
 import speakers  # noqa: E402
 from briefs import add_name, name_keys, same_name  # noqa: E402
 from google_setup import CONFIG, owner, sender_name  # noqa: E402
@@ -650,6 +651,28 @@ def find_words(plains: list[str], *candidates: str) -> str:
                     best = piece
                     break
     return best
+
+
+def score_view(job: Job, md: str) -> dict | None:
+    """The score at the end of the tags (scores.py): the one from the user's edits once the mail went out, else
+    the AI's check against the transcript; each lost point with the words that find it in the Doc."""
+    data = scores.read_json(job.dir / scores.FILE)
+    kind = 'edits' if isinstance(data.get('edits'), dict) else 'check' if isinstance(data.get('check'), dict) else ''
+    if not kind:
+        return None
+    got = data[kind]
+    plains = [b.plain for b in doc_sync.parse(md)[1]] if md else []
+    cats = got.get('categories') if isinstance(got.get('categories'), dict) else {}
+    return {'kind': kind, 'score': int(got.get('score') or 0),
+            'categories': [[c, *cats[c]] for c in scores.CATEGORIES if isinstance(cats.get(c), list) and len(cats[c]) == 2],
+            'lost': [{'what': x.get('what', ''), 'fix': x.get('fix', ''), 'find': quote_in(plains, x.get('quote', ''))}
+                     for x in got.get('lost') or [] if isinstance(x, dict)]}
+
+
+def quote_in(plains: list[str], quote) -> str:
+    """The words the AI quoted, when the minutes hold them as they are: a piece of them could be anywhere."""
+    quote = quote.strip() if isinstance(quote, str) else ''
+    return quote if quote and any(quote in p for p in plains) else ''
 
 
 def todo_items(job: Job, md: str) -> list[dict]:
@@ -2639,7 +2662,7 @@ def page(job: Job, base: dict, md: str, html_text: str, **over) -> dict:
             'doc_url': job.result.get('doc_url', ''), 'account': owner() or '',      # the Doc opens as this account
             'html': html_text, 'shown': page_token(job, html_text),
             'news': {'editors': [], 'edits': 0, 'new_comments': 0}, 'warning': '', 'offline': False, 'readonly': False,
-            'comments': [], 'todo': todo_items(job, md), 'check': check_items(job), 'learned': [],
+            'comments': [], 'todo': todo_items(job, md), 'check': check_items(job), 'learned': [], 'score': score_view(job, md),
             'log': job.log_entries()[:200], 'mail': mail_defaults(job),
             'sent': {'at': short_time(job.result['sent_at']), 'count': len((job.result.get('mail') or {}).get('to', [])),
                      'format': format_words(job.result.get('sent_format'))} if job.result.get('sent_at') else None,
@@ -2744,7 +2767,7 @@ def cmd_refresh(job: Job):
     job.save_state()
     md = '' if job.missing else job.md
     out({'todo': todo_items(job, md) if md else [], 'check': check_items(job), 'learned': learned,
-         'attendees': attendees(md), 'people': meeting_people(job), 'speakers': speakers_shown(job), 'calendar': calendar_payload(job),
+         'score': score_view(job, md), 'attendees': attendees(md), 'people': meeting_people(job), 'speakers': speakers_shown(job), 'calendar': calendar_payload(job),
          'silent': silent_people(job),
          'log': job.log_entries()[:200], 'warning': warning,
          'can_undo': (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()})

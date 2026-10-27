@@ -2474,6 +2474,36 @@ function openMail() {
   S.sheet = 'mail';
   placeDoc();
   renderMail();
+  if (!m.summary_fresh) mailSummary();
+}
+
+// The minutes changed after the AI wrote the mail: its 會議目的 and 重點 are written again from the minutes as they
+// are now (Vin 2026-10-27). What the user typed in the box meanwhile stays.
+async function mailSummary() {
+  const m = S.mail;
+  const id = S.sel;
+  const shown = m.body;
+  m.wait = true; redrawMail();
+  let r = null;
+  try { r = await call('mailSummary', { id }); } catch (e) { /* the summary taken from the minutes stays */ }
+  if (S.sheet !== 'mail' || S.mail !== m || S.sel !== id) return;
+  redrawMail(() => {
+    m.wait = false;
+    if (r && r.body && m.body === shown && !m.sending) { m.body = r.body; m.linkBody = r.body; }
+  });
+}
+
+// the sheet drawn again with the field being typed in still focused, its caret where it was; `change` runs once
+// what is in the fields has been kept
+function redrawMail(change = () => {}) {
+  const m = S.mail;
+  const el = document.activeElement;
+  const id = el && ['subj', 'body', 'addTo'].includes(el.id) ? el.id : '';
+  const at = id ? [el.selectionStart, el.selectionEnd] : null;
+  m.subject = $('#subj').value; m.body = $('#body').value; m.typed = $('#addTo').value;
+  change();
+  renderMail();
+  if (id) { const box = $('#' + id); box.focus(); box.setSelectionRange(...at); }
 }
 
 const mailTo = () => S.mail.rcpts.filter((r) => r.mail).map((r) => r.mail);
@@ -2498,7 +2528,7 @@ function renderMail() {
     </div>
     <textarea id="body" aria-label="${esc(t('mail_body'))}">${esc(m.body)}</textarea>
     <div style="display:flex;align-items:center;gap:10px">
-      <span class="note${m.err ? ' err' : ''}">${esc(say(m.err) || (t(m.fmt === 'gdoc' ? 'note_gdoc' : 'note_file')
+      <span class="note${m.err ? ' err' : ''}">${esc(say(m.err) || (m.wait ? t('summary_wait') : '') || (t(m.fmt === 'gdoc' ? 'note_gdoc' : 'note_file')
         + (m.files ? t('note_files', m.files) : '')))}</span>
       <button class="btn ghost" id="mailCancel"${m.sending ? ' disabled' : ''}>${esc(t('cancel'))}</button>
       <button class="btn primary" id="mailSend"${m.sending ? ' disabled' : ''}>${esc(t(m.sending ? 'sending' : 'send_mail_btn'))}</button></div>

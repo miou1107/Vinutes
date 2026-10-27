@@ -2478,27 +2478,45 @@ function openMail() {
 }
 
 // The mail's 會議目的 and 重點 for the minutes as they are now, edits still being saved included: when the minutes
-// changed after the AI wrote the mail, the AI writes them again from the minutes (Vin 2026-10-27). What the user
-// typed meanwhile stays, and only the box and the note change, so a word being composed (注音) is not broken.
+// changed after the AI wrote the mail, the AI writes them again from the minutes (Vin 2026-10-27). Only those two
+// paragraphs are swapped, where the text still has them as the sheet opened with them: whatever else the user typed
+// meanwhile stays, and a word being composed (注音) is not broken. 寄出 waits for the answer.
 async function mailSummary() {
   const m = S.mail;
   const id = S.sel;
-  const shown = m.body;
+  const old = summaryOf(m.body);
+  m.asking = true; showMailNote();
   const slow = setTimeout(() => { if (S.mail === m) { m.wait = true; showMailNote(); } }, 500);
   let r = null;
   try { await flush(); r = await call('mailSummary', { id }); } catch (e) { /* the text the sheet opened with stays */ }
   clearTimeout(slow);
   if (S.sheet !== 'mail' || S.mail !== m || S.sel !== id) return;
-  m.wait = false;
+  m.wait = false; m.asking = false;
   const box = $('#body');
   if (box) m.body = box.value;
-  if (r && r.body && !m.sending && r.body !== shown) {
-    let next = null;
-    if (m.body === shown) next = r.body;
-    else if (m.fmt !== 'gdoc' && m.body === withAttachment(shown)) next = withAttachment(r.body);   // Word or PDF picked meanwhile
-    if (next !== null) { m.body = next; m.linkBody = r.body; if (box) box.value = next; }
+  if (r && r.summary && old && r.summary !== old) {
+    // the paragraphs as the text has them, whatever the blank lines between them
+    const at = new RegExp(old.split('\n\n').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\n\\s*\\n'));
+    const swap = (text) => text.replace(at, () => r.summary);
+    m.linkBody = swap(m.linkBody);
+    const next = swap(m.body);
+    if (next !== m.body) { m.body = next; if (box) box.value = next; }
+  } else if (r && r.body && !old && m.body === m.linkBody && m.fmt === 'gdoc') {   // no summary in the text yet
+    m.body = r.body; m.linkBody = r.body; if (box) box.value = r.body;
   }
   showMailNote();
+}
+
+// the 會議目的 and 重點 paragraphs of a mail text, with the list right after them (minutes_app.summary_text)
+function summaryOf(text) {
+  const label = /^\s*(會議目的|重點|Purpose|Highlights)\s*[:：]/;
+  const item = /^\s*(?:[-*•]|\d+[.、)])\s+\S/;
+  const found = [];
+  let after = false;
+  for (const p of text.trim().split(/\n\s*\n/)) {
+    if (label.test(p) || (after && p.split('\n').every((l) => item.test(l)))) { found.push(p); after = true; } else after = false;
+  }
+  return found.join('\n\n');
 }
 
 function mailNote(m) {
@@ -2507,8 +2525,11 @@ function mailNote(m) {
 }
 
 function showMailNote() {
+  const m = S.mail;
   const note = $('#sheet .note');
-  if (note) { note.textContent = mailNote(S.mail); note.classList.toggle('err', !!S.mail.err); }
+  if (note) { note.textContent = mailNote(m); note.classList.toggle('err', !!m.err); }
+  const send = $('#mailSend');
+  if (send) send.disabled = !!(m.sending || m.asking);
 }
 
 const mailTo = () => S.mail.rcpts.filter((r) => r.mail).map((r) => r.mail);
@@ -2535,7 +2556,7 @@ function renderMail() {
     <div style="display:flex;align-items:center;gap:10px">
       <span class="note${m.err ? ' err' : ''}">${esc(mailNote(m))}</span>
       <button class="btn ghost" id="mailCancel"${m.sending ? ' disabled' : ''}>${esc(t('cancel'))}</button>
-      <button class="btn primary" id="mailSend"${m.sending ? ' disabled' : ''}>${esc(t(m.sending ? 'sending' : 'send_mail_btn'))}</button></div>
+      <button class="btn primary" id="mailSend"${m.sending || m.asking ? ' disabled' : ''}>${esc(t(m.sending ? 'sending' : 'send_mail_btn'))}</button></div>
   </div></div>`;
   const keep = () => { m.subject = $('#subj').value; m.body = $('#body').value; };
   const again = () => { keep(); renderMail(); const i = $('#addTo'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); };
@@ -2654,7 +2675,7 @@ document.addEventListener('mousedown', (e) => {
 
 async function sendMail() {
   const m = S.mail;
-  if (m.sending) return;
+  if (m.sending || m.asking) return;
   m.subject = $('#subj').value; m.body = $('#body').value;
   if (!mailTo().length) { m.err = ['need_rcpt']; renderMail(); return; }
   await flush();

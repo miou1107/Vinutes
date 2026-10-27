@@ -2731,6 +2731,24 @@ class MailDefaults(Flows):
         (self.job_dir / minutes_app.SHEET_TEXT).touch()
         self.assertEqual(minutes_app.mail_body(self.job()), (mine, True))
 
+    def test_a_preview_of_the_text_as_given_does_not_keep_old_highlights(self):
+        """Word picked once to see the file, nothing typed: after the minutes change, the mail follows them again,
+        and the highlights go before the sign-off, not after it."""
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text(self.AI_BODY, encoding='utf-8')
+        given = minutes_app.mail_body(self.job())[0]
+        word = given.replace('週會的會議紀錄整理好了：\n{文件網址}', '週會的會議紀錄整理好了，詳細如附件。')
+        (self.job_dir / '信件內文.txt').write_text(word, encoding='utf-8')                # what the preview wrote
+        (self.job_dir / minutes_app.SHEET_TEXT).touch()
+        self.assertEqual(minutes_app.mail_body(self.job()), (word, True))                  # nothing changed since
+        self.md_path.write_text(MINUTES_WITH_PURPOSE.replace('預算 10 萬元', '預算 12 萬元'), encoding='utf-8')
+        body, fresh = minutes_app.mail_body(self.job())
+        self.assertFalse(fresh)
+        self.assertNotIn('AI 寫的目的', body)
+        self.assertTrue(body.endswith('重點：\n1. 預算 12 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作\n\n'
+                                      'Vin\n\nSent by Vinutes v' + (minutes_app.ROOT / 'VERSION').read_text().strip()), body)
+
     def test_a_list_left_under_its_own_heading_goes_with_it(self):
         self.assertEqual(minutes_app.without_summary('Hi\n\n{文件網址}\n\n重點：\n\n- a\n- b\n\n會議目的：x\n\nVin'),
                          'Hi\n\n{文件網址}\n\nVin')
@@ -2739,6 +2757,7 @@ class MailDefaults(Flows):
         self.assertEqual(minutes_app.summary_of('會議目的：a\n\n重點：\n- b\n- c\n\n以上兩段可直接放進信裡，需要調整再告訴我。', 'zh-TW'),
                          '會議目的：a\n\n重點：\n- b\n- c')                     # what the AI says after them is not mailed
         self.assertEqual(minutes_app.summary_of('**會議目的**：a\n\n**重點**：\n\n1. b', 'zh-TW'), '會議目的：a\n\n重點：\n\n1. b')
+        self.assertEqual(minutes_app.summary_of('會議目的：a\n\n重點：\n以下為重點：\n- b', 'zh-TW'), '')   # not a list right under it
         self.assertEqual(minutes_app.summary_of('好的，以下是：\n\n```\n會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）\n```\n', 'zh-TW'),
                          '會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）')
         self.assertEqual(minutes_app.summary_of('Purpose: budget.\n\nHighlights:\n1. Budget 100k (Amy)', 'en'),

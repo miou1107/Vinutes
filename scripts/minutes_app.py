@@ -2660,16 +2660,27 @@ def with_summary(body: str, md: str, lang: str, block: str = '') -> str:
 LIST_LINE = re.compile(r'^\s*(?:[-*•]|\d+[.、)])\s+\S')
 
 
-def without_summary(body: str) -> str:
-    """The body without the 會議目的 and 重點 paragraphs the AI wrote with the minutes, nor a list right after them."""
-    kept, after = [], False
+def split_summary(body: str) -> tuple[list[str], list[str]]:
+    """The body's paragraphs without, and with only, 會議目的 and 重點 (a list right after them counts as theirs)."""
+    kept, summary, after = [], [], False
     for p in re.split(r'\n\s*\n', body.strip()):
         if SUMMARY_LINE.match(p) or (after and all(LIST_LINE.match(line) for line in p.split('\n'))):
+            summary.append(p)
             after = True
-            continue
-        kept.append(p)
-        after = False
-    return '\n\n'.join(kept)
+        else:
+            kept.append(p)
+            after = False
+    return kept, summary
+
+
+def without_summary(body: str) -> str:
+    """The body without the 會議目的 and 重點 paragraphs, nor a list right after them."""
+    return '\n\n'.join(split_summary(body)[0])
+
+
+def summary_text(body: str) -> str:
+    """Only the body's 會議目的 and 重點, as the window finds them in the text box (app.js summaryOf)."""
+    return '\n\n'.join(split_summary(body)[1])
 
 
 def minutes_key(md: str) -> str:
@@ -2696,24 +2707,34 @@ def with_signature(body: str) -> str:
     return f"{body.rstrip()}\n\nSent by Vinutes{f' v{version}' if version else ''}"
 
 
+def without_signature(body: str) -> str:
+    return '\n\n'.join(p for p in re.split(r'\n\s*\n', body.strip()) if not p.startswith('Sent by Vinutes'))
+
+
 def mail_body(job: Job, block: str = '') -> tuple[str, bool]:
     """The mail's text and whether its 會議目的 and 重點 match the minutes as they are now. The AI wrote them with
     the minutes; once the user has changed the minutes they come from the minutes instead (Vin 2026-10-27): the
     AI's rewrite for these minutes (`block`, or the one kept in 信件重點.json), else taken line by line."""
     path = job.dir / '信件內文.txt'
     body = path.read_text(encoding='utf-8').strip() if path.is_file() else ''
-    if (job.dir / SHEET_TEXT).is_file():              # the sheet's text, maybe edited by the user: kept as it is
+    kept = read_json(job.dir / SUMMARY_FILE)
+    # a preview or a failed send kept the sheet's text: its 會議目的 and 重點 are the user's once they differ from
+    # whatever the sheet was given, and then the text stays as it is
+    offered = [o for o in kept.get('offered') or [] if isinstance(o, str)]
+    if (job.dir / SHEET_TEXT).is_file() and summary_text(body) not in offered:
         return body, True
-    body = finished_body(body)
+    body = without_signature(finished_body(body))
     md = '' if job.missing else job.md
     fresh = not md or not minutes_edited(job, md)
     if not fresh:
         body = without_summary(body)
         if not block:
-            kept = read_json(job.dir / SUMMARY_FILE)
             block = kept.get('block', '') if kept.get('minutes') == minutes_key(md) else ''
         fresh = bool(block)
-    return with_signature(with_summary(body, md, job.lang, block)), fresh
+    body = with_signature(with_summary(body, md, job.lang, block))
+    if summary_text(body) not in offered:
+        write_json(job.dir / SUMMARY_FILE, {**kept, 'offered': (offered + [summary_text(body)])[-20:]})
+    return body, fresh
 
 
 def ai_summary(job: Job, md: str) -> str:
@@ -2721,6 +2742,9 @@ def ai_summary(job: Job, md: str) -> str:
     import ai_runner
     import auto_minutes
     import tempfile
+    for old in job.dir.glob(SUMMARY_WORK + '*'):     # left by a run the app quit in the middle of
+        if old.is_dir() and datetime.now().timestamp() - old.stat().st_mtime > 600:
+            shutil.rmtree(old, ignore_errors=True)
     work = Path(tempfile.mkdtemp(prefix=SUMMARY_WORK, dir=job.dir))   # a second sheet opened meanwhile has its own
     (work / '紀錄.md').write_text(md, encoding='utf-8')
     try:
@@ -2748,7 +2772,7 @@ def summary_of(text: str, lang: str) -> str:
     for i in range(top + 1, len(lines)):
         if LIST_LINE.match(lines[i]):
             end = i + 1
-        elif lines[i].strip() and end > top + 1:      # the list is over
+        elif lines[i].strip():                         # the list is over, or a line before it that is not the list
             break
     if end == top + 1:
         return ''
@@ -2766,9 +2790,9 @@ def cmd_mail_summary(job: Job):
         md = job.md
         block = ai_summary(job, md)
         if block:
-            write_json(job.dir / SUMMARY_FILE, {'minutes': minutes_key(md), 'block': block})
+            write_json(job.dir / SUMMARY_FILE, {**read_json(job.dir / SUMMARY_FILE), 'minutes': minutes_key(md), 'block': block})
             body, fresh = mail_body(job, block)
-    out({'body': body, 'summary_fresh': fresh})
+    out({'body': body, 'summary': summary_text(body), 'summary_fresh': fresh})
 
 
 def cmd_suggest(job: Job, query: str):

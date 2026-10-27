@@ -588,7 +588,7 @@ async function select(id) {
     else learnLater(S.sel);
   }
   S.sel = id;
-  S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null;
+  S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null; S.tabBeforeScore = null;
   S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
   S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
   S.tagAdding = false;
@@ -835,7 +835,7 @@ function scoreButtonHTML() {
   if (!sc) return '';
   const on = scoreOpen();
   return `<button class="tscore${on ? ' on' : ''}" id="scoreBtn" aria-expanded="${on}" title="${esc(t('score_aria', sc.score))}"
-    aria-label="${esc(t('score_aria', sc.score))}">${sc.score}</button>`;
+    aria-label="${esc(t('score_aria', sc.score))}">${Number(sc.score)}</button>`;
 }
 
 function toggleScore() {
@@ -851,10 +851,10 @@ function markScoreButton() {
 }
 
 function scoreHTML(sc) {
-  return `<div class="sbig"><b>${sc.score}</b><small>${esc(t(sc.kind === 'edits' ? 'score_edits' : 'score_check'))}</small></div>
-    <div class="scats">${(sc.categories || []).map(([k, got, of]) => `<span>${esc(t('score_' + k))}</span><span class="sn${got < of ? ' lost' : ''}">${got} / ${of}</span>`).join('')}</div>
+  return `<div class="sbig"><b>${Number(sc.score)}</b><small>${esc(t(sc.kind === 'edits' ? 'score_edits' : 'score_check'))}</small></div>
+    <div class="scats">${(sc.categories || []).map(([k, got, of]) => `<span>${esc(t('score_' + k))}</span><span class="sn${got < of ? ' lost' : ''}">${Number(got)} / ${Number(of)}</span>`).join('')}</div>
     <div class="slost">${esc(t('score_lost'))}</div>
-    ${(sc.lost || []).length ? sc.lost.map((x, i) => `<button class="sitem" data-s="${i}"${x.find ? '' : ' disabled'}><b>${esc(x.what)}</b>${x.fix ? `<small>${esc(x.fix)}</small>` : ''}</button>`).join('')
+    ${(sc.lost || []).length ? sc.lost.map((x, i) => `<button class="sitem" data-s="${i}"${x.find && docsMode() ? '' : ' disabled'}><b>${esc(x.what)}</b>${x.fix ? `<small>${esc(x.fix)}</small>` : ''}</button>`).join('')
       : `<div class="empty">${esc(t('score_none_lost'))}</div>`}`;
 }
 
@@ -1285,7 +1285,7 @@ function renderRail() {
     <div class="railbody" id="railbody">${tab === 'comments' ? commentsHTML(comments) : tab === 'score' ? scoreHTML(d.score) : logHTML(d.log || [])}</div>`;
   $('#tabC').addEventListener('click', () => { S.tab = 'comments'; renderRail(); });
   $('#tabL').addEventListener('click', () => { S.tab = 'log'; renderRail(); });
-  if ($('#tabS')) $('#tabS').addEventListener('click', () => { S.tab = 'score'; renderRail(); });
+  if ($('#tabS')) $('#tabS').addEventListener('click', () => { if (S.tab !== 'score') S.tabBeforeScore = S.tab; S.tab = 'score'; renderRail(); });
   if (tab === 'score') wireScore(el, d.score);
   $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); markScoreButton(); });
   if (tab === 'comments') wireComments();
@@ -1348,7 +1348,7 @@ function renderDocsRail(el) {
   $('#tabF').addEventListener('click', pick('todo'));
   $('#tabP').addEventListener('click', pick('people'));
   $('#tabL').addEventListener('click', pick('log'));
-  if ($('#tabS')) $('#tabS').addEventListener('click', pick('score'));
+  if ($('#tabS')) $('#tabS').addEventListener('click', () => { if (S.tab !== 'score') S.tabBeforeScore = S.tab; pick('score')(); });
   $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); markScoreButton(); });
   if (tab === 'score') wireScore(el, d.score);
   if (tab === 'todo') {

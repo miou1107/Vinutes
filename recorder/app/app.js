@@ -2469,7 +2469,9 @@ function openMail() {
   const m = S.d.mail;
   const rcpts = (m.people || []).map((p) => ({ name: p.name, mail: p.mail || '' }));
   for (const a of m.to || []) if (!rcpts.some((r) => r.mail === a)) rcpts.push({ name: a, mail: a });
-  S.mail = { rcpts, subject: m.subject, body: m.body, linkBody: m.body, fmt: 'gdoc', info: '', sending: false, err: '',
+  // the sheet opens on the Doc link: a text a Word or PDF preview kept gets its link back
+  const body = S.d.doc_url && !DOC_URL.test(m.body) ? withLink(m.body, S.d.doc_url) : m.body;
+  S.mail = { rcpts, subject: m.subject, body, linkBody: body, fmt: 'gdoc', info: '', sending: false, err: '',
              files: S.d.attach_files || 0, typed: '', sugg: [], at: 0, seq: 0 };
   S.sheet = 'mail';
   placeDoc();

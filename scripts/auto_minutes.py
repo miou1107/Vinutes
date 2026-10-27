@@ -222,7 +222,6 @@ def transcribe(job: Path, meta: dict):
     if not (job / '逐字稿.txt').read_text(encoding='utf-8').strip():
         raise Failed(t('no_speech'))
     log(job, f'transcribed in {time.time() - began:.0f}s')
-    shutil.rmtree(job / PIECES, ignore_errors=True)   # the transcript has everything the pieces had
     length = re.search(r'audio (\d+(?::\d\d){1,2})', done.stdout)
     usage.record('transcribe', s=round(time.time() - began, 1),
                  audio=sum(int(n) * 60 ** i for i, n in enumerate(reversed(length[1].split(':')))) if length else None)
@@ -230,6 +229,7 @@ def transcribe(job: Path, meta: dict):
     write_json(job / 'job.json', meta)
     activity(job, t('assistant'), t('log_transcribed'))
     tell_voices(job)
+    shutil.rmtree(job / PIECES, ignore_errors=True)   # the transcript and the voices have everything the pieces had
     if audio.suffix == '.caf':                       # the transcript is safe, keep a small copy of the audio
         small = audio.with_suffix('.m4a')
         conv = subprocess.run(['afconvert', '-f', 'm4af', '-d', 'aac', '-b', '48000', str(audio), str(small)],

@@ -178,3 +178,29 @@ match 59% of Vin's lines there.
 ```bash
 ~/.config/vin-meeting-minutes-zh/venv/bin/python docs/bench/voices.py 7
 ```
+
+## Voice prints during the recording (v0.4.20, issue #1)
+
+After v0.4.16 the slowest step after Stop was telling the voices apart: a CAM++ print for every transcript line,
+about 50 ms a line on 8 threads (grouping the prints takes about a second). On the meetings of 2026-10-21 it took
+35 s (52 minutes, 952 lines) and 121 s (1 h 55 min, 2,527 lines), against 17 to 19 s for the transcript.
+
+Each piece now gets its lines' prints during the recording (`speakers.piece_prints`), from the samples the helper
+reads out of the CAF file, which are the samples `speakers.prints` reads after Stop: the voices are told apart
+before the audio becomes AAC (tests/test_live.py checks the two give the same samples on a CAF the test writes).
+Replayed on the 52-minute meeting with the real model, cut where its nine pieces were cut (the log's times), with the
+helper's two threads, and the user's kept voices (`live_voices.py`; the CAF is gone, so both paths read the same
+decoded AAC):
+
+| | Lines printed after Stop | Seconds after Stop |
+|---|---|---|
+| Before | 952 | 57.9 |
+| v0.4.20 | 145 (the last 5½ minutes, and lines that run past a cut) | 6.0 |
+
+Every line got the same speaker. The prints differ by at most 0.0000025 (onnxruntime adds up in another order on two
+threads than on eight); the grouping's thresholds are 0.05 and up. A piece took 2.2 to 5.4 s more in the background.
+A line whose stretch runs past its piece is left for after Stop, so no print is made from a cut-off stretch.
+
+```bash
+$PY docs/bench/live_voices.py ~/.config/vin-meeting-minutes-zh/recordings/20261021-134441 /tmp/bench/lv 0,320,646,932,1259,1585,1859,2179,2477,2805
+```

@@ -2721,7 +2721,24 @@ class MailDefaults(Flows):
         finally:
             minutes_app.ai_summary = saved
 
+    def test_the_text_the_mail_sheet_wrote_is_kept_as_it_is(self):
+        """A preview (Word, PDF) or a send that failed writes the sheet's text to 信件內文.txt: what the user typed
+        there stays, even when the minutes changed since."""
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        self.md_path.write_text(MINUTES_WITH_PURPOSE.replace('預算 10 萬元', '預算 12 萬元'), encoding='utf-8')
+        mine = 'Hi，\n\n詳細如附件。\n\n會議目的：我改過的目的。\n\n重點：\n1. 我手改的重點\n\nVin\n\nSent by Vinutes v0.4.22'
+        (self.job_dir / '信件內文.txt').write_text(mine, encoding='utf-8')
+        (self.job_dir / minutes_app.SHEET_TEXT).touch()
+        self.assertEqual(minutes_app.mail_body(self.job()), (mine, True))
+
+    def test_a_list_left_under_its_own_heading_goes_with_it(self):
+        self.assertEqual(minutes_app.without_summary('Hi\n\n{文件網址}\n\n重點：\n\n- a\n- b\n\n會議目的：x\n\nVin'),
+                         'Hi\n\n{文件網址}\n\nVin')
+
     def test_only_two_paragraphs_with_a_highlight_are_taken_from_the_ai(self):
+        self.assertEqual(minutes_app.summary_of('會議目的：a\n\n重點：\n- b\n- c\n\n以上兩段可直接放進信裡，需要調整再告訴我。', 'zh-TW'),
+                         '會議目的：a\n\n重點：\n- b\n- c')                     # what the AI says after them is not mailed
+        self.assertEqual(minutes_app.summary_of('**會議目的**：a\n\n**重點**：\n\n1. b', 'zh-TW'), '會議目的：a\n\n重點：\n\n1. b')
         self.assertEqual(minutes_app.summary_of('好的，以下是：\n\n```\n會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）\n```\n', 'zh-TW'),
                          '會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）')
         self.assertEqual(minutes_app.summary_of('Purpose: budget.\n\nHighlights:\n1. Budget 100k (Amy)', 'en'),

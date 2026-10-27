@@ -2474,36 +2474,41 @@ function openMail() {
   S.sheet = 'mail';
   placeDoc();
   renderMail();
-  if (!m.summary_fresh) mailSummary();
+  mailSummary();
 }
 
-// The minutes changed after the AI wrote the mail: its 會議目的 and 重點 are written again from the minutes as they
-// are now (Vin 2026-10-27). What the user typed in the box meanwhile stays.
+// The mail's 會議目的 and 重點 for the minutes as they are now, edits still being saved included: when the minutes
+// changed after the AI wrote the mail, the AI writes them again from the minutes (Vin 2026-10-27). What the user
+// typed meanwhile stays, and only the box and the note change, so a word being composed (注音) is not broken.
 async function mailSummary() {
   const m = S.mail;
   const id = S.sel;
   const shown = m.body;
-  m.wait = true; redrawMail();
+  const slow = setTimeout(() => { if (S.mail === m) { m.wait = true; showMailNote(); } }, 500);
   let r = null;
-  try { r = await call('mailSummary', { id }); } catch (e) { /* the summary taken from the minutes stays */ }
+  try { await flush(); r = await call('mailSummary', { id }); } catch (e) { /* the text the sheet opened with stays */ }
+  clearTimeout(slow);
   if (S.sheet !== 'mail' || S.mail !== m || S.sel !== id) return;
-  redrawMail(() => {
-    m.wait = false;
-    if (r && r.body && m.body === shown && !m.sending) { m.body = r.body; m.linkBody = r.body; }
-  });
+  m.wait = false;
+  const box = $('#body');
+  if (box) m.body = box.value;
+  if (r && r.body && !m.sending && r.body !== shown) {
+    let next = null;
+    if (m.body === shown) next = r.body;
+    else if (m.fmt !== 'gdoc' && m.body === withAttachment(shown)) next = withAttachment(r.body);   // Word or PDF picked meanwhile
+    if (next !== null) { m.body = next; m.linkBody = r.body; if (box) box.value = next; }
+  }
+  showMailNote();
 }
 
-// the sheet drawn again with the field being typed in still focused, its caret where it was; `change` runs once
-// what is in the fields has been kept
-function redrawMail(change = () => {}) {
-  const m = S.mail;
-  const el = document.activeElement;
-  const id = el && ['subj', 'body', 'addTo'].includes(el.id) ? el.id : '';
-  const at = id ? [el.selectionStart, el.selectionEnd] : null;
-  m.subject = $('#subj').value; m.body = $('#body').value; m.typed = $('#addTo').value;
-  change();
-  renderMail();
-  if (id) { const box = $('#' + id); box.focus(); box.setSelectionRange(...at); }
+function mailNote(m) {
+  return say(m.err) || (m.wait ? t('summary_wait') : '') || (t(m.fmt === 'gdoc' ? 'note_gdoc' : 'note_file')
+    + (m.files ? t('note_files', m.files) : ''));
+}
+
+function showMailNote() {
+  const note = $('#sheet .note');
+  if (note) { note.textContent = mailNote(S.mail); note.classList.toggle('err', !!S.mail.err); }
 }
 
 const mailTo = () => S.mail.rcpts.filter((r) => r.mail).map((r) => r.mail);
@@ -2528,8 +2533,7 @@ function renderMail() {
     </div>
     <textarea id="body" aria-label="${esc(t('mail_body'))}">${esc(m.body)}</textarea>
     <div style="display:flex;align-items:center;gap:10px">
-      <span class="note${m.err ? ' err' : ''}">${esc(say(m.err) || (m.wait ? t('summary_wait') : '') || (t(m.fmt === 'gdoc' ? 'note_gdoc' : 'note_file')
-        + (m.files ? t('note_files', m.files) : '')))}</span>
+      <span class="note${m.err ? ' err' : ''}">${esc(mailNote(m))}</span>
       <button class="btn ghost" id="mailCancel"${m.sending ? ' disabled' : ''}>${esc(t('cancel'))}</button>
       <button class="btn primary" id="mailSend"${m.sending ? ' disabled' : ''}>${esc(t(m.sending ? 'sending' : 'send_mail_btn'))}</button></div>
   </div></div>`;

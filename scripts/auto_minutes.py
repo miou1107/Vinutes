@@ -691,9 +691,10 @@ def mail_turn(job: Path, what: str):
 def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, confirm: str | None):
     """--dry: the exact mail as the app will show it, with its confirm code. Otherwise send it if the code matches."""
     lock = mail_turn(job, 'preview' if dry else 'send')  # noqa: F841 (held until this process ends)
+    import minutes_app
+    (job / minutes_app.SHEET_TEXT).touch()             # the mail sheet just wrote 信件內文.txt: from now on it is the user's
     result = read_json(job / 'result.json')
     if result.get('sent_at'):
-        import minutes_app
         at = minutes_app.short_time(result['sent_at']) if ui_lang() == 'en' else result['sent_at'][:16].replace('T', ' ')
         sys.exit(t('mail_already_sent', at=at))
     if not result.get('mail') or not (job / BODY).is_file() or not doc_id(result):
@@ -733,7 +734,6 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
     result['sent_format'] = fmt
     write_json(job / 'result.json', result)
     usage.mail(len(people))
-    import minutes_app
     entry = minutes_app.Job(job)
     names = t('list_sep').join(minutes_app.name_of(entry, p) for p in people)
     entry.log(minutes_app.me(), t('log_sent', names=names, format=minutes_app.format_words(fmt)), 'sent')

@@ -2599,7 +2599,8 @@ def plain_text(text: str) -> str:
 
 SUMMARY_LINE = re.compile(r'^\s*(會議目的|重點|Purpose|Highlights)\s*[:：]')
 SUMMARY_FILE = '信件重點.json'     # the AI's 會議目的 and 重點, with the minutes they were written from
-SUMMARY_WORK = '信件重點'           # the folder the AI reads the minutes in, gone once it answers
+SUMMARY_WORK = '信件重點-'          # the folders the AI reads the minutes in, one per run, gone once it answers
+SHEET_TEXT = '.信件內文來自寄信視窗'   # 信件內文.txt holds what the mail sheet had (a preview or a send wrote it)
 SUMMARY_PROMPT = {
     'zh-TW': ('這個資料夾裡的 紀錄.md 是一場會議的會議紀錄，使用者剛改過。替寄給與會人員的信寫兩段，只寫這兩段，不要寫別的：\n'
               '會議目的：一句話，照紀錄第二節，只留這場會議要談什麼、要決定什麼。\n\n'
@@ -2656,9 +2657,19 @@ def with_summary(body: str, md: str, lang: str, block: str = '') -> str:
     return '\n\n'.join(paragraphs)
 
 
+LIST_LINE = re.compile(r'^\s*(?:[-*•]|\d+[.、)])\s+\S')
+
+
 def without_summary(body: str) -> str:
-    """The body without the 會議目的 and 重點 paragraphs the AI wrote with the minutes."""
-    return '\n\n'.join(p for p in re.split(r'\n\s*\n', body.strip()) if not SUMMARY_LINE.match(p))
+    """The body without the 會議目的 and 重點 paragraphs the AI wrote with the minutes, nor a list right after them."""
+    kept, after = [], False
+    for p in re.split(r'\n\s*\n', body.strip()):
+        if SUMMARY_LINE.match(p) or (after and all(LIST_LINE.match(line) for line in p.split('\n'))):
+            after = True
+            continue
+        kept.append(p)
+        after = False
+    return '\n\n'.join(kept)
 
 
 def minutes_key(md: str) -> str:
@@ -2690,7 +2701,10 @@ def mail_body(job: Job, block: str = '') -> tuple[str, bool]:
     the minutes; once the user has changed the minutes they come from the minutes instead (Vin 2026-10-27): the
     AI's rewrite for these minutes (`block`, or the one kept in 信件重點.json), else taken line by line."""
     path = job.dir / '信件內文.txt'
-    body = finished_body(path.read_text(encoding='utf-8').strip() if path.is_file() else '')
+    body = path.read_text(encoding='utf-8').strip() if path.is_file() else ''
+    if (job.dir / SHEET_TEXT).is_file():              # the sheet's text, maybe edited by the user: kept as it is
+        return body, True
+    body = finished_body(body)
     md = '' if job.missing else job.md
     fresh = not md or not minutes_edited(job, md)
     if not fresh:
@@ -2706,9 +2720,8 @@ def ai_summary(job: Job, md: str) -> str:
     """The chosen AI's 會議目的 and 重點 for these minutes, read in a folder of their own; '' when it gives none."""
     import ai_runner
     import auto_minutes
-    work = job.dir / SUMMARY_WORK
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir()
+    import tempfile
+    work = Path(tempfile.mkdtemp(prefix=SUMMARY_WORK, dir=job.dir))   # a second sheet opened meanwhile has its own
     (work / '紀錄.md').write_text(md, encoding='utf-8')
     try:
         done = ai_runner.run(SUMMARY_PROMPT['en' if job.lang == 'en' else 'zh-TW'], work, write=False, read_only=True,
@@ -2721,17 +2734,26 @@ def ai_summary(job: Job, md: str) -> str:
 
 
 def summary_of(text: str, lang: str) -> str:
-    """The two paragraphs out of the AI's answer: from 會議目的 on, with 重點 and at least one line under it."""
+    """The two paragraphs out of the AI's answer: from 會議目的 to the end of the list under 重點, which needs a line.
+    Anything before or after them (an introduction, an offer to change them) is left out."""
     import ai_runner
     words = SUMMARY['en' if lang == 'en' else 'zh-TW']
-    lines = [line.rstrip() for line in (text or '').replace('```', '').split('\n')]
+    lines = [line.rstrip() for line in (text or '').replace('```', '').replace('**', '').split('\n')]
     start = next((i for i, line in enumerate(lines) if SUMMARY_LINE.match(line)), None)
-    if start is None:
-        return ''
-    block = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines[start:]).strip())
     head = words['highlights'].rstrip(':：')
-    if not re.search(rf'(?m)^\s*{head}\s*[:：]\s*\n\s*(?:[-*]|\d+[.、)])\s+\S', block) or len(block) > 1500 \
-            or BLANK in block or ai_runner.leaks(block):
+    top = next((i for i, line in enumerate(lines) if re.match(rf'^\s*{head}\s*[:：]\s*$', line)), None)
+    if start is None or top is None or top < start:
+        return ''
+    end = top + 1
+    for i in range(top + 1, len(lines)):
+        if LIST_LINE.match(lines[i]):
+            end = i + 1
+        elif lines[i].strip() and end > top + 1:      # the list is over
+            break
+    if end == top + 1:
+        return ''
+    block = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines[start:end]).strip())
+    if len(block) > 1500 or BLANK in block or ai_runner.leaks(block):
         return ''
     return block
 

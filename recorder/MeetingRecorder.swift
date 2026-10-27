@@ -189,6 +189,8 @@ let STRINGS: [String: [String: String]] = [
         "panel.refs": "Choose files for the AI to read",
         "panel.refImages": "Choose pictures for the AI to look at",
         "panel.add": "Add",
+        "panel.folder": "Choose the folder where this project's files are",
+        "panel.chooseFolder": "Choose",
     ],
     "zh-TW": [
         "menu.start": "開始錄音",
@@ -299,6 +301,8 @@ let STRINGS: [String: [String: String]] = [
         "panel.refs": "選擇要給 AI 參考的檔案",
         "panel.refImages": "選擇要給 AI 參考的圖片",
         "panel.add": "加入",
+        "panel.folder": "選擇這個專案放文件的資料夾",
+        "panel.chooseFolder": "選擇",
     ],
 ]
 
@@ -1759,6 +1763,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["correct", dir.path, args["item"] as? String ?? "", text], done)
         case "pick":
             pickFiles(kind: args["kind"] as? String ?? "file", done)
+        case "pickFolder":
+            pickFolder(done)
         case "pastePicture":
             pastedPictures(done)
         case "setupState":
@@ -1878,7 +1884,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             let old = args["old"] as? String ?? "", new = args["new"] as? String ?? ""
             app(["rename_project", old, new], done)
         case "brief":
-            // a project's brief (專案小抄): its people with what they do, its terms, its background
+            // a project's brief (專案背景): its people with what they do, its terms, its background, its folder
             app(["brief", args["project"] as? String ?? ""], done)
         case "saveBrief":
             // the brief as the user left it in 專案設定; anything that is not one would empty it
@@ -2219,6 +2225,22 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         }
     }
 
+    /// A project's folder for 專案設定, as {path}; the AI gets a copy of what is in it (project_folders.py).
+    func pickFolder(_ done: @escaping (Bool, Any) -> Void) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        panel.message = tr("panel.folder")
+        panel.prompt = tr("panel.chooseFolder")
+        panel.beginSheetModal(for: window) { answer in
+            guard answer == .OK, let url = panel.url else { return done(true, ["cancelled": true]) }
+            done(true, ["path": url.path])
+        }
+    }
+
     /// Files and links handed to the AI with a sentence: a file only if the open panel gave it, a link only http(s).
     func handed(_ raw: Any?) -> [[String: String]] {
         var out: [[String: String]] = []
@@ -2474,12 +2496,16 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
 #if SNAPSHOT
 // For development only:  swiftc -D SNAPSHOT -swift-version 5 MeetingRecorder.swift, inside an .app with Resources/app.
 // <app>/Contents/MacOS/MeetingRecorder <job id> <out.png> [light|dark] opens the meeting window on that job, waits
-// for it to load and saves what the window shows.
+// for it to load and saves what the window shows. VINUTES_SNAPSHOT_JS, when set, runs in the page first (opening a
+// sheet or a menu to show it).
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 app.appearance = NSAppearance(named: CommandLine.arguments.count > 3 && CommandLine.arguments[3] == "dark" ? .darkAqua : .aqua)
 let delegate = AppDelegate()
 delegate.showManager(select: CommandLine.arguments[1])
+if let script = ProcessInfo.processInfo.environment["VINUTES_SNAPSHOT_JS"] {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 9) { delegate.manager?.web.evaluateJavaScript(script) }
+}
 DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
     delegate.manager?.web.evaluateJavaScript("location.href + ' | ' + document.body.innerText.slice(0, 300)") { value, error in
         print("PAGE", value ?? "", error ?? "")

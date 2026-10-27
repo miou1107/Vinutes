@@ -1,11 +1,13 @@
-"""A project's brief (專案小抄, Vin 2026-10-17 and 10-19): the people and what each of them does, the project's own
-terms with the ways the transcript mishears them, and a few lines of background the user writes. The AI that writes
-the minutes reads every project's brief, decides which project the meeting is, and writes names and terms its way.
+"""A project's brief (專案背景, Vin 2026-10-17, 10-19 and 10-28): the people and what each of them does, the project's
+own terms with the ways the transcript mishears them, a few lines of background the user writes, and the folder on
+this Mac where the project's files are (project_folders.py copies it for the AI). The AI that writes the minutes reads
+every project's brief, decides which project the meeting is, and writes names and terms its way.
 
 Where it lives, on this Mac only (one brief per person, never shared):
   $MINUTES_HOME/people.json   {project: [name, ...]}: the project's people, the same list the 人員 tab keeps
   $MINUTES_HOME/briefs.json   {project: {"people": {name: {"role", "heard", "added"}},
-                                         "terms": [{"word", "meaning", "heard", "added", "learned"}], "background"}}
+                                         "terms": [{"word", "meaning", "heard", "added", "learned"}], "background",
+                                         "folder": "/Users/…/the project's folder"}}
 
 Only what the user confirmed goes in: a name or a word Claude guessed waits under 待確認 until the user presses
 確認無誤 or keeps an edit. The background is the user's own text; nothing here writes it but 儲存 in 專案設定.
@@ -24,10 +26,11 @@ from datetime import datetime
 from pathlib import Path
 
 from google_setup import CONFIG
+from i18n import t as tr                          # t is a term in the loops below
 
 PEOPLE = CONFIG / 'people.json'
 BRIEFS = CONFIG / 'briefs.json'
-FILE_NAME = '專案小抄.md'                       # what the AI reads, in the folder it works in
+FILE_NAME = '專案背景.md'                       # what the AI reads, in the folder it works in
 LIMITS = {'name': 30, 'role': 20, 'word': 30, 'meaning': 30, 'heard': 30, 'background': 600}
 _held = 0                                        # how deep this process is inside _locked()
 
@@ -181,7 +184,8 @@ def _entry(project: str) -> dict:
     found = found if isinstance(found, dict) else {}
     people = found.get('people') if isinstance(found.get('people'), dict) else {}
     terms = [t for t in found.get('terms') or [] if isinstance(t, dict) and t.get('word')]
-    return {'people': people, 'terms': terms, 'background': str(found.get('background') or '')}
+    folder = found.get('folder') if isinstance(found.get('folder'), str) else ''
+    return {'people': people, 'terms': terms, 'background': str(found.get('background') or ''), 'folder': folder}
 
 
 def _save_entry(project: str, entry: dict):
@@ -206,7 +210,7 @@ def load(project: str) -> dict:
     terms = [{'word': one_line(t['word'], LIMITS['word']), 'meaning': one_line(t.get('meaning'), LIMITS['meaning']),
               'heard': _heard(t.get('heard')), 'added': t.get('added') or ''} for t in entry['terms']]
     return {'project': project, 'people': people, 'terms': terms,
-            'background': entry['background'][:LIMITS['background']]}
+            'background': entry['background'][:LIMITS['background']], 'folder': entry['folder']}
 
 
 def save(project: str, brief: dict) -> dict:
@@ -255,6 +259,11 @@ def save(project: str, brief: dict) -> dict:
             entry['terms'] = terms
         if isinstance(brief.get('background'), str):
             entry['background'] = brief['background'].strip()[:LIMITS['background']]
+        if isinstance(brief.get('folder'), str):     # '' takes the folder off; anything else must be a folder here
+            folder = brief['folder'].strip()
+            if folder and not Path(folder).expanduser().is_dir():
+                raise SystemExit(tr('bad_folder'))
+            entry['folder'] = str(Path(folder).expanduser().resolve()) if folder else ''
         _save_entry(project, entry)
         return load(project)
 
@@ -356,10 +365,21 @@ def rename(old: str, new: str) -> list[str]:
                     same['heard'] = _heard((same.get('heard') or []) + (term.get('heard') or []))
                     same['meaning'] = same.get('meaning') or term.get('meaning') or ''
             into['background'] = '\n'.join(b for b in (into['background'], gone['background']) if b)
+            into['folder'] = into['folder'] or gone['folder']
             briefs.pop(old)
             briefs[new] = into
             _write(BRIEFS, briefs)
         return names
+
+
+def folders() -> dict[str, Path]:
+    """Each project's folder that is still there, by project."""
+    found = {}
+    for project, entry in _read(BRIEFS).items():
+        folder = entry.get('folder') if isinstance(entry, dict) else None
+        if isinstance(project, str) and project and isinstance(folder, str) and folder and Path(folder).is_dir():
+            found[project] = Path(folder)
+    return found
 
 
 def projects() -> list[str]:
@@ -391,9 +411,9 @@ def markdown(only: str | None = None, lang: str = 'zh-TW') -> str:
         parts.append('\n'.join(lines).rstrip())
     if not parts:
         return ''
-    head = ('# 專案小抄\n\n使用者確認過的每個專案的人員、名詞與背景。先判斷這場會議屬於哪一個專案，'
-            '人名、誰負責什麼、名詞的寫法照那個專案的小抄；別的專案的人和事不要寫進這場紀錄。'
-            '小抄上的人是專案成員，不是這場會議的與會者。\n'
+    head = ('# 專案背景\n\n使用者確認過的每個專案的人員、名詞與背景。先判斷這場會議屬於哪一個專案，'
+            '人名、誰負責什麼、名詞的寫法照那個專案的專案背景；別的專案的人和事不要寫進這場紀錄。'
+            '專案背景上的人是專案成員，不是這場會議的與會者。\n'
             if zh else
             '# Project briefs\n\nWhat the user confirmed about each project: its people, terms and background. Decide which '
             'project this meeting belongs to and write names, who does what and terms as its brief has them; nothing '

@@ -1,0 +1,151 @@
+<title>Vinutes 專案資料夾</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a short lead, Project settings as it is today (two tabs), then with the third tab open. */
+:root {
+  --bg: #f3f3f6; --win: #ffffff; --panel: #f6f6f8; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --field: #ffffff; --field-line: #cfcfd6;
+  --blue: #0a64d8; --blue-bg: #f3f7ff;
+  --asis: #b42318; --asis-bg: #fdecea; --asis-line: #f1b5af;
+  --tobe: #0a64d8; --tobe-bg: #eaf2ff; --tobe-line: #a9c4ef;
+  --note: #6b4d00; --note-bg: #fff6dd; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.14);
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-bg: #24304a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161618; --win: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --field: #2c2c30; --field-line: #46464c;
+  --blue: #2f7ef0; --blue-bg: #24304a;
+  --asis: #e5574b; --asis-bg: #3a1f1d; --asis-line: #6e3330;
+  --tobe: #2f7ef0; --tobe-bg: #1c2a42; --tobe-line: #36507a;
+  --note: #ffe08a; --note-bg: #3d3214; --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0,0,0,0.6); color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px; }
+.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 22px; margin: 0; }
+.lead { margin: 6px 0 0; color: var(--text2); max-width: 62ch; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.state { border: 2px solid; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.state.asis { border-color: var(--asis-line); background: var(--asis-bg); }
+.state.tobe { border-color: var(--tobe-line); background: var(--tobe-bg); }
+.tag { align-self: flex-start; font-size: 13px; font-weight: 700; padding: 3px 12px; border-radius: 999px; color: var(--on-accent); }
+.asis .tag { background: var(--asis); } .tobe .tag { background: var(--tobe); }
+.cap { margin: 0; color: var(--text2); }
+.hint { margin: 0; font-size: 13px; color: var(--note); background: var(--note-bg); border-radius: 8px; padding: 6px 10px; align-self: flex-start; }
+
+/* the Project settings sheet */
+.sheet { background: var(--win); border: 1px solid var(--line2); border-radius: 12px; box-shadow: var(--shadow); max-width: 600px; width: 100%;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sheet h3 { margin: 0; font-size: 16px; }
+.tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.tabs span { padding-bottom: 8px; color: var(--muted); }
+.tabs span.on { color: var(--blue); border-bottom: 2px solid var(--blue); font-weight: 600; }
+.grid { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 14px 12px; align-items: start; font-size: 13px; }
+.k { color: var(--muted); padding-top: 4px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.path { border: 1px solid var(--field-line); background: var(--field); border-radius: 8px; padding: 4px 10px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn { border: 1px solid var(--line2); background: var(--win); border-radius: 8px; padding: 4px 12px; font-size: 13px; }
+.btn.primary { background: var(--blue); color: var(--on-accent); border-color: var(--blue); font-weight: 600; }
+.list { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.list .f { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.list .f span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list small, .count { color: var(--muted); }
+.list label { display: flex; gap: 8px; align-items: center; padding: 3px 6px; border-radius: 6px; cursor: pointer; min-width: 0; }
+.list label:hover { background: var(--blue-bg); }
+.list label.off { opacity: .5; cursor: default; }
+.list label.off:hover { background: none; }
+.list input { accent-color: var(--blue); }
+.bsec { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 13px; }
+.bsec header { display: flex; align-items: center; gap: 8px; }
+.bsec header .n { color: var(--muted); }
+.bsec header .btn { margin-left: auto; }
+.brow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
+.brow span, .bg { border: 1px solid var(--field-line); background: var(--field); border-radius: 8px; padding: 4px 10px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bg { white-space: normal; min-height: 56px; }
+.bar { display: flex; align-items: center; gap: 6px; background: var(--win); border: 1px solid var(--line2); border-radius: 10px;
+  padding: 8px 12px; font-size: 13px; max-width: 600px; width: 100%; min-width: 0; }
+.bar .crumb { color: var(--blue); font-weight: 600; }
+.bar .gear, .bar .sep { color: var(--muted); }
+.bar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.menu { align-self: flex-start; margin: -8px 0 0 12px; background: var(--win); border: 1px solid var(--line2); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 4px; min-width: 200px; font-size: 13px; display: flex; flex-direction: column; }
+.menu div { padding: 4px 10px; border-radius: 6px; display: flex; justify-content: space-between; gap: 12px; }
+.menu .on { background: var(--blue-bg); color: var(--blue); font-weight: 600; }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+.foot { display: flex; justify-content: flex-end; gap: 8px; }
+.empty { color: var(--muted); font-size: 13px; padding: 4px 0 30px; }
+@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } .k { padding-top: 0; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Vinutes 專案資料夾</h1>
+    <p class="lead">專案設定改成一頁，不用切換分頁。會議要換專案時，改從會議上方的專案名稱選。</p>
+  </header>
+
+  <section class="state asis" aria-label="目前的畫面">
+    <span class="tag">目前的畫面</span>
+    <div class="bar"><span class="crumb">春季活動</span><span class="gear">⚙</span><span class="sep">›</span><span class="title">10/28 專案週會</span></div>
+    <div class="sheet">
+      <h3>專案設定</h3>
+      <div class="tabs"><span class="on">小抄</span><span>名稱</span></div>
+      <div class="empty">（人員、名詞、背景）</div>
+    </div>
+    <p class="cap">AI 整理紀錄時只讀得到這場會議的逐字稿和行事曆，讀不到專案資料夾裡之前的紀錄和提案。</p>
+    <p class="cap">會議分錯專案時，要打開專案設定的「名稱」分頁才能改。</p>
+  </section>
+
+  <section class="state tobe" aria-label="調整後的畫面">
+    <span class="tag">調整後的畫面</span>
+    <div class="bar"><span class="crumb">春季活動 ▾</span><span class="gear">⚙</span><span class="sep">›</span><span class="title">10/28 專案週會</span></div>
+    <div class="menu">
+      <div class="on"><span>春季活動</span><span>✓</span></div>
+      <div><span>年度預算</span></div>
+      <div><span>官網改版</span></div>
+      <div><span>未分類</span></div>
+      <hr>
+      <div><span>新增專案…</span></div>
+    </div>
+    <p class="cap">點會議上方的專案名稱，就能把這場會議換到別的專案，或新增一個專案。</p>
+    <div class="sheet">
+      <h3>專案設定</h3>
+      <div class="grid">
+        <span class="k">專案名稱</span>
+        <div class="row"><span class="path">春季活動</span></div>
+        <span class="k">專案資料夾</span>
+        <div class="row"><span class="path">~/Documents/春季活動</span><button class="btn">選擇資料夾</button></div>
+      </div>
+      <section class="bsec"><header><b>人員</b><span class="n">3</span><button class="btn">新增人員</button></header>
+        <div class="brow"><span>王小明</span><span>活動企劃</span></div>
+        <div class="brow"><span>陳怡君</span><span>預算與報價</span></div>
+        <div class="brow"><span>林志豪</span><span>媒體聯繫</span></div>
+      </section>
+      <section class="bsec"><header><b>名詞</b><span class="n">2</span><button class="btn">新增名詞</button></header>
+        <div class="brow"><span>春遊祭</span><span>今年春季活動的名稱</span></div>
+        <div class="brow"><span>早鳥票</span><span>3 月底前購票打八折</span></div>
+      </section>
+      <section class="bsec"><header><b>背景</b></header>
+        <div class="bg">今年 4 月在華山辦，目標 3,000 人入場。</div>
+      </section>
+      <div class="foot"><button class="btn">取消</button><button class="btn primary">儲存</button></div>
+    </div>
+    <p class="cap">AI 整理紀錄時會讀這個資料夾裡的所有檔案，包括之前的紀錄和提案。</p>
+  </section>
+</div>
+

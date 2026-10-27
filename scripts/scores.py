@@ -43,12 +43,13 @@ TIMEOUT = 15 * 60
 # in the window's language: what the user can do in Vinutes, for the AI to pick from when it says how to do better
 # next time; examples of a lost point; and the other kind of fix each way of scoring has
 ACTIONS = {
-    'zh-TW': ['到人員分頁替講者取名', '把與會人員加進小抄的人員', '在小抄的人員寫上每個人負責什麼',
-              '把專有名詞加進小抄的名詞', '把專案背景寫進小抄的背景', '在行事曆的會議說明寫上主持人和參與人員',
-              '加入會議附件'],
+    'zh-TW': ['到人員分頁替講者取名', '在專案設定把與會人員加進人員', '在專案設定的人員寫上每個人負責什麼',
+              '在專案設定把專有名詞加進名詞', '在專案設定的背景寫上專案背景', '在專案設定選好專案資料夾',
+              '在行事曆的會議說明寫上主持人和參與人員', '加入會議附件'],
     'en': ['Name the voice in the People tab', "Add the attendees to the brief's People",
            "Write what each person does in the brief's People", "Add the term to the brief's Terms",
-           "Write the project's background in the brief", "Write the chair and attendees in the calendar event",
+           "Write the project's background in the brief", "Choose the project's folder in Project settings",
+           "Write the chair and attendees in the calendar event",
            'Add the meeting attachments'],
 }
 EXAMPLES = {'zh-TW': {'check': '「講者 B 沒有名字」「待辦「報價單」沒寫期限」',

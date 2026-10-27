@@ -584,6 +584,8 @@ def run(job: Path):
         lang = minutes_lang(spoken)
         work = gather(job, meta, folder, lang)
         (job / 'result.json').unlink(missing_ok=True)
+        for old in (scores.FILE, scores.ORIGINAL):    # a rerun's score is the new minutes' only
+            (job / old).unlink(missing_ok=True)
         write_minutes(job, work, meta, folder, lang, spoken)
         result = check_result(work, meta, folder, lang)
         result.update(minutes_lang=lang, spoken=spoken)
@@ -598,7 +600,7 @@ def run(job: Path):
         base = next((md.stem.removesuffix(end) for end, _ in SUFFIX.values() if md.stem.endswith(end)), md.stem)
         md.with_name(base + SUFFIX[lang][1] + '.txt').write_text(speakers.labelled_transcript(job, unnamed(lang)),
                                                                  encoding='utf-8')
-        shutil.copy(md, job / scores.ORIGINAL)       # the AI's own minutes, for the score when the mail goes out
+        scores.keep_original(job, md)
         publish(job, result)
         write_json(job / 'result.json', result)
         import ai_runner

@@ -33,10 +33,10 @@ from i18n import ui_lang  # noqa: E402
 
 FILE = '評分.json'
 ORIGINAL = '原稿.md'            # the minutes as the AI wrote them
-WORK = '評分'                   # the AI's folder for scoring, inside the job
+WORK = '評分'                   # the AI's folders for scoring, inside the job: 評分-check, 評分-edits
 CATEGORIES = ('basics', 'people', 'numbers', 'decisions', 'actions')
 WEIGHTS = {'basics': 25, 'people': 20, 'numbers': 20, 'decisions': 15, 'actions': 20}
-VALUE = {'check': {'supported': 1.0, 'partial': 0.5}, 'edits': {'same': 1.0, 'partial': 0.5}}
+VALUE = {'check': {'supported': 1.0, 'partial': 0.5}, 'edits': {'same': 1.0, 'partial': 0.5}}   # any other mark: 0
 MOST_LOST = 6
 TIMEOUT = 15 * 60
 
@@ -104,6 +104,7 @@ Mark each fact against 原稿.md:
 - "partial": 原稿.md has part of it (the task without its owner, a name spelled differently, a blank such as [__])
 - "changed": 原稿.md says otherwise
 - "added": 原稿.md does not have it
+Then add every fact 原稿.md states that 定稿.md no longer has (the user deleted it as wrong), marked "removed".
 
 """ + LOST.format(good='same', most=MOST_LOST, where='定稿.md')
 
@@ -121,13 +122,17 @@ def log(job: Path, text: str):
         out.write(f'{datetime.now():%H:%M:%S} score: {text}\n')
 
 
+def word(value) -> str:
+    return value.strip().lower() if isinstance(value, str) else ''
+
+
 def tally(kind: str, facts: list) -> tuple[int, dict]:
     """The score and each category's [points, out of] from the AI's marks. Points are rounded per category, so
     the score is the sum of what the window shows."""
     value = VALUE[kind]
     categories = {}
     for cat in CATEGORIES:
-        marks = [f.get('status') for f in facts if isinstance(f, dict) and f.get('category') == cat]
+        marks = [word(f.get('status')) for f in facts if isinstance(f, dict) and word(f.get('category')) == cat]
         share = sum(value.get(m, 0) for m in marks) / len(marks) if marks else 1.0
         categories[cat] = [round(WEIGHTS[cat] * share), WEIGHTS[cat]]
     return sum(p for p, _ in categories.values()), categories
@@ -147,13 +152,19 @@ def lost_items(found) -> list[dict]:
 
 
 def answer_of(text: str) -> dict:
-    found = re.search(r'\{.*\}', text or '', re.S)
-    if not found:
-        raise ValueError('no JSON in the answer')
-    data = json.loads(found.group(0))
-    if not isinstance(data, dict) or not isinstance(data.get('facts'), list):
-        raise ValueError('no facts in the answer')
-    return data
+    """The JSON the AI answered with: the last object in its text that lists facts of the five categories. An
+    answer without any is no score, not 100."""
+    text = text or ''
+    starts = [m.start() for m in re.finditer(r'\{', text)]
+    for at in reversed(starts):
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text, at)
+        except ValueError:
+            continue
+        facts = data.get('facts') if isinstance(data, dict) else None
+        if isinstance(facts, list) and any(isinstance(f, dict) and word(f.get('category')) in CATEGORIES for f in facts):
+            return data
+    raise ValueError('no facts in the answer')
 
 
 def save(job: Path, kind: str, entry: dict):
@@ -182,14 +193,14 @@ def ask(job: Path, kind: str, files: dict[str, str]) -> tuple[dict, str]:
     """The chosen AI reads the files in a folder of their own, may write nothing, and answers with its marks."""
     import ai_runner
     import auto_minutes
-    work = job / WORK
+    work = job / f'{WORK}-{kind}'                    # check and edits may run at the same time
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
     for name, text in files.items():
         (work / name).write_text(text, encoding='utf-8')
     try:
-        done = ai_runner.run(prompt(kind, ui_lang()), work, write=False, timeout=TIMEOUT, env=auto_minutes.env(),
-                             task='score')
+        done = ai_runner.run(prompt(kind, ui_lang()), work, write=False, read_only=True, timeout=TIMEOUT,
+                             env=auto_minutes.env(), task='score')
     finally:
         shutil.rmtree(work, ignore_errors=True)
     if done.returncode:
@@ -241,11 +252,23 @@ def edits(job: Path):
 
 
 def start(job: Path, kind: str):
-    """In the background: the minutes, or the mail, never wait for the score."""
-    with (job / 'log.txt').open('a', encoding='utf-8') as out:
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), kind, str(job)], stdout=out, stderr=out,
-                         stdin=subprocess.DEVNULL, start_new_session=True,
-                         env={**os.environ, 'VINUTES_MEETING': job.name})
+    """In the background: the minutes, or the mail, never wait for the score, and nothing here stops them."""
+    try:
+        with (job / 'log.txt').open('a', encoding='utf-8') as out:
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), kind, str(job)], stdout=out, stderr=out,
+                             stdin=subprocess.DEVNULL, start_new_session=True,
+                             env={**os.environ, 'VINUTES_MEETING': job.name})
+    except Exception:                                  # noqa: BLE001 (the meeting goes on without a score)
+        pass
+
+
+def keep_original(job: Path, md: Path):
+    """The AI's own minutes, for the score when the mail goes out; a new write-up starts without the old score."""
+    try:
+        (job / FILE).unlink(missing_ok=True)
+        shutil.copy(md, job / ORIGINAL)
+    except Exception:                                  # noqa: BLE001 (that meeting gets no score from its edits)
+        pass
 
 
 def main():

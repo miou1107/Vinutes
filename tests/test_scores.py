@@ -57,6 +57,15 @@ class Tally(unittest.TestCase):
         self.assertEqual(cats['basics'], [9, 25])            # 25 * 1.5/4
         self.assertEqual(scores.tally('edits', marks(basics=['supported']))[1]['basics'], [0, 25])
 
+    def test_marks_in_other_case_still_count(self):
+        self.assertEqual(scores.tally('check', marks(basics=[' Supported ']))[1]['basics'], [25, 25])
+        self.assertEqual(scores.tally('check', [{'category': 'People', 'status': 'blank'}])[1]['people'], [0, 20])
+
+    def test_what_the_user_deleted_costs_points(self):
+        _, cats = scores.tally('edits', marks(decisions=['same', 'removed']))
+        self.assertEqual(cats['decisions'], [8, 15])
+        self.assertIn('"removed"', scores.prompt('edits', 'zh-TW'))
+
     def test_nothing_marked_is_100(self):
         self.assertEqual(scores.tally('edits', [])[0], 100)
 
@@ -71,9 +80,14 @@ class Answer(unittest.TestCase):
         self.assertEqual(got['facts'][0]['status'], 'blank')
 
     def test_no_facts_is_no_answer(self):
-        for text in ('沒有結果', '{"lost": []}', '[1, 2]'):
+        for text in ('沒有結果', '{"lost": []}', '[1, 2]', '{"facts": []}',
+                     '{"facts": [{"category": "其他", "status": "blank"}]}'):
             with self.assertRaises(ValueError):
                 scores.answer_of(text)
+
+    def test_braces_before_the_answer(self):
+        text = '我讀了 {紀錄.md} 和 {逐字稿.txt}。\n{"facts": [{"category": "actions", "status": "blank"}], "lost": []}'
+        self.assertEqual(scores.answer_of(text)['facts'][0]['category'], 'actions')
 
     def test_lost_items_are_cut_and_capped(self):
         lost = scores.lost_items([{'category': 'people', 'what': '講者 B\n沒有名字', 'fix': 'x' * 200, 'quote': '講者 B'},
@@ -163,12 +177,53 @@ class Failing(Job):
         self.assertIn('edits failed: ValueError: no JSON', (self.dir / 'log.txt').read_text(encoding='utf-8'))
 
     def test_the_ai_folder_is_gone_after_asking(self):
-        done = subprocess.CompletedProcess([], 0, stdout='{"facts": []}', stderr='')
+        done = subprocess.CompletedProcess([], 0, stdout='{"facts": [{"category": "basics", "status": "blank"}]}', stderr='')
         with mock.patch('ai_runner.run', return_value=done) as run, mock.patch('ai_runner.name', return_value='Claude'):
             answer, ai = scores.ask(self.dir, 'check', {'紀錄.md': MINUTES})
-        self.assertEqual((answer, ai), ({'facts': []}, 'Claude'))
-        self.assertFalse(run.call_args.kwargs['write'])
-        self.assertFalse((self.dir / scores.WORK).exists())
+        self.assertEqual((len(answer['facts']), ai), (1, 'Claude'))
+        self.assertTrue(run.call_args.kwargs['read_only'])
+        self.assertEqual(run.call_args.args[1].name, '評分-check')
+        self.assertFalse(any(self.dir.glob(scores.WORK + '*')))
+
+    def test_check_and_edits_ask_in_folders_of_their_own(self):
+        seen = {}
+
+        def answer(prompt, work, **kw):
+            seen[work.name] = sorted(f.name for f in work.iterdir())
+            other = work.with_name('評分-edits' if work.name == '評分-check' else '評分-check')
+            if other.name not in seen:                 # the other kind starts while this one is still asking
+                scores.ask(self.dir, 'edits' if work.name == '評分-check' else 'check', {'x.md': 'x'})
+            self.assertTrue(work.is_dir())             # ... and has not wiped this one's files
+            return subprocess.CompletedProcess([], 0, stdout='{"facts": [{"category": "basics", "status": "same"}]}', stderr='')
+        with mock.patch('ai_runner.run', side_effect=answer), mock.patch('ai_runner.name', return_value='Claude'):
+            scores.ask(self.dir, 'check', {'紀錄.md': MINUTES})
+        self.assertEqual(seen['評分-check'], ['紀錄.md'])
+        self.assertEqual(seen['評分-edits'], ['x.md'])
+
+    def test_claude_gets_read_alone_and_codex_a_read_only_sandbox(self):
+        import ai_runner
+        cmd, _ = ai_runner.command('claude', 'claude', 'p', self.dir, False, read_only=True)
+        self.assertEqual(cmd[cmd.index('--tools') + 1], 'Read')
+        cmd, _ = ai_runner.command('codex', 'codex', 'p', self.dir, False, read_only=True)
+        self.assertEqual(cmd[cmd.index('--sandbox') + 1], 'read-only')
+        cmd, _ = ai_runner.command('claude', 'claude', 'p', self.dir, False)
+        self.assertEqual(cmd[cmd.index('--tools') + 1], 'Read,Write,Edit')     # the other runs as before
+
+
+class Starting(Job):
+    def test_a_start_that_fails_stops_nothing(self):
+        with mock.patch('subprocess.Popen', side_effect=OSError('no more processes')):
+            scores.start(self.dir, 'check')            # returns: the minutes are published, the mail was sent
+
+    def test_a_new_write_up_drops_the_old_score(self):
+        scores.save(self.dir, 'check', scores.entry('check', {'facts': marks(basics=['blank'])}, 'Claude'))
+        scores.keep_original(self.dir, self.md)
+        self.assertFalse((self.dir / scores.FILE).exists())
+        self.assertEqual((self.dir / scores.ORIGINAL).read_text(encoding='utf-8'), MINUTES)
+
+    def test_a_copy_that_fails_stops_nothing(self):
+        scores.keep_original(self.dir, self.dir / 'gone.md')
+        self.assertFalse((self.dir / scores.ORIGINAL).exists())
 
 
 class Window(Job):
@@ -199,8 +254,15 @@ class Window(Job):
         self.assertEqual(minutes_app.score_view(minutes_app.Job(self.dir), MINUTES)['lost'][0]['find'], '')
 
     def test_a_damaged_file_shows_no_score(self):
-        (self.dir / scores.FILE).write_text('{"check": [', encoding='utf-8')
-        self.assertIsNone(minutes_app.score_view(minutes_app.Job(self.dir), MINUTES))
+        for text in ('{"check": [', '{"check": {"score": "x"}}', '{"check": {"score": 1, "categories": {"basics": ["<b>", 25]}}}'):
+            (self.dir / scores.FILE).write_text(text, encoding='utf-8')
+            self.assertIsNone(minutes_app.score_view(minutes_app.Job(self.dir), MINUTES))
+
+    def test_a_quote_copied_with_markdown_still_finds(self):
+        scores.save(self.dir, 'check', scores.entry('check', {'facts': [], 'lost': [
+            {'what': '負責人', 'quote': '| 報價單 |'}, {'what': '講者', 'quote': '**講者 B**'}]}, 'Claude'))
+        lost = minutes_app.score_view(minutes_app.Job(self.dir), MINUTES)['lost']
+        self.assertEqual([x['find'] for x in lost], ['報價單', '講者 B'])
 
 
 if __name__ == '__main__':

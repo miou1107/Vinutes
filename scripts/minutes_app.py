@@ -655,7 +655,15 @@ def find_words(plains: list[str], *candidates: str) -> str:
 
 def score_view(job: Job, md: str) -> dict | None:
     """The score at the end of the tags (scores.py): the one from the user's edits once the mail went out, else
-    the AI's check against the transcript; each lost point with the words that find it in the Doc."""
+    the AI's check against the transcript; each lost point with the words that find it in the Doc. A damaged
+    評分.json shows no score; it never keeps a meeting from opening."""
+    try:
+        return scored(job, md)
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def scored(job: Job, md: str) -> dict | None:
     data = scores.read_json(job.dir / scores.FILE)
     kind = 'edits' if isinstance(data.get('edits'), dict) else 'check' if isinstance(data.get('check'), dict) else ''
     if not kind:
@@ -664,14 +672,16 @@ def score_view(job: Job, md: str) -> dict | None:
     plains = [b.plain for b in doc_sync.parse(md)[1]] if md else []
     cats = got.get('categories') if isinstance(got.get('categories'), dict) else {}
     return {'kind': kind, 'score': int(got.get('score') or 0),
-            'categories': [[c, *cats[c]] for c in scores.CATEGORIES if isinstance(cats.get(c), list) and len(cats[c]) == 2],
-            'lost': [{'what': x.get('what', ''), 'fix': x.get('fix', ''), 'find': quote_in(plains, x.get('quote', ''))}
+            'categories': [[c, int(cats[c][0]), int(cats[c][1])] for c in scores.CATEGORIES
+                           if isinstance(cats.get(c), list) and len(cats[c]) == 2],
+            'lost': [{'what': str(x.get('what', '')), 'fix': str(x.get('fix', '')), 'find': quote_in(plains, x.get('quote', ''))}
                      for x in got.get('lost') or [] if isinstance(x, dict)]}
 
 
 def quote_in(plains: list[str], quote) -> str:
     """The words the AI quoted, when the minutes hold them as they are: a piece of them could be anywhere."""
-    quote = quote.strip() if isinstance(quote, str) else ''
+    quote = quote if isinstance(quote, str) else ''
+    quote = re.sub(r'\*\*|__|`', '', quote).strip(' |#>-*').strip()   # quoted from the Markdown, matched in the Doc's text
     return quote if quote and any(quote in p for p in plains) else ''
 
 

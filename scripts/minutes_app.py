@@ -2571,11 +2571,12 @@ def mail_defaults(job: Job) -> dict | None:
             'summary_fresh': fresh, 'from': f'{sender_name()} <{owner()}>' if sender_name() else owner()}
 
 
-# the mail says what the meeting was for and what came out of it, taken from the minutes (Vin 2026-10-20)
+# the mail says what the meeting was for and what came out of it, taken from the minutes (Vin 2026-10-20); who does
+# what is in the minutes, not in the mail's highlights (Vin 2026-10-27)
 SUMMARY = {'zh-TW': {'purpose': '會議目的', 'decisions': '初步共識', 'actions': '行動方案',
-                     'purpose_label': '會議目的：', 'highlights': '重點：', 'owner_sep': '：'},
+                     'purpose_label': '會議目的：', 'highlights': '重點：'},
            'en': {'purpose': 'Purpose', 'decisions': 'Agreements', 'actions': 'Action Items',
-                  'purpose_label': 'Purpose: ', 'highlights': 'Highlights:', 'owner_sep': ': '}}
+                  'purpose_label': 'Purpose: ', 'highlights': 'Highlights:'}}
 MOST_HIGHLIGHTS = 5
 
 
@@ -2602,19 +2603,19 @@ SUMMARY_WORK = '信件重點'           # the folder the AI reads the minutes in
 SUMMARY_PROMPT = {
     'zh-TW': ('這個資料夾裡的 紀錄.md 是一場會議的會議紀錄，使用者剛改過。替寄給與會人員的信寫兩段，只寫這兩段，不要寫別的：\n'
               '會議目的：一句話，照紀錄第二節，只留這場會議要談什麼、要決定什麼。\n\n'
-              '重點：\n- 三到五條，取第四節的共識和第六節的行動方案，每條一句；有負責的人就在句尾括號寫名字，例如（Vin）。\n\n'
+              '重點：\n- 三到五條，取第四節的共識和第六節的行動方案，每條一句，不寫負責的人。\n\n'
               '人名、數字、日期照紀錄寫，紀錄裡沒有的事不要寫。還寫著 [__] 的事不要寫進信裡。'),
     'en': ('紀錄.md in this folder is the minutes of a meeting, just edited by the user. Write two paragraphs for the '
            'mail to the attendees, these two and nothing else:\n'
            'Purpose: one sentence from section 2, only what the meeting was to discuss or decide.\n\n'
            'Highlights:\n- three to five lines from the agreements of section 4 and the action items of section 6, one '
-           'sentence each; with an owner, end it with the name in brackets, e.g. (Vin).\n\n'
+           'sentence each, without who is to do it.\n\n'
            'Names, numbers and dates exactly as in the minutes; nothing the minutes do not say, nothing still [__].')}
 
 
 def summary_block(md: str, lang: str) -> str:
     """會議目的 (one line, the minutes' section 二) and 重點 (up to five lines: the agreements of section 四, then the
-    action items of section 六, owner after each), taken from the minutes as they are; '' when they give nothing."""
+    action items of section 六), taken from the minutes as they are; '' when they give nothing."""
     words = SUMMARY['en' if lang == 'en' else 'zh-TW']
     purpose = next((plain_text(p) for p in re.split(r'\n\s*\n', section_text(md, words['purpose'])) if plain_text(p)), '')
     if len(purpose) > 160:                            # cut at the end of a sentence, else with an ellipsis
@@ -2631,8 +2632,8 @@ def summary_block(md: str, lang: str) -> str:
         cells = [plain_text(c) for c in row.strip('|').split('|')]
         if i == header or len(cells) < 3 or re.fullmatch(r'[-:\s]*', cells[0]):
             continue
-        owner_name = cells[2]
-        items.append(f'{cells[1]}{words["owner_sep"]}{owner_name}' if owner_name else cells[1])
+        if BLANK not in cells[2]:                       # an action nobody has taken yet stays in the Doc
+            items.append(cells[1])
     items = [i for i in items if i and BLANK not in i][:MOST_HIGHLIGHTS]   # a line still to fill in is not said in the mail
     block = (f'{words["purpose_label"]}{purpose}' if purpose else '')
     if items:

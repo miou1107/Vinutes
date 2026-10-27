@@ -2651,8 +2651,9 @@ class MailDefaults(Flows):
     def test_the_body_gets_the_purpose_and_the_highlights_after_the_link(self):
         self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
         body = minutes_app.mail_defaults(self.job())['body']
+        self.assertNotIn('Kai', body.split('重點：')[1])                     # who does what stays in the minutes
         self.assertIn('{文件網址}\n\n會議目的：確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n重點：\n'
-                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作：Kai\n\n內容有需要調整的地方再跟我說。', body)   # the row whose owner is still [__] stays in the Doc
+                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作\n\n內容有需要調整的地方再跟我說。', body)   # the row whose owner is still [__] stays in the Doc
         again = minutes_app.with_summary(body, MINUTES_WITH_PURPOSE, 'zh-TW')
         self.assertEqual(again, body)                                          # not twice
         self.assertEqual(minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', '# x\n\n## 一、會議基本資訊\n\n- 主持人：Vin\n', 'zh-TW'),
@@ -2665,7 +2666,7 @@ class MailDefaults(Flows):
               '| No. | Action | Owner | Notes |\n|---|---|---|---|\n| 1 | Book the venue | Amy | by Friday |\n| 2 | 確認合約付款事項 | Kai | |\n')
         out = minutes_app.with_summary('Hi,\n\nThe minutes:\n{doc_url}\n\nVin', md, 'en')
         self.assertIn('{doc_url}\n\nPurpose: Settle the October budget.\n\nHighlights:\n1. Budget is 100k.\n2. Two KOLs first.\n'
-                      '3. Book the venue: Amy\n4. 確認合約付款事項: Kai\n\nVin', out)      # the header row is not an item, nor a sub-point or a blank
+                      '3. Book the venue\n4. 確認合約付款事項\n\nVin', out)      # the header row is not an item, nor a sub-point or a blank
         long = '## 二、會議目的\n\n' + '這是一句很長的話，' * 12 + '最後一句。\n'
         got = minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', long, 'zh-TW')
         self.assertLessEqual(len(got.split('會議目的：')[1].split('\n')[0]), 160)
@@ -2701,12 +2702,12 @@ class MailDefaults(Flows):
         self.assertIn('重點：\n1. 預算 12 萬元。', mail['body'])                   # meanwhile: the minutes' own lines
         asked = []
         saved = minutes_app.ai_summary
-        minutes_app.ai_summary = lambda job, md: asked.append(md) or '會議目的：新的目的。\n\n重點：\n- 預算 12 萬元（Amy）'
+        minutes_app.ai_summary = lambda job, md: asked.append(md) or '會議目的：新的目的。\n\n重點：\n- 預算 12 萬元，下週定案'
         try:
             minutes_app.cmd_mail_summary(self.job())
             got = self.outs[-1]
             self.assertTrue(got['summary_fresh'])
-            self.assertIn('{文件網址}\n\n會議目的：新的目的。\n\n重點：\n- 預算 12 萬元（Amy）\n\n內容有需要調整的地方再跟我說。', got['body'])
+            self.assertIn('{文件網址}\n\n會議目的：新的目的。\n\n重點：\n- 預算 12 萬元，下週定案\n\n內容有需要調整的地方再跟我說。', got['body'])
             self.assertEqual(got['body'].count('Sent by Vinutes'), 1)
             minutes_app.cmd_mail_summary(self.job())                             # the same minutes: kept, not asked again
             self.assertEqual(len(asked), 1)

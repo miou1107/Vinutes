@@ -2536,7 +2536,7 @@ def finished_body(body: str) -> str:
 def mail_defaults(job: Job) -> dict | None:
     """What the mail sheet opens with. The recipients are the meeting's people (人員), each with the address the
     calendar invitation, the company directory or an earlier mail gave them (contacts.py), plus the user; a person
-    without one is listed under `missing`. The body gets the meeting's purpose and highlights (with_summary)."""
+    without one is listed under `missing`. The body gets the meeting's purpose and highlights (mail_body)."""
     mail = job.result.get('mail')
     if not isinstance(mail, dict):
         return None
@@ -2566,10 +2566,9 @@ def mail_defaults(job: Job) -> dict | None:
     for address in [p['mail'] for p in people if p['mail']] + [mine]:
         if address and address not in to:
             to.append(address)
-    body = (job.dir / '信件內文.txt').read_text(encoding='utf-8').strip() if (job.dir / '信件內文.txt').is_file() else ''
-    body = with_summary(finished_body(body), '' if job.missing else job.md, job.lang)
+    body, fresh = mail_body(job)
     return {'to': to, 'people': people, 'missing': missing, 'subject': mail.get('subject', ''), 'body': body,
-            'from': f'{sender_name()} <{owner()}>' if sender_name() else owner()}
+            'summary_fresh': fresh, 'from': f'{sender_name()} <{owner()}>' if sender_name() else owner()}
 
 
 # the mail says what the meeting was for and what came out of it, taken from the minutes (Vin 2026-10-20)
@@ -2597,13 +2596,26 @@ def plain_text(text: str) -> str:
     return ' '.join(text.split())
 
 
-def with_summary(body: str, md: str, lang: str) -> str:
-    """The body with 會議目的 (one line, the minutes' section 二) and 重點 (up to five lines: the agreements of
-    section 四, then the action items of section 六, owner after each) after the paragraph with the Doc link.
-    Unchanged when the body already has them, or the minutes give nothing to take."""
+SUMMARY_LINE = re.compile(r'^\s*(會議目的|重點|Purpose|Highlights)\s*[:：]')
+SUMMARY_FILE = '信件重點.json'     # the AI's 會議目的 and 重點, with the minutes they were written from
+SUMMARY_WORK = '信件重點'           # the folder the AI reads the minutes in, gone once it answers
+SUMMARY_PROMPT = {
+    'zh-TW': ('這個資料夾裡的 紀錄.md 是一場會議的會議紀錄，使用者剛改過。替寄給與會人員的信寫兩段，只寫這兩段，不要寫別的：\n'
+              '會議目的：一句話，照紀錄第二節，只留這場會議要談什麼、要決定什麼。\n\n'
+              '重點：\n- 三到五條，取第四節的共識和第六節的行動方案，每條一句；有負責的人就在句尾括號寫名字，例如（Vin）。\n\n'
+              '人名、數字、日期照紀錄寫，紀錄裡沒有的事不要寫。還寫著 [__] 的事不要寫進信裡。'),
+    'en': ('紀錄.md in this folder is the minutes of a meeting, just edited by the user. Write two paragraphs for the '
+           'mail to the attendees, these two and nothing else:\n'
+           'Purpose: one sentence from section 2, only what the meeting was to discuss or decide.\n\n'
+           'Highlights:\n- three to five lines from the agreements of section 4 and the action items of section 6, one '
+           'sentence each; with an owner, end it with the name in brackets, e.g. (Vin).\n\n'
+           'Names, numbers and dates exactly as in the minutes; nothing the minutes do not say, nothing still [__].')}
+
+
+def summary_block(md: str, lang: str) -> str:
+    """會議目的 (one line, the minutes' section 二) and 重點 (up to five lines: the agreements of section 四, then the
+    action items of section 六, owner after each), taken from the minutes as they are; '' when they give nothing."""
     words = SUMMARY['en' if lang == 'en' else 'zh-TW']
-    if not body or re.search(r'(?m)^\s*(會議目的|重點|Purpose|Highlights)\s*[:：]', body):
-        return body
     purpose = next((plain_text(p) for p in re.split(r'\n\s*\n', section_text(md, words['purpose'])) if plain_text(p)), '')
     if len(purpose) > 160:                            # cut at the end of a sentence, else with an ellipsis
         stop = max(purpose.rfind(c, 0, 160) for c in '。！？，.!?')
@@ -2622,16 +2634,118 @@ def with_summary(body: str, md: str, lang: str) -> str:
         owner_name = cells[2]
         items.append(f'{cells[1]}{words["owner_sep"]}{owner_name}' if owner_name else cells[1])
     items = [i for i in items if i and BLANK not in i][:MOST_HIGHLIGHTS]   # a line still to fill in is not said in the mail
-    if not purpose and not items:
-        return body
     block = (f'{words["purpose_label"]}{purpose}' if purpose else '')
     if items:
         block += ('\n\n' if block else '') + words['highlights'] + '\n' + '\n'.join(f'{n}. {i}' for n, i in enumerate(items, 1))
+    return block
+
+
+def with_summary(body: str, md: str, lang: str, block: str = '') -> str:
+    """The body with 會議目的 and 重點 (`block`, else summary_block) after the paragraph with the Doc link.
+    Unchanged when the body already has them, or there is nothing to put."""
+    if not body or any(SUMMARY_LINE.match(line) for line in body.split('\n')):
+        return body
+    block = block or summary_block(md, lang)
+    if not block:
+        return body
     paragraphs = re.split(r'\n\s*\n', body.strip())
     at = next((i for i, p in enumerate(paragraphs) if re.search(r'https?://|\{文件網址\}|\{doc_url\}', p)), None)
     at = len(paragraphs) - 2 if at is None else at              # no link paragraph: before the sign-off
     paragraphs.insert(max(at, 0) + 1, block)
     return '\n\n'.join(paragraphs)
+
+
+def without_summary(body: str) -> str:
+    """The body without the 會議目的 and 重點 paragraphs the AI wrote with the minutes."""
+    return '\n\n'.join(p for p in re.split(r'\n\s*\n', body.strip()) if not SUMMARY_LINE.match(p))
+
+
+def minutes_key(md: str) -> str:
+    return hashlib.sha256(' '.join(md.split()).encode('utf-8')).hexdigest()[:16]
+
+
+def minutes_edited(job: Job, md: str) -> bool:
+    """The minutes differ from what the AI wrote (原稿.md), or Vinutes did not keep the AI's copy."""
+    original = job.dir / scores.ORIGINAL
+    try:
+        return not scores.same_text(original.read_text(encoding='utf-8'), md)
+    except OSError:
+        return True
+
+
+def with_signature(body: str) -> str:
+    """The last line says which Vinutes sent the mail (Vin 2026-10-27)."""
+    try:
+        version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+    except OSError:
+        version = ''
+    if not body or 'Sent by Vinutes' in body:
+        return body
+    return f"{body.rstrip()}\n\nSent by Vinutes{f' v{version}' if version else ''}"
+
+
+def mail_body(job: Job, block: str = '') -> tuple[str, bool]:
+    """The mail's text and whether its 會議目的 and 重點 match the minutes as they are now. The AI wrote them with
+    the minutes; once the user has changed the minutes they come from the minutes instead (Vin 2026-10-27): the
+    AI's rewrite for these minutes (`block`, or the one kept in 信件重點.json), else taken line by line."""
+    path = job.dir / '信件內文.txt'
+    body = finished_body(path.read_text(encoding='utf-8').strip() if path.is_file() else '')
+    md = '' if job.missing else job.md
+    fresh = not md or not minutes_edited(job, md)
+    if not fresh:
+        body = without_summary(body)
+        if not block:
+            kept = read_json(job.dir / SUMMARY_FILE)
+            block = kept.get('block', '') if kept.get('minutes') == minutes_key(md) else ''
+        fresh = bool(block)
+    return with_signature(with_summary(body, md, job.lang, block)), fresh
+
+
+def ai_summary(job: Job, md: str) -> str:
+    """The chosen AI's 會議目的 and 重點 for these minutes, read in a folder of their own; '' when it gives none."""
+    import ai_runner
+    import auto_minutes
+    work = job.dir / SUMMARY_WORK
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    (work / '紀錄.md').write_text(md, encoding='utf-8')
+    try:
+        done = ai_runner.run(SUMMARY_PROMPT['en' if job.lang == 'en' else 'zh-TW'], work, write=False, read_only=True,
+                             timeout=120, env=auto_minutes.env(), task='edit')
+    except (SystemExit, subprocess.TimeoutExpired):
+        return ''
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return summary_of(done.stdout if not done.returncode else '', job.lang)
+
+
+def summary_of(text: str, lang: str) -> str:
+    """The two paragraphs out of the AI's answer: from 會議目的 on, with 重點 and at least one line under it."""
+    import ai_runner
+    words = SUMMARY['en' if lang == 'en' else 'zh-TW']
+    lines = [line.rstrip() for line in (text or '').replace('```', '').split('\n')]
+    start = next((i for i, line in enumerate(lines) if SUMMARY_LINE.match(line)), None)
+    if start is None:
+        return ''
+    block = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines[start:]).strip())
+    head = words['highlights'].rstrip(':：')
+    if not re.search(rf'(?m)^\s*{head}\s*[:：]\s*\n\s*(?:[-*]|\d+[.、)])\s+\S', block) or len(block) > 1500 \
+            or BLANK in block or ai_runner.leaks(block):
+        return ''
+    return block
+
+
+def cmd_mail_summary(job: Job):
+    """The mail's text with 會議目的 and 重點 for the minutes as they are when the mail sheet opens: the AI rewrites
+    them once the user has changed the minutes, and the rewrite is kept for the same minutes."""
+    body, fresh = mail_body(job)
+    if not fresh:
+        md = job.md
+        block = ai_summary(job, md)
+        if block:
+            write_json(job.dir / SUMMARY_FILE, {'minutes': minutes_key(md), 'block': block})
+            body, fresh = mail_body(job, block)
+    out({'body': body, 'summary_fresh': fresh})
 
 
 def cmd_suggest(job: Job, query: str):
@@ -2864,6 +2978,8 @@ def main():
     rest = argv[2:]
     if cmd == 'suggest':                             # only reads the contacts: answers while the AI works on the meeting
         return cmd_suggest(job, ' '.join(rest))
+    if cmd == 'mail_summary':                        # only reads the minutes: saving them goes on while the AI writes
+        return cmd_mail_summary(job)
     if cmd == 'locate':                              # only reads the Doc: no turn to wait for
         return cmd_locate(job, ' '.join(rest).strip())
     if cmd in ('archive', 'unarchive'):              # only a marker file: no turn to wait for either

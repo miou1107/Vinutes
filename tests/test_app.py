@@ -2672,6 +2672,63 @@ class MailDefaults(Flows):
         self.assertTrue(got.split('會議目的：')[1].split('\n')[0].endswith(('，', '。', '…')))
         self.assertEqual(minutes_app.with_summary('Hi\n\n會議目的: x\n\n{文件網址}', long, 'zh-TW'), 'Hi\n\n會議目的: x\n\n{文件網址}')
 
+    AI_BODY = ('Hi，\n\n週會的會議紀錄整理好了：\n{文件網址}\n\n會議目的：AI 寫的目的。\n\n重點：\n- 預算 10 萬元（Nina）\n\n'
+               '內容有需要調整的地方再跟我說。\n\nVin\n')
+
+    def test_the_mail_ends_with_the_vinutes_that_sent_it_once(self):
+        version = (minutes_app.ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+        body = minutes_app.mail_defaults(self.job())['body']
+        self.assertTrue(body.endswith(f'\n\nVin\n\nSent by Vinutes v{version}'))
+        self.assertEqual(minutes_app.with_signature(body), body)
+
+    def test_untouched_minutes_keep_the_summary_the_ai_wrote_with_them(self):
+        self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text(self.AI_BODY, encoding='utf-8')
+        mail = minutes_app.mail_defaults(self.job())
+        self.assertTrue(mail['summary_fresh'])
+        self.assertIn('會議目的：AI 寫的目的。\n\n重點：\n- 預算 10 萬元（Nina）', mail['body'])
+
+    def test_edited_minutes_drop_the_ais_summary_and_take_the_minutes_until_the_ai_rewrites_it(self):
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        edited = MINUTES_WITH_PURPOSE.replace('預算 10 萬元', '預算 12 萬元')
+        self.md_path.write_text(edited, encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text(self.AI_BODY, encoding='utf-8')
+        mail = minutes_app.mail_defaults(self.job())
+        self.assertFalse(mail['summary_fresh'])                                # the window asks for the AI's rewrite
+        self.assertNotIn('Nina', mail['body'])
+        self.assertNotIn('AI 寫的目的', mail['body'])
+        self.assertIn('重點：\n1. 預算 12 萬元。', mail['body'])                   # meanwhile: the minutes' own lines
+        asked = []
+        saved = minutes_app.ai_summary
+        minutes_app.ai_summary = lambda job, md: asked.append(md) or '會議目的：新的目的。\n\n重點：\n- 預算 12 萬元（Amy）'
+        try:
+            minutes_app.cmd_mail_summary(self.job())
+            got = self.outs[-1]
+            self.assertTrue(got['summary_fresh'])
+            self.assertIn('{文件網址}\n\n會議目的：新的目的。\n\n重點：\n- 預算 12 萬元（Amy）\n\n內容有需要調整的地方再跟我說。', got['body'])
+            self.assertEqual(got['body'].count('Sent by Vinutes'), 1)
+            minutes_app.cmd_mail_summary(self.job())                             # the same minutes: kept, not asked again
+            self.assertEqual(len(asked), 1)
+            self.assertEqual(self.outs[-1]['body'], got['body'])
+            self.md_path.write_text(edited.replace('12 萬', '15 萬'), encoding='utf-8')
+            self.assertFalse(minutes_app.mail_defaults(self.job())['summary_fresh'])   # changed again: asked again
+            minutes_app.ai_summary = lambda job, md: ''                          # the AI gave nothing
+            minutes_app.cmd_mail_summary(self.job())
+            self.assertFalse(self.outs[-1]['summary_fresh'])
+            self.assertIn('1. 預算 15 萬元。', self.outs[-1]['body'])
+        finally:
+            minutes_app.ai_summary = saved
+
+    def test_only_two_paragraphs_with_a_highlight_are_taken_from_the_ai(self):
+        self.assertEqual(minutes_app.summary_of('好的，以下是：\n\n```\n會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）\n```\n', 'zh-TW'),
+                         '會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）')
+        self.assertEqual(minutes_app.summary_of('Purpose: budget.\n\nHighlights:\n1. Budget 100k (Amy)', 'en'),
+                         'Purpose: budget.\n\nHighlights:\n1. Budget 100k (Amy)')
+        self.assertEqual(minutes_app.summary_of('會議目的：談預算。', 'zh-TW'), '')              # no highlights
+        self.assertEqual(minutes_app.summary_of('會議目的：談預算。\n\n重點：\n- 場地 [__]', 'zh-TW'), '')
+        self.assertEqual(minutes_app.summary_of('', 'zh-TW'), '')
+
 
 class CalendarPick(unittest.TestCase):
     """workspace.pick_meeting: which calendar event a recording was. Only events on the user's own calendar that

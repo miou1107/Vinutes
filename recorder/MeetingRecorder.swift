@@ -1661,7 +1661,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
                                      "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice", "askMany",
-                                     "suggest", "contacts"]
+                                     "suggest", "contacts", "mailSummary"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
         }
@@ -1917,6 +1917,9 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["update"], done)
         case "mailPrepare", "send":
             mail(dir, args, send: cmd == "send", done)
+        case "mailSummary":
+            // the mail's 會議目的 and 重點 for the minutes as they are now (the AI rewrites them once the minutes changed)
+            app(["mail_summary", dir.path], done)
         case "suggest":
             // people for the mail sheet's recipient box, from what was typed (contacts.py)
             let q = String((args["q"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))

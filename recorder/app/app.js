@@ -166,15 +166,21 @@ function placeDoc(reload = false) {
   // the AI and ＋ menus open upward, into the Doc's place: the Doc ends above the open one
   const open = !show ? null : S.aiOpen ? $('#aiMenu') : S.menuOpen ? $('#attachMenu') : null;
   const menu = open && !open.hidden ? open : null;
-  const h = menu ? Math.max(0, Math.min(r.height, menu.getBoundingClientRect().top - r.y - 8)) : r.height;
-  const key = [show, show ? S.d.doc_url : '', Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(h)].join('|');
+  let h = menu ? Math.max(0, Math.min(r.height, menu.getBoundingClientRect().top - r.y - 8)) : r.height;
+  let y = r.y;
+  const projMenu = show && S.pmenu ? $('#projMenu') : null;   // the project list opens downward: the Doc starts below it
+  if (projMenu && !projMenu.hidden) {
+    const below = projMenu.getBoundingClientRect().bottom + 8;
+    if (below > y) { h = Math.max(0, h - (below - y)); y = below; }
+  }
+  const key = [show, show ? S.d.doc_url : '', Math.round(r.x), Math.round(y), Math.round(r.width), Math.round(h)].join('|');
   if (key === S.placed && !reload) return;
   S.placed = key;
   call('gdoc', { show, reload, url: show ? S.d.doc_url : '', account: show ? S.d.account || '' : '',
-                 x: r.x, y: r.y, w: r.width, h }).catch(() => {});
+                 x: r.x, y, w: r.width, h }).catch(() => {});
 }
 const docSpot = new ResizeObserver(() => placeDoc());
-window.addEventListener('resize', () => placeDoc());
+window.addEventListener('resize', () => (S.pmenu ? renderProjMenu() : placeDoc()));   // the project list follows its name
 
 // what was typed into the Doc: into the minutes, the side panel, and what Claude learns. One at a time per
 // meeting; `again` waits for one already on its way and then asks once more (closing the window, leaving a meeting)
@@ -590,7 +596,7 @@ async function select(id) {
   S.sel = id;
   S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null; S.tabBeforeScore = null;
   S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
-  S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
+  S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null; S.pmenu = null;
   S.tagAdding = false;
   S.att = null; S.refs = []; S.pics = []; S.askedPic = ''; S.fixing = ''; S.skipping = new Set(); S.urlOpen = false; S.menuOpen = false;
   S.dirty = false; S.saveText = ''; S.saveErr = false;
@@ -770,8 +776,8 @@ function renderHead() {
   const planned = d.planned ? t('planned', d.planned) : t('no_next');
   el.innerHTML = `
     <nav class="crumbs" aria-label="${esc(t('crumbs_aria'))}">
-      <button class="crumb" id="toProj">${esc(d.project || t('proj_loose'))}</button>
-      <button class="iconbtn gear" id="projSet" title="${esc(t('proj_settings'))}" aria-label="${esc(t('proj_settings'))}">${ICON.gear}</button>${ICON.chevR}
+      <button class="crumb pcrumb" id="toProj" title="${esc(t('proj_switch'))}" aria-haspopup="menu" aria-expanded="${!!S.pmenu}">${esc(d.project || t('proj_loose'))}<span class="caret">▾</span></button>
+      ${d.project ? `<button class="iconbtn gear" id="projSet" title="${esc(t('proj_settings'))}" aria-label="${esc(t('proj_settings'))}">${ICON.gear}</button>` : ''}${ICON.chevR}
       <button class="crumb" id="toDate">${esc(shortDay(d))}</button>
       <b>${t('crumb_title', esc(d.title || t('untitled')))}</b>
     </nav>
@@ -780,14 +786,24 @@ function renderHead() {
     ${docsMode() ? '' : `<span class="savetext${S.saveErr ? ' err' : ''}" id="savetext">${esc(say(S.saveText))}</span>`}
     ${d.doc_url ? `<span class="iconlink" id="openDoc" title="${esc(t('open_doc_tip'))}">${ICON.open}</span>` : ''}
     ${d.sent ? `<span class="sentmark" title="${esc(t('sent_line', d.sent.at, d.sent.count, d.sent.format))}">${ICON.done}<span>${esc(t('sent_short', d.sent.count))}</span></span>`
-      : d.mail ? `<button class="btn primary sendbtn" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}`;
+      : d.mail ? `<button class="btn primary sendbtn" id="mailBtn">${ICON.mail}<span>${esc(t('send_mail'))}</span></button>` : ''}
+    <div class="mmenu pmenu" id="projMenu" role="menu" hidden></div>`;
   if ($('#mailBtn')) $('#mailBtn').addEventListener('click', openMail);
-  $('#toProj').addEventListener('click', () => { S.proj = d.project || LOOSE; S.tag = ALL; S.q = ''; renderSide(); });
-  $('#projSet').addEventListener('click', openProject);
+  $('#toProj').addEventListener('click', (e) => {
+    e.stopPropagation();
+    S.pmenu = S.pmenu ? null : { adding: false, typed: '', busy: false, err: '' };
+    $('#toProj').setAttribute('aria-expanded', String(!!S.pmenu));
+    if (S.pmenu && S.aiOpen) { S.aiOpen = false; renderAiMenu(); }      // one menu open at a time
+    if (S.pmenu && S.menuOpen) { S.menuOpen = false; renderAttachMenu(); }
+    renderProjMenu();
+  });
+  $('#projMenu').addEventListener('click', (e) => e.stopPropagation());
+  if ($('#projSet')) $('#projSet').addEventListener('click', openProject);
   $('#toDate').addEventListener('click', () => { S.q = shortDay(d); S.proj = ALL; S.tag = ALL; renderSide(); });
   $('#prev').addEventListener('click', () => d.prev && select(d.prev));
   $('#next').addEventListener('click', () => d.next && select(d.next));
   if (d.doc_url) $('#openDoc').addEventListener('click', () => call('link', { url: d.doc_url }).catch(() => {}));
+  if (S.pmenu) renderProjMenu();
 }
 
 // under the path: the meeting's tags, 加標籤, and the ones Claude suggested (dashed until the user adds one)
@@ -889,19 +905,18 @@ async function sendTags(id, tags) {
   renderSide();
 }
 
-// 專案設定: the project's brief (專案小抄: its people with what they do, its terms, a few lines of background; Vin
-// 2026-10-19), and renaming the project (every meeting of it) or moving this meeting to another project or a new one
-const NEW_PROJECT = '\u2060new';
-
+// 專案設定, one page (prototypes/project-folder.html, Vin 2026-10-28): the project's name (every meeting of it),
+// its folder for the AI to read, and its brief (專案背景: its people with what they do, its terms, a few lines of
+// background; Vin 2026-10-19). Moving this meeting to another project is the project name above the meeting.
 function openProject() {
   const d = S.d;
-  if (!d) return;
-  const now = d.project || '';
-  S.pset = { name: now, move: now, adding: false, typed: '', busy: false, err: '', tab: now ? 'brief' : 'name', brief: null };
+  if (!d || !d.project) return;
+  S.pset = { name: d.project, busy: false, err: '', brief: null };
   S.sheet = 'project';
+  closeProjMenu();
   placeDoc();
   renderProject();
-  if (now) loadBrief(now);
+  loadBrief(d.project);
 }
 
 async function loadBrief(project) {
@@ -946,42 +961,50 @@ function briefHTML(m) {
       <textarea id="bBg" class="pinput bbg" maxlength="600" placeholder="${esc(t('brief_bg_ph'))}" aria-label="${esc(t('brief_background'))}">${esc(b.background)}</textarea></section>`;
 }
 
+// a folder as the Mac shows it in a sentence: the home folder as ~
+const homeShort = (path) => path.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
+
 function renderProject() {
   const m = S.pset, d = S.d;
-  if (!m || !d) return closeSheet();
-  const now = d.project || '';
-  const names = [...new Set(S.jobs.map((j) => j.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-  const count = S.jobs.filter((j) => j.project === now && now).length;
-  const brief = now && m.tab === 'brief';
-  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm pset${brief ? ' wide' : ''}" role="dialog" aria-label="${esc(t('proj_settings'))}">
+  if (!m || !d || !d.project) return closeSheet();
+  const now = d.project;
+  const count = S.jobs.filter((j) => j.project === now).length;
+  const folder = m.brief ? m.brief.folder || '' : '';
+  // drawn again when the brief arrives or a row comes and goes: the field being typed in keeps its place
+  const was = document.activeElement && $('#sheet').contains(document.activeElement) ? document.activeElement : null;
+  const at = was && was.id ? { id: was.id, from: was.selectionStart, to: was.selectionEnd } : null;
+  $('#sheet').innerHTML = `<div class="veil"><div class="sheet confirm pset wide" role="dialog" aria-label="${esc(t('proj_settings'))}">
     <h3>${esc(t('proj_settings'))}</h3>
-    <div class="phead">${projectMark(now, true)}<div><div class="pname">${esc(now || t('proj_loose'))}</div>
-      ${now ? `<div class="pcount">${esc(t('proj_count', count))}</div>` : ''}</div>
-      ${now ? `<span class="seg ptab"><button id="pTabBrief" class="${brief ? 'on' : ''}">${esc(t('brief_tab'))}</button><button id="pTabName" class="${brief ? '' : 'on'}">${esc(t('name_tab'))}</button></span>` : ''}</div>
-    ${brief ? briefHTML(m) : `${now ? `<label class="plbl" for="pName">${esc(t('proj_name'))}</label>
-      <input id="pName" class="pinput" maxlength="30" value="${esc(m.name)}">
-      <p class="dnote small">${esc(t('proj_rename_note', count))}</p>` : ''}
-    <label class="plbl" for="pMove">${esc(t('proj_of_meeting'))}</label>
-    <select id="pMove" class="pinput">${[...names, '', NEW_PROJECT].map((p) => `<option value="${esc(p)}"${(m.adding ? p === NEW_PROJECT : p === m.move) ? ' selected' : ''}>${esc(p === NEW_PROJECT ? t('proj_new') : p || t('proj_loose'))}</option>`).join('')}</select>
-    ${m.adding ? `<input id="pNew" class="pinput" maxlength="30" placeholder="${esc(t('proj_new_ph'))}" value="${esc(m.typed)}">` : ''}`}
+    <div class="phead">${projectMark(now, true)}<div><div class="pname">${esc(now)}</div>
+      <div class="pcount">${esc(t('proj_count', count))}</div></div></div>
+    <label class="plbl" for="pName">${esc(t('proj_name'))}</label>
+    <input id="pName" class="pinput" maxlength="30" value="${esc(m.name)}">
+    <p class="dnote small">${esc(t('proj_rename_note', count))}</p>
+    <span class="plbl">${esc(t('proj_folder'))}</span>
+    <div class="pfolder"><span class="ppath${folder ? '' : ' none'}" title="${esc(folder)}">${esc(folder ? homeShort(folder) : t('proj_folder_none'))}</span>
+      ${folder ? `<button class="bx" id="pFolderOff" title="${esc(t('proj_folder_off'))}" aria-label="${esc(t('proj_folder_off'))}"${m.busy ? ' disabled' : ''}>×</button>` : ''}
+      <button class="btn ghost" id="pFolder"${m.brief && !m.busy ? '' : ' disabled'}>${esc(t('proj_folder_pick'))}</button></div>
+    ${briefHTML(m)}
     ${m.err ? `<p class="dnote err">${esc(m.err)}</p>` : ''}
     <div class="dfoot"><button class="btn ghost" id="pCancel"${m.busy ? ' disabled' : ''}>${esc(t('cancel'))}</button>
-      <button class="btn primary" id="pSave"${m.busy || (brief && !m.brief) ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('save'))}</button></div>
+      <button class="btn primary" id="pSave"${m.busy ? ' disabled' : ''}>${m.busy ? ICON.spinWhite : ''}${esc(t('save'))}</button></div>
   </div></div>`;
-  const tab = (to) => () => { m.tab = to; if (m.brief) m.err = ''; renderProject(); };
-  if ($('#pTabBrief')) $('#pTabBrief').addEventListener('click', tab('brief'));
-  if ($('#pTabName')) $('#pTabName').addEventListener('click', tab('name'));
   $('#pCancel').addEventListener('click', closeSheet);
   $('#pSave').addEventListener('click', saveSettings);
-  if (brief) return bindBrief(m);
-  if ($('#pName')) $('#pName').addEventListener('input', (e) => { m.name = e.target.value; });
-  $('#pMove').addEventListener('change', (e) => {
-    m.adding = e.target.value === NEW_PROJECT;
-    if (!m.adding) m.move = e.target.value;
-    renderProject();
-    if (m.adding) $('#pNew').focus();
+  $('#pName').addEventListener('input', (e) => { m.name = e.target.value; });
+  $('#pFolder').addEventListener('click', async () => {
+    try {
+      const r = await call('pickFolder', {});
+      if (r.path && S.pset === m && m.brief) { m.brief.folder = r.path; m.folderChanged = true; m.err = ''; renderProject(); }
+    } catch (e) { /* the panel did not open: nothing changes */ }
   });
-  if ($('#pNew')) $('#pNew').addEventListener('input', (e) => { m.typed = e.target.value; });
+  if ($('#pFolderOff')) $('#pFolderOff').addEventListener('click', () => { m.brief.folder = ''; m.folderChanged = true; renderProject(); });
+  bindBrief(m);
+  const back = at && document.getElementById(at.id);
+  if (back) {
+    back.focus();
+    if (typeof at.from === 'number' && back.setSelectionRange) back.setSelectionRange(at.from, at.to);
+  }
 }
 
 function bindBrief(m) {
@@ -1009,15 +1032,14 @@ function bindBrief(m) {
   $('#bBg').addEventListener('input', (e) => { m.brief.background = e.target.value; m.briefDirty = true; });
 }
 
-// 儲存 keeps both pages: the brief first (under the project's current name), then a new name or another project
+// 儲存: the brief and the folder first (under the project's current name), then a new name
 async function saveSettings() {
   const m = S.pset, d = S.d;
-  if (!m || !d || m.busy) return;
-  if (m.brief && m.briefDirty && !(await saveBrief())) return;
-  const now = d.project || '';
+  if (!m || !d || !d.project || m.busy) return;
   const name = m.name.trim().replace(/\s+/g, ' ');
-  if ((now && !name) || (m.adding && !m.typed.trim())) m.tab = 'name';   // the error shows by the field it is about
-  if ((now && name !== now) || m.adding || m.move !== now) return saveProject();
+  if (!name) { m.err = t('proj_name_empty'); return renderProject(); }
+  if (m.brief && (m.briefDirty || m.folderChanged) && !(await saveBrief())) return;
+  if (name !== d.project) return renameProject(name);
   closeSheet();
 }
 
@@ -1029,12 +1051,13 @@ async function saveBrief() {
     terms: m.brief.terms.filter((x) => x.word.trim()).map((x) => ({ word: x.word, meaning: x.meaning || '' })),
     background: m.brief.background || '',
     seen: m.seen || { people: [], terms: [] },
+    ...(m.folderChanged ? { folder: m.brief.folder || '' } : {}),   // a folder gone from the Mac stays until changed
   };
   m.busy = true; m.err = '';
   renderProject();
   try {
     await call('saveBrief', { project, brief });
-    m.busy = false; m.briefDirty = false;
+    m.busy = false; m.briefDirty = false; m.folderChanged = false;
     return true;
   } catch (e) {
     m.busy = false; m.err = e.message;
@@ -1043,29 +1066,89 @@ async function saveBrief() {
   }
 }
 
-async function saveProject() {
+async function renameProject(name) {
   const m = S.pset, d = S.d;
-  if (!m || !d || m.busy) return;
-  const now = d.project || '';
-  const name = m.name.trim().replace(/\s+/g, ' ');
-  const target = m.adding ? m.typed.trim().replace(/\s+/g, ' ') : m.move;
-  if (now && !name) { m.err = t('proj_name_empty'); return renderProject(); }
-  if (m.adding && !target) { m.err = t('proj_name_empty'); return renderProject(); }
+  const now = d.project;
   m.busy = true; m.err = '';
   renderProject();
   const id = S.sel;
   try {
-    let project = now;
-    if (now && name !== now) project = (await call('renameProject', { old: now, new: name })).project;
-    if (target !== now) project = (await call('move', { id, project: target })).project;
+    const project = (await call('renameProject', { old: now, new: name })).project;
     if (S.sel === id && S.d) S.d.project = project;
-    if (S.proj === now && now) S.proj = project || LOOSE;     // the list that showed the project follows the meeting
+    if (S.proj === now) S.proj = project;            // the list that showed the project follows it
     closeSheet();
     await loadList();
     if (S.sel === id && S.d) renderHead();
   } catch (e) {
     m.busy = false; m.err = e.message;
     if (S.sheet === 'project') renderProject();
+  }
+}
+
+// The project name above the meeting opens a list of the projects (prototypes/project-folder.html, Vin 2026-10-28):
+// picking one moves this meeting there, 新增專案… names a new one. The list sits over the Doc, so the Doc starts
+// below it while it is open (placeDoc).
+function renderProjMenu() {
+  const el = $('#projMenu'), d = S.d, m = S.pmenu;
+  if (!el) return;
+  el.hidden = !m || !d;
+  if (el.hidden) { el.innerHTML = ''; placeDoc(); return; }
+  const now = d.project || '';
+  const names = [...new Set(S.jobs.map((j) => j.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const item = (p) => `<button class="mi" data-p="${esc(p)}"${m.busy ? ' disabled' : ''}><span class="mn">${esc(p || t('proj_loose'))}</span>${p === now ? `<span class="ck">${ICON.tick}</span>` : ''}</button>`;
+  el.innerHTML = `${[...names, ''].map(item).join('')}
+    ${m.adding
+      ? `<div class="pnew"><input id="pNewName" class="pinput" maxlength="30" autocomplete="off" placeholder="${esc(t('proj_new_ph'))}" aria-label="${esc(t('proj_new_ph'))}" value="${esc(m.typed)}"${m.busy ? ' disabled' : ''}></div>`
+      : `<button class="mi pnewbtn" data-new="1"${m.busy ? ' disabled' : ''}><span class="mn">${esc(t('proj_new'))}</span></button>`}
+    ${m.err ? `<div class="merr">${esc(m.err)}</div>` : ''}`;
+  const r = $('#toProj').getBoundingClientRect();
+  el.style.left = `${Math.round(r.left)}px`;
+  el.style.top = `${Math.round(r.bottom + 6)}px`;
+  el.querySelectorAll('.mi[data-p]').forEach((b) => b.addEventListener('click', () => moveTo(b.dataset.p)));
+  if (el.querySelector('.pnewbtn')) el.querySelector('.pnewbtn').addEventListener('click', () => {
+    m.adding = true; m.err = '';
+    renderProjMenu();
+    $('#pNewName').focus();
+  });
+  const input = $('#pNewName');
+  if (input) {
+    input.addEventListener('input', (e) => { m.typed = e.target.value; });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !inputMethod(e)) {
+        const name = m.typed.trim().replace(/\s+/g, ' ');
+        if (!name) { m.err = t('proj_name_empty'); renderProjMenu(); $('#pNewName').focus(); return; }
+        moveTo(name);
+      }
+    });
+  }
+  placeDoc();
+}
+
+function closeProjMenu() {
+  if (!S.pmenu) return;
+  S.pmenu = null;
+  renderProjMenu();
+}
+
+async function moveTo(project) {
+  const m = S.pmenu, d = S.d;
+  if (!m || !d || m.busy) return;
+  const now = d.project || '';
+  if (project === now) return closeProjMenu();
+  m.busy = true; m.err = '';
+  renderProjMenu();
+  const id = S.sel;
+  try {
+    const moved = (await call('move', { id, project })).project;
+    if (S.sel === id && S.d) S.d.project = moved;
+    if (S.proj === (now || LOOSE) && S.proj !== ALL) S.proj = moved || LOOSE;   // the list that showed it follows
+    S.pmenu = null;
+    await loadList();
+    if (S.sel === id && S.d) renderHead();
+    renderProjMenu();
+  } catch (e) {
+    m.busy = false; m.err = e.message;
+    renderProjMenu();
   }
 }
 
@@ -1649,6 +1732,7 @@ function renderAsk() {
       e.stopPropagation();
       S.aiOpen = !S.aiOpen;
       if (S.menuOpen) { S.menuOpen = false; renderAttachMenu(); }
+      closeProjMenu();
       renderAiMenu();
       if (S.aiOpen) loadAiStates();
     });
@@ -1661,6 +1745,7 @@ function renderAsk() {
     $('#attachPlus').addEventListener('click', (e) => {
       e.stopPropagation(); S.menuOpen = !S.menuOpen;
       if (S.aiOpen) { S.aiOpen = false; renderAiMenu(); }
+      closeProjMenu();
       renderAttachMenu();
     });
     $('#attachImage').addEventListener('click', () => pickRef('refImage'));
@@ -1767,6 +1852,7 @@ document.addEventListener('click', (e) => {
   if (S.menuOpen && !e.target.closest('#attachMenu')) { S.menuOpen = false; renderAttachMenu(); }
   if (S.pickOpen && !e.target.closest('.pickwrap')) { closePick(); renderRail(); }
   if (S.aiOpen && !e.target.closest('#aiMenu')) { S.aiOpen = false; renderAiMenu(); }
+  if (S.pmenu && !S.pmenu.busy && !e.target.closest('#projMenu')) closeProjMenu();
 });
 
 // what goes to the AI with the next sentence, above the box under 「給 Claude 參考」; each one can be taken off again.
@@ -2704,6 +2790,7 @@ async function sendMail() {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.ctx) { closeCtx(); return; }
   if (e.key === 'Escape' && S.aiOpen) { S.aiOpen = false; renderAiMenu(); return; }
+  if (e.key === 'Escape' && S.pmenu) { if (!S.pmenu.busy) closeProjMenu(); return; }
   if (e.key === 'Escape' && S.sheet === 'delete' && S.del && S.del.busy) return;
   if (e.key === 'Escape' && S.sheet === 'project' && S.pset && S.pset.busy) return;
   if (e.key === 'Escape' && S.sheet === 'attach' && S.att && S.att.busy) return;

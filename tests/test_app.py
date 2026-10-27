@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 
@@ -3584,7 +3585,7 @@ class ConnectAgents(unittest.TestCase):
 
 
 class ProjectBrief(unittest.TestCase):
-    """專案小抄 (Vin 2026-10-19): each project's people with what they do, its terms with the ways the transcript
+    """專案背景 (Vin 2026-10-19): each project's people with what they do, its terms with the ways the transcript
     mishears them, and a few lines of background. 確認無誤 on a new name or a word, and an edit the user keeps, write
     into it; the AI that writes the next minutes reads every project's brief."""
     job = Flows.job
@@ -3599,8 +3600,10 @@ class ProjectBrief(unittest.TestCase):
             f.unlink(missing_ok=True)
 
     def tearDown(self):
+        import project_folders
         for f in self.files:
             f.unlink(missing_ok=True)
+        shutil.rmtree(project_folders.CACHE, ignore_errors=True)
         Flows.tearDown(self)
 
     def result(self, **changes):
@@ -3699,8 +3702,96 @@ class ProjectBrief(unittest.TestCase):
         self.briefs.save('官網改版', {'people': [{'name': 'Amy', 'role': '網站'}]})
         (self.job_dir / '逐字稿.txt').write_text('[00:01] 好，我們開始。\n', encoding='utf-8')
         work = auto_minutes.gather(self.job_dir, {}, self.root / 'minutes')
-        self.assertIn('- Amy：網站', (work / '參考' / '專案小抄.md').read_text(encoding='utf-8'))
-        self.assertIn('專案小抄.md', auto_minutes.prompt(work, {}, self.root / 'minutes'))
+        self.assertIn('- Amy：網站', (work / '參考' / '專案背景.md').read_text(encoding='utf-8'))
+        self.assertIn('專案背景.md', auto_minutes.prompt(work, {}, self.root / 'minutes'))
+
+    def test_the_brief_keeps_the_project_folder_and_a_rename_keeps_it_too(self):
+        folder = self.root / '春季活動'
+        folder.mkdir()
+        self.assertEqual(self.briefs.save('官網改版', {'folder': str(folder)})['folder'], str(folder.resolve()))
+        self.briefs.save('官網改版', {'background': '十二月底結案。'})            # a save without the folder keeps it
+        self.assertEqual(self.briefs.load('官網改版')['folder'], str(folder.resolve()))
+        with self.assertRaises(SystemExit):                                    # a folder that isn't there
+            self.briefs.save('官網改版', {'folder': str(self.root / '沒有這個資料夾')})
+        self.assertEqual(self.briefs.load('官網改版')['folder'], str(folder.resolve()))
+        minutes_app.cmd_rename_project('官網改版', '官網改版二期')
+        self.assertEqual(self.briefs.folders(), {'官網改版二期': folder.resolve()})
+        self.briefs.save('官網改版二期', {'folder': ''})                        # 移除資料夾
+        self.assertEqual(self.briefs.folders(), {})
+
+    def test_the_minutes_writer_gets_a_copy_of_the_project_folder(self):
+        import auto_minutes
+        import docx
+        import project_folders
+        folder = self.root / '春季活動'
+        (folder / '會議紀錄').mkdir(parents=True)
+        (folder / '.git').mkdir()
+        (folder / '會議紀錄' / '10-14 週會.md').write_text('# 10/14 週會\n報價下週五前給。\n', encoding='utf-8')
+        (folder / '.git' / 'notes.md').write_text('hidden', encoding='utf-8')
+        (folder / '.DS_Store').write_bytes(b'\0')
+        (folder / '場地照片.png').write_bytes(b'\x89PNG')
+        word = docx.Document()
+        word.add_paragraph('春遊祭提案：4 月在華山辦。')
+        word.save(folder / '提案.docx')
+        (folder / '~$提案.docx').write_bytes(b'lock')                         # Word's lock file
+        (folder / '鎖住的.md').write_text('讀不到', encoding='utf-8')
+        os.chmod(folder / '鎖住的.md', 0)                                      # unreadable: left out, nothing stops
+        before = {str(p): (p.lstat().st_mtime_ns, p.read_bytes() if p.is_file() and os.access(p, os.R_OK) else b'')
+                  for p in folder.rglob('*')}
+        self.briefs.save('官網改版', {'folder': str(folder)})
+        (self.job_dir / '逐字稿.txt').write_text('[00:01] 好，我們開始。\n', encoding='utf-8')
+        work = auto_minutes.gather(self.job_dir, {}, self.root / 'minutes')
+        copy = work / '參考' / '專案資料夾' / '官網改版'
+        self.assertEqual(sorted(str(p.relative_to(copy)) for p in copy.rglob('*') if p.is_file()),
+                         sorted(['會議紀錄/10-14 週會.md', '提案.docx.txt', '檔案清單.md']))
+        self.assertIn('4 月在華山辦', (copy / '提案.docx.txt').read_text(encoding='utf-8'))
+        listed = (copy / '檔案清單.md').read_text(encoding='utf-8')
+        self.assertIn('會議紀錄/10-14 週會.md', listed)
+        self.assertIn('提案.docx　', listed)
+        self.assertIn('專案資料夾', auto_minutes.prompt(work, {}, self.root / 'minutes'))
+        self.assertEqual(len(list(project_folders.CACHE.glob('*.txt'))), 1)   # the Word file became text once
+        after = {str(p): (p.lstat().st_mtime_ns, p.read_bytes() if p.is_file() and os.access(p, os.R_OK) else b'')
+                 for p in folder.rglob('*')}
+        self.assertEqual(after, before)                                       # the folder itself is never touched
+        (folder / '會議紀錄' / '10-14 週會.md').write_text('改過', encoding='utf-8')
+        import references
+        with mock.patch.object(references, 'read_file', side_effect=AssertionError('converted again')):
+            work = auto_minutes.gather(self.job_dir, {}, self.root / 'minutes')   # the next meeting: a fresh copy
+        copy = work / '參考' / '專案資料夾' / '官網改版'
+        self.assertEqual((copy / '會議紀錄' / '10-14 週會.md').read_text(encoding='utf-8'), '改過')
+        self.assertIn('4 月在華山辦', (copy / '提案.docx.txt').read_text(encoding='utf-8'))   # from the cache
+
+    def test_a_project_folder_that_fails_never_stops_the_minutes(self):
+        import auto_minutes
+        import project_folders
+        folder = self.root / '春季活動'
+        folder.mkdir()
+        self.briefs.save('官網改版', {'folder': str(folder)})
+        (self.job_dir / '逐字稿.txt').write_text('[00:01] 好，我們開始。\n', encoding='utf-8')
+        with mock.patch.object(project_folders, 'copy', side_effect=RuntimeError('boom')):
+            work = auto_minutes.gather(self.job_dir, {}, self.root / 'minutes')
+        self.assertTrue((work / '逐字稿.txt').is_file())
+        self.assertFalse((work / '參考' / '專案資料夾').exists())
+        self.assertIn('project folders not copied', (self.job_dir / 'log.txt').read_text(encoding='utf-8'))
+
+    def test_project_names_never_leave_or_share_their_folder(self):
+        import project_folders
+        taken = set()
+        self.assertEqual([project_folders.place(p, taken) for p in ('..', '.', 'ABC', 'abc', 'a/b')],
+                         ['專案..', '專案.', 'ABC', 'abc (2)', 'a／b'])
+
+    def test_a_project_folder_past_the_limits_keeps_its_newest_files(self):
+        import project_folders
+        folder = self.root / '大資料夾'
+        folder.mkdir()
+        for i in range(5):
+            f = folder / f'{i}.txt'
+            f.write_text('x' * 100, encoding='utf-8')
+            os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))
+        with mock.patch.object(project_folders, 'MOST_FILES', 3):
+            self.assertEqual([p.name for p, _ in project_folders.files(folder)], ['4.txt', '3.txt', '2.txt'])
+        with mock.patch.object(project_folders, 'MOST_BYTES', 250):
+            self.assertEqual([p.name for p, _ in project_folders.files(folder)], ['4.txt', '3.txt'])
 
     def test_the_brief_commands_answer_and_refuse_a_broken_brief(self):
         minutes_app.cmd_save_brief('官網改版', json.dumps({'people': [{'name': 'Amy'}]}))

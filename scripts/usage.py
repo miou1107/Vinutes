@@ -3,7 +3,7 @@ transcribed. The window's 用量統計 adds disk and shows it by day and by proj
 
 The record: $MINUTES_HOME/usage/<YYYY-MM>.jsonl, one JSON object per line, appended whole by each process:
   {"at", "kind", "meeting", "project", ...}
-  kind ai          task (write | edit | test), ai, s (seconds), ok, limit (stopped by the AI's usage limit),
+  kind ai          task (write | edit | test | score; a score counts with edit in the table), ai, s (seconds), ok, limit (stopped by the AI's usage limit),
                    tokens {"in", "cached", "out"} when the AI said
   kind google      api (docs | drive | gmail | calendar | people | other), n requests, bytes uploaded; one line per
                    meeting and API per hour: each process adds its requests to usage/google.json when it ends, and

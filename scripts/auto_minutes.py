@@ -51,6 +51,7 @@ SKILL_DIR = SCRIPTS.parent
 CLAUDE_TIMEOUT = 45 * 60
 from ai_runner import EXTRA_PATH  # noqa: E402  (where claude, codex and agy are installed)
 import usage  # noqa: E402
+import scores  # noqa: E402
 BODY = '信件內文.txt'
 WORK = '整理'                   # the agent's folder inside the job
 PIECES = '分段'                 # pieces transcribed during the recording (live_transcribe.py), until the transcript is written
@@ -583,6 +584,8 @@ def run(job: Path):
         lang = minutes_lang(spoken)
         work = gather(job, meta, folder, lang)
         (job / 'result.json').unlink(missing_ok=True)
+        for old in (scores.FILE, scores.ORIGINAL):    # a rerun's score is the new minutes' only
+            (job / old).unlink(missing_ok=True)
         write_minutes(job, work, meta, folder, lang, spoken)
         result = check_result(work, meta, folder, lang)
         result.update(minutes_lang=lang, spoken=spoken)
@@ -597,12 +600,14 @@ def run(job: Path):
         base = next((md.stem.removesuffix(end) for end, _ in SUFFIX.values() if md.stem.endswith(end)), md.stem)
         md.with_name(base + SUFFIX[lang][1] + '.txt').write_text(speakers.labelled_transcript(job, unnamed(lang)),
                                                                  encoding='utf-8')
+        scores.keep_original(job, md)
         publish(job, result)
         write_json(job / 'result.json', result)
         import ai_runner
         activity(job, ai_runner.name(), t('log_published'))
         status(job, 'done', result['title'])
         log(job, 'done')
+        scores.start(job, 'check')
     except Failed as err:
         fail(job, str(err))
     except Exception as err:                         # anything unexpected still ends as a visible failure
@@ -732,6 +737,7 @@ def send(job: Path, to: str | None, subject: str | None, fmt: str, dry: bool, co
     entry = minutes_app.Job(job)
     names = t('list_sep').join(minutes_app.name_of(entry, p) for p in people)
     entry.log(minutes_app.me(), t('log_sent', names=names, format=minutes_app.format_words(fmt)), 'sent')
+    scores.start(job, 'edits')
     print('SENT ' + ', '.join(people))
 
 

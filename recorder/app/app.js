@@ -185,7 +185,7 @@ function refreshDoc(id = S.sel, again = false) {
   const seq = S.editSeq;
   const p = call('refresh', { id }).then((r) => {
     if (r.busy || S.sel !== id || !S.d || !docsMode()) return;
-    const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent, S.d.calendar]);
+    const seen = () => JSON.stringify([S.d.todo, S.d.check, S.d.log, S.d.attendees, S.d.people, S.d.speakers, S.d.silent, S.d.calendar, S.d.score]);
     const before = seen();
     if (seq === S.editSeq) { S.d.todo = r.todo || []; S.d.check = checkShown(r.check, id); }   // not over a confirm made meanwhile
     if (r.attendees) S.d.attendees = r.attendees;
@@ -195,6 +195,10 @@ function refreshDoc(id = S.sel, again = false) {
     if (r.silent && !S.peopleBusy) S.d.silent = r.silent;
     if (r.calendar && !S.peopleBusy) S.d.calendar = r.calendar;
     S.d.log = r.log || [];
+    if ('score' in r && JSON.stringify(r.score) !== JSON.stringify(S.d.score)) {
+      S.d.score = r.score;
+      if (!S.tagAdding) renderTags();               // not while a tag is being typed
+    }
     if ('can_undo' in r && !S.busy && !aiBusy(id)) S.canUndo = !!r.can_undo;
     if (r.learned && r.learned.length) { S.learned.push(...r.learned); renderLearned(); }
     if ((r.warning || '') !== S.docWarning) { S.docWarning = r.warning || ''; renderBanners(); }
@@ -584,7 +588,7 @@ async function select(id) {
     else learnLater(S.sel);
   }
   S.sel = id;
-  S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null;
+  S.d = null; S.loadError = ''; S.cfocus = null; S.resolved = new Set(); S.tab = null; S.tabBeforeScore = null;
   S.busy = false; S.asked = ''; S.askedQuick = ''; S.said = ''; S.canUndo = false; S.learned = []; S.learnOpen = false; S.learnShown = 0; S.learnHidden = false; S.learnHover = false; S.alert = null;
   S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; clearTimeout(S.peopleStop); S.peoplePlay = null;
   S.tagAdding = false;
@@ -798,8 +802,9 @@ function renderTags() {
     ${tags.length >= MAX_TAGS ? '' : S.tagAdding ? `<input id="tagIn" class="tagin" maxlength="20" aria-label="${esc(t('add_tag'))}" placeholder="${esc(t('tag_ph'))}">`
       : `<button class="tadd" id="tagAdd">${ICON.plusSm}<span>${esc(t('add_tag'))}</span></button>`}
     ${offered.length && tags.length < MAX_TAGS ? `<span class="tl ai">${esc(t('tag_ai', aiName()))}</span>${offered.map((g) => `<button class="tchip sug" data-add="${esc(g)}" title="${esc(t('add_this_tag', g))}">${ICON.plusSm}${esc(g)}</button>`).join('')}` : ''}
-    ${attachmentsHTML()}`;
+    ${attachmentsHTML()}${scoreButtonHTML()}`;
   bindAttachments(el);
+  if ($('#scoreBtn')) $('#scoreBtn').addEventListener('click', toggleScore);
   el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => changeTags((now) => now.filter((g) => g !== b.dataset.rm))));
   el.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => changeTags((now) => [...now, b.dataset.add])));
   if ($('#tagAdd')) $('#tagAdd').addEventListener('click', () => { S.tagAdding = true; renderTags(); $('#tagIn').focus(); });
@@ -819,6 +824,42 @@ function renderTags() {
     if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
   });
   box.addEventListener('blur', () => finish(true));
+}
+
+// the score of the minutes (scores.py), grey at the end of the tags: a click opens 評分 beside the Doc, a second
+// click goes back to the tab that was open before
+const scoreOpen = () => !!(S.railOpen && S.tab === 'score' && S.d && S.d.score);
+
+function scoreButtonHTML() {
+  const sc = S.d.score;
+  if (!sc) return '';
+  const on = scoreOpen();
+  return `<button class="tscore${on ? ' on' : ''}" id="scoreBtn" aria-expanded="${on}" title="${esc(t('score_aria', sc.score))}"
+    aria-label="${esc(t('score_aria', sc.score))}">${Number(sc.score)}</button>`;
+}
+
+function toggleScore() {
+  if (scoreOpen()) { S.tab = S.tabBeforeScore || null; } else { S.tabBeforeScore = S.tab === 'score' ? null : S.tab; S.railOpen = true; S.tab = 'score'; }
+  renderRail();
+}
+
+function markScoreButton() {
+  const b = $('#scoreBtn');
+  if (!b) return;
+  b.classList.toggle('on', scoreOpen());
+  b.setAttribute('aria-expanded', String(scoreOpen()));
+}
+
+function scoreHTML(sc) {
+  return `<div class="sbig"><b>${Number(sc.score)}</b><small>${esc(t(sc.kind === 'edits' ? 'score_edits' : 'score_check'))}</small></div>
+    <div class="scats">${(sc.categories || []).map(([k, got, of]) => `<span>${esc(t('score_' + k))}</span><span class="sn${got < of ? ' lost' : ''}">${Number(got)} / ${Number(of)}</span>`).join('')}</div>
+    <div class="slost">${esc(t('score_lost'))}</div>
+    ${(sc.lost || []).length ? sc.lost.map((x, i) => `<button class="sitem" data-s="${i}"${x.find && docsMode() ? '' : ' disabled'}><b>${esc(x.what)}</b>${x.fix ? `<small>${esc(x.fix)}</small>` : ''}</button>`).join('')
+      : `<div class="empty">${esc(t('score_none_lost'))}</div>`}`;
+}
+
+function wireScore(el, sc) {
+  el.querySelectorAll('.sitem[data-s]').forEach((b) => b.addEventListener('click', () => showInDoc(sc.lost[Number(b.dataset.s)].find)));
 }
 
 // a click shows at once; the lists go out one after another, each from what the clicks before it left, so two
@@ -1216,7 +1257,8 @@ function renderRail() {
   if (docsMode()) return renderDocsRail(el);
   const d = S.d;
   const open = openComments().length;
-  const tab = S.tab || (open ? 'comments' : 'log');
+  const tab = S.tab === 'score' && d.score ? 'score' : ['comments', 'log'].includes(S.tab) ? S.tab : (open ? 'comments' : 'log');
+  markScoreButton();
   if (!S.railOpen) {
     el.className = 'rail closed';
     el.innerHTML = `
@@ -1235,14 +1277,17 @@ function renderRail() {
       <div class="tabs" role="tablist">
         <button class="tab${tab === 'comments' ? ' on' : ''}" role="tab" id="tabC">${esc(t('comments'))}${open ? `<b class="n">${open}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
+        ${d.score ? `<button class="tab${tab === 'score' ? ' on' : ''}" role="tab" id="tabS">${esc(t('score_tab'))}</button>` : ''}
       </div>
       <span style="flex:1"></span>
       <button class="iconbtn" id="collapse" title="${esc(t('collapse'))}" aria-label="${esc(t('collapse'))}">${ICON.collapse}</button>
     </div>
-    <div class="railbody" id="railbody">${tab === 'comments' ? commentsHTML(comments) : logHTML(d.log || [])}</div>`;
+    <div class="railbody" id="railbody">${tab === 'comments' ? commentsHTML(comments) : tab === 'score' ? scoreHTML(d.score) : logHTML(d.log || [])}</div>`;
   $('#tabC').addEventListener('click', () => { S.tab = 'comments'; renderRail(); });
   $('#tabL').addEventListener('click', () => { S.tab = 'log'; renderRail(); });
-  $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); });
+  if ($('#tabS')) $('#tabS').addEventListener('click', () => { if (S.tab !== 'score') S.tabBeforeScore = S.tab; S.tab = 'score'; renderRail(); });
+  if (tab === 'score') wireScore(el, d.score);
+  $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); markScoreButton(); });
   if (tab === 'comments') wireComments();
 }
 
@@ -1259,9 +1304,10 @@ function renderDocsRail(el) {
   const waiting = todo.length + check.length;
   const shown = d.speakers || {};
   const unnamed = (d.voices || []).filter((v) => !(v.name || shown[v.group])).length;   // voices nobody is picked for
-  const tabs = ['todo', 'people', 'log'];
+  const tabs = ['todo', 'people', 'log', ...(d.score ? ['score'] : [])];
   const tab = tabs.includes(S.tab) ? S.tab : (waiting ? 'todo' : unnamed ? 'people' : 'log');
   const pick = (t) => () => { S.railOpen = true; S.tab = t; renderRail(); };
+  markScoreButton();
   if (!S.railOpen) {
     el.className = 'rail closed';
     el.innerHTML = `
@@ -1286,13 +1332,14 @@ function renderDocsRail(el) {
             : `<div class="acts"><button class="okc2" data-c="${i}">${ICON.checkSmall}<span>${esc(t('looks_right'))}</span></button>
               <button class="fixb" data-fix="${i}">${esc(t('fix'))}</button><button class="fixb ghost" data-skip="${i}">${esc(t('skip'))}</button></div>`}</div>`).join('')
       : `<div class="empty">${esc(t('nothing_to_handle'))}</div>`)
-    : tab === 'people' ? peopleHTML(people) : logHTML(d.log || []);
+    : tab === 'people' ? peopleHTML(people) : tab === 'score' ? scoreHTML(d.score) : logHTML(d.log || []);
   el.innerHTML = `
     <div class="railhead">
       <div class="tabs" role="tablist">
         <button class="tab${tab === 'todo' ? ' on' : ''}" role="tab" id="tabF">${esc(t('to_handle'))}${waiting ? `<b class="n${todo.length ? ' red' : ''}">${waiting}</b>` : ''}</button>
         <button class="tab${tab === 'people' ? ' on' : ''}" role="tab" id="tabP">${esc(t('people'))}${unnamed ? `<b class="n">${unnamed}</b>` : ''}</button>
         <button class="tab${tab === 'log' ? ' on' : ''}" role="tab" id="tabL">${esc(t('activity'))}</button>
+        ${d.score ? `<button class="tab${tab === 'score' ? ' on' : ''}" role="tab" id="tabS">${esc(t('score_tab'))}</button>` : ''}
       </div>
       <span style="flex:1"></span>
       <button class="iconbtn" id="collapse" title="${esc(t('collapse'))}" aria-label="${esc(t('collapse'))}">${ICON.collapse}</button>
@@ -1301,7 +1348,9 @@ function renderDocsRail(el) {
   $('#tabF').addEventListener('click', pick('todo'));
   $('#tabP').addEventListener('click', pick('people'));
   $('#tabL').addEventListener('click', pick('log'));
-  $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); });
+  if ($('#tabS')) $('#tabS').addEventListener('click', () => { if (S.tab !== 'score') S.tabBeforeScore = S.tab; pick('score')(); });
+  $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); markScoreButton(); });
+  if (tab === 'score') wireScore(el, d.score);
   if (tab === 'todo') {
     el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
       const item = todo[Number(b.dataset.t)];

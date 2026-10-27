@@ -26,6 +26,7 @@
 | `scripts/auto_minutes.py` | After a recording: transcript, calendar match, minutes by the chosen AI, Google Doc, draft email; also sends the email when the user presses Send |
 | `scripts/briefs.py` | Each project's brief: its people with what they do, terms and how the transcript mishears them, background; what the AI reads before writing minutes |
 | `scripts/contacts.py` | The addresses Vinutes knows for the mail's recipients: the company directory (once a day), calendar invitees, people mailed before; a name to its address, and the people offered while typing |
+| `scripts/scores.py` | The score of each meeting's minutes: the AI's check against the transcript once the minutes are written, then the user's edits when the mail is sent; what lost points and how to do better |
 | `scripts/minutes_app.py` | Everything the meeting window asks for: the list, syncing the Doc, saving edits, AI rewrites, comments, history, learning from the user's edits, archiving and deleting meetings, projects and tags |
 | `scripts/ai_runner.py` | Runs Claude Code, Codex or Antigravity, each sandboxed to one meeting's folder; installs each with its maker's own script |
 | `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper, or Qwen3-ASR for Chinese meetings when the user chose it and downloaded it); audio is not uploaded. Reuses the pieces transcribed during the recording and does only the rest |

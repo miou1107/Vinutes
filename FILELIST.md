@@ -37,6 +37,7 @@
 | `scripts/doc_sync.py` | Keeps the Markdown minutes and the Google Doc in step, paragraph by paragraph, so comments stay put |
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |
 | `scripts/attachments.py` | Files, links and pictures from Add attachments: uploads them to Google Drive and lists them, each with its note, in the minutes' last section; reads that section back for the row under the title |
+| `scripts/project_folders.py` | Each project's folder (Project settings), copied for the AI that writes the minutes: PDF and text as they are, Word, Excel and PowerPoint as text, with a list of the files |
 | `scripts/references.py` | Files and links handed to the AI with a sentence: copied or read as text into its folder (Word, Excel, PowerPoint, web pages, Google files) |
 | `scripts/setup_check.py` | The setup checklist: the speech model (Whisper, or Qwen3-ASR chosen and downloaded from its model page), the voice model, the AI (installed, signed in, one test answer), Google connection |
 | `scripts/i18n.py` | Which language the app speaks (the user's pick, else the Mac's) and which language the minutes are written in |

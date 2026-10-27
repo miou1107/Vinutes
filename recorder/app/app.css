@@ -127,6 +127,14 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .crumbs b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .crumbs .gear { width: 22px; height: 22px; color: var(--muted); flex: none; }
 .crumbs .gear:hover { color: var(--text); }
+.pcrumb .caret { margin-left: 3px; font-size: 10px; }
+/* the project list under the project name: fixed, since the path clips what overflows it */
+.mmenu.pmenu { position: fixed; bottom: auto; max-height: 60vh; overflow: auto; }
+.pmenu .pnew { padding: 4px 6px; border-top: 1px solid var(--line); margin-top: 4px; }
+.pmenu .pnew .pinput { box-sizing: border-box; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px;
+                       background: var(--field); font-size: 13px; }
+.pmenu .pnewbtn { color: var(--blue); border-top: 1px solid var(--line); margin-top: 4px; border-radius: 0 0 7px 7px; }
+.pmenu .merr { padding: 4px 10px; font-size: 12px; color: var(--red); }
 /* under the path: the meeting's tags */
 .tagbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 24px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .tagbar .tl { color: var(--muted); }
@@ -570,9 +578,14 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .pset .plbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .pset .pinput { height: 30px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px; background: var(--field); font-size: 13px; }
 .pset .dnote.small { font-size: 12px; color: var(--muted); }
-/* 專案設定 › 小抄: the project's people, terms and background */
+/* 專案設定 › 專案背景: the project's people, terms and background */
 .sheet.confirm.pset.wide { width: 600px; }
-.pset .ptab { margin-left: auto; }
+.sheet.pset > * { flex-shrink: 0; }              /* a long brief scrolls the sheet instead of squeezing it */
+.pfolder { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pfolder .ppath { flex: 1; min-width: 0; height: 30px; line-height: 30px; padding: 0 8px; border: 1px solid var(--field-line); border-radius: 6px;
+                  background: var(--field); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pfolder .ppath.none { color: var(--muted); }
+.pfolder .btn { flex: none; }
 .bsec { border: 1px solid var(--line); border-radius: 8px; background: var(--field); }
 .bsec > header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .bsec > header .n { color: var(--muted); font-variant-numeric: tabular-nums; }

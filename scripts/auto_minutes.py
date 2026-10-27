@@ -292,6 +292,14 @@ def gather(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW') -> Path:
     brief = briefs.markdown(lang=lang)
     if brief:
         (ref / briefs.FILE_NAME).write_text(brief, encoding='utf-8')
+    import project_folders                           # each project's folder, as copies the agent can read
+    try:
+        copied = project_folders.copy_all(briefs.folders(), ref)
+    except Exception as err:                         # a folder's trouble never costs the minutes
+        copied = {}
+        log(job, f'project folders not copied: {err!r}')
+    if copied:                                       # 0: a folder macOS kept from Vinutes, or nothing readable
+        log(job, 'project folders: ' + ', '.join(f'{p} {n} files' for p, n in copied.items()))
     recent = []
     for other in sorted(job.parent.iterdir(), reverse=True):
         r = read_json(other / 'result.json')
@@ -380,7 +388,10 @@ def prompt(job: Path, meta: dict, folder: Path, lang: str = 'zh-TW', spoken: str
         f'- 錄音時間：{started} 到 {ended}{length}\n'
         f'- 行事曆（程式已經挑好這場會議）：{job}/行事曆.txt\n'
         f'- 詞彙表與使用者設定：{job}/參考/\n'
-        f'- 專案小抄（有的話）：{job}/參考/專案小抄.md，每個專案的人員與負責的事、名詞、背景；先判斷這場屬於哪個專案\n'
+        f'- 專案背景（有的話）：{job}/參考/專案背景.md，每個專案的人員與負責的事、名詞、背景；先判斷這場屬於哪個專案\n'
+        f'- 專案資料夾（有的話）：{job}/參考/專案資料夾/<專案名稱>/，使用者替專案選的資料夾的副本，Word、Excel、PowerPoint '
+        '已轉成文字。判斷出專案之後先看那個專案的 檔案清單.md，挑跟這場會議有關的檔案讀，例如之前的紀錄、提案、時程，'
+        '用來補背景、核對人名、日期與待辦\n'
         f'- 之前的會議名稱、專案與標籤：{job}/參考/最近的會議.json（同一個會議沿用一樣的名稱與專案）\n'
         f'- 之前的會議紀錄（補背景用）：{job}/參考/舊紀錄/\n'
         f'- 紀錄寫成 {job}/{DRAFT}，程式會照 result.json 的 title 存進紀錄資料夾。\n'
@@ -411,8 +422,12 @@ def prompt_en(job: Path, meta: dict, spoken: str) -> str:
         f'- Recording: {started} to {ended}{length}\n'
         f'- The calendar (the program has picked the meeting): {job}/行事曆.txt\n'
         f'- Glossaries and the user\'s settings: {job}/參考/\n'
-        f'- Project briefs, if any: {job}/參考/專案小抄.md (each project\'s people and what they do, terms, background); '
+        f'- Project briefs, if any: {job}/參考/專案背景.md (each project\'s people and what they do, terms, background); '
         'decide which project this meeting is first\n'
+        f'- Project folders, if any: {job}/參考/專案資料夾/<project>/, a copy of the folder the user chose for the '
+        'project, with Word, Excel and PowerPoint files as text. Once you know the project, read its 檔案清單.md (the '
+        'list of files, newest first) and the files that bear on this meeting, such as earlier minutes, proposals and '
+        'schedules, for background and to check names, dates and action items\n'
         f'- Earlier meeting names, projects and tags: {job}/參考/最近的會議.json (the same meeting keeps the same name and project)\n'
         f'- Earlier minutes, for background: {job}/參考/舊紀錄/\n'
         f'- Write the minutes to {job}/{DRAFT}; the program files them under the title in result.json.\n'
@@ -586,7 +601,11 @@ def run(job: Path):
         (job / 'result.json').unlink(missing_ok=True)
         for old in (scores.FILE, scores.ORIGINAL):    # a rerun's score is the new minutes' only
             (job / old).unlink(missing_ok=True)
-        write_minutes(job, work, meta, folder, lang, spoken)
+        try:
+            write_minutes(job, work, meta, folder, lang, spoken)
+        finally:                                     # the copies of the project folders are not kept with the meeting
+            import project_folders
+            shutil.rmtree(work / '參考' / project_folders.DIR, ignore_errors=True)
         result = check_result(work, meta, folder, lang)
         result.update(minutes_lang=lang, spoken=spoken)
         if result['mail']:

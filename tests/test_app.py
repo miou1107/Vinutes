@@ -2651,8 +2651,9 @@ class MailDefaults(Flows):
     def test_the_body_gets_the_purpose_and_the_highlights_after_the_link(self):
         self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
         body = minutes_app.mail_defaults(self.job())['body']
+        self.assertNotIn('Ken', body.split('重點：')[1])                     # who does what stays in the minutes
         self.assertIn('{文件網址}\n\n會議目的：確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n重點：\n'
-                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作：Ken\n\n內容有需要調整的地方再跟我說。', body)   # the row whose owner is still [__] stays in the Doc
+                      '1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作\n\n內容有需要調整的地方再跟我說。', body)   # the row whose owner is still [__] stays in the Doc
         again = minutes_app.with_summary(body, MINUTES_WITH_PURPOSE, 'zh-TW')
         self.assertEqual(again, body)                                          # not twice
         self.assertEqual(minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', '# x\n\n## 一、會議基本資訊\n\n- 主持人：Vin\n', 'zh-TW'),
@@ -2665,12 +2666,105 @@ class MailDefaults(Flows):
               '| No. | Action | Owner | Notes |\n|---|---|---|---|\n| 1 | Book the venue | Amy | by Friday |\n| 2 | 確認合約付款事項 | Ken | |\n')
         out = minutes_app.with_summary('Hi,\n\nThe minutes:\n{doc_url}\n\nVin', md, 'en')
         self.assertIn('{doc_url}\n\nPurpose: Settle the October budget.\n\nHighlights:\n1. Budget is 100k.\n2. Two KOLs first.\n'
-                      '3. Book the venue: Amy\n4. 確認合約付款事項: Ken\n\nVin', out)      # the header row is not an item, nor a sub-point or a blank
+                      '3. Book the venue\n4. 確認合約付款事項\n\nVin', out)      # the header row is not an item, nor a sub-point or a blank
         long = '## 二、會議目的\n\n' + '這是一句很長的話，' * 12 + '最後一句。\n'
         got = minutes_app.with_summary('Hi\n\n{文件網址}\n\nVin', long, 'zh-TW')
         self.assertLessEqual(len(got.split('會議目的：')[1].split('\n')[0]), 160)
         self.assertTrue(got.split('會議目的：')[1].split('\n')[0].endswith(('，', '。', '…')))
         self.assertEqual(minutes_app.with_summary('Hi\n\n會議目的: x\n\n{文件網址}', long, 'zh-TW'), 'Hi\n\n會議目的: x\n\n{文件網址}')
+
+    AI_BODY = ('Hi，\n\n週會的會議紀錄整理好了：\n{文件網址}\n\n會議目的：AI 寫的目的。\n\n重點：\n- 預算 10 萬元（Nina）\n\n'
+               '內容有需要調整的地方再跟我說。\n\nVin\n')
+
+    def test_the_mail_ends_with_the_vinutes_that_sent_it_once(self):
+        version = (minutes_app.ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+        body = minutes_app.mail_defaults(self.job())['body']
+        self.assertTrue(body.endswith(f'\n\nVin\n\nSent by Vinutes v{version}'))
+        self.assertEqual(minutes_app.with_signature(body), body)
+
+    def test_untouched_minutes_keep_the_summary_the_ai_wrote_with_them(self):
+        self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text(self.AI_BODY, encoding='utf-8')
+        mail = minutes_app.mail_defaults(self.job())
+        self.assertTrue(mail['summary_fresh'])
+        self.assertIn('會議目的：AI 寫的目的。\n\n重點：\n- 預算 10 萬元（Nina）', mail['body'])
+
+    def test_edited_minutes_drop_the_ais_summary_and_take_the_minutes_until_the_ai_rewrites_it(self):
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        edited = MINUTES_WITH_PURPOSE.replace('預算 10 萬元', '預算 12 萬元')
+        self.md_path.write_text(edited, encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text(self.AI_BODY, encoding='utf-8')
+        mail = minutes_app.mail_defaults(self.job())
+        self.assertFalse(mail['summary_fresh'])                                # the window asks for the AI's rewrite
+        self.assertNotIn('Nina', mail['body'])
+        self.assertNotIn('AI 寫的目的', mail['body'])
+        self.assertIn('重點：\n1. 預算 12 萬元。', mail['body'])                   # meanwhile: the minutes' own lines
+        asked = []
+        saved = minutes_app.ai_summary
+        minutes_app.ai_summary = lambda job, md: asked.append(md) or '會議目的：新的目的。\n\n重點：\n- 預算 12 萬元，下週定案'
+        try:
+            minutes_app.cmd_mail_summary(self.job())
+            got = self.outs[-1]
+            self.assertTrue(got['summary_fresh'])
+            self.assertIn('{文件網址}\n\n會議目的：新的目的。\n\n重點：\n- 預算 12 萬元，下週定案\n\n內容有需要調整的地方再跟我說。', got['body'])
+            self.assertEqual(got['body'].count('Sent by Vinutes'), 1)
+            minutes_app.cmd_mail_summary(self.job())                             # the same minutes: kept, not asked again
+            self.assertEqual(len(asked), 1)
+            self.assertEqual(self.outs[-1]['body'], got['body'])
+            self.md_path.write_text(edited.replace('12 萬', '15 萬'), encoding='utf-8')
+            self.assertFalse(minutes_app.mail_defaults(self.job())['summary_fresh'])   # changed again: asked again
+            minutes_app.ai_summary = lambda job, md: ''                          # the AI gave nothing
+            minutes_app.cmd_mail_summary(self.job())
+            self.assertFalse(self.outs[-1]['summary_fresh'])
+            self.assertIn('1. 預算 15 萬元。', self.outs[-1]['body'])
+        finally:
+            minutes_app.ai_summary = saved
+
+    def test_the_text_the_mail_sheet_wrote_is_kept_as_it_is(self):
+        """A preview (Word, PDF) or a send that failed writes the sheet's text to 信件內文.txt: what the user typed
+        there stays, even when the minutes changed since."""
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        self.md_path.write_text(MINUTES_WITH_PURPOSE.replace('預算 10 萬元', '預算 12 萬元'), encoding='utf-8')
+        mine = 'Hi，\n\n詳細如附件。\n\n會議目的：我改過的目的。\n\n重點：\n1. 我手改的重點\n\nVin\n\nSent by Vinutes v0.4.22'
+        (self.job_dir / '信件內文.txt').write_text(mine, encoding='utf-8')
+        (self.job_dir / minutes_app.SHEET_TEXT).touch()
+        self.assertEqual(minutes_app.mail_body(self.job()), (mine, True))
+
+    def test_a_preview_of_the_text_as_given_does_not_keep_old_highlights(self):
+        """Word picked once to see the file, nothing typed: after the minutes change, the mail follows them again,
+        and the highlights go before the sign-off, not after it."""
+        (self.job_dir / minutes_app.scores.ORIGINAL).write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')
+        (self.job_dir / '信件內文.txt').write_text(self.AI_BODY, encoding='utf-8')
+        given = minutes_app.mail_body(self.job())[0]
+        word = given.replace('週會的會議紀錄整理好了：\n{文件網址}', '週會的會議紀錄整理好了，詳細如附件。')
+        (self.job_dir / '信件內文.txt').write_text(word, encoding='utf-8')                # what the preview wrote
+        (self.job_dir / minutes_app.SHEET_TEXT).touch()
+        self.assertEqual(minutes_app.mail_body(self.job()), (word, True))                  # nothing changed since
+        self.md_path.write_text(MINUTES_WITH_PURPOSE.replace('預算 10 萬元', '預算 12 萬元'), encoding='utf-8')
+        body, fresh = minutes_app.mail_body(self.job())
+        self.assertFalse(fresh)
+        self.assertNotIn('AI 寫的目的', body)
+        self.assertTrue(body.endswith('重點：\n1. 預算 12 萬元。\n2. KOL 合作先找兩位試行。\n3. KOL 試行合作\n\n'
+                                      'Vin\n\nSent by Vinutes v' + (minutes_app.ROOT / 'VERSION').read_text().strip()), body)
+
+    def test_a_list_left_under_its_own_heading_goes_with_it(self):
+        self.assertEqual(minutes_app.without_summary('Hi\n\n{文件網址}\n\n重點：\n\n- a\n- b\n\n會議目的：x\n\nVin'),
+                         'Hi\n\n{文件網址}\n\nVin')
+
+    def test_only_two_paragraphs_with_a_highlight_are_taken_from_the_ai(self):
+        self.assertEqual(minutes_app.summary_of('會議目的：a\n\n重點：\n- b\n- c\n\n以上兩段可直接放進信裡，需要調整再告訴我。', 'zh-TW'),
+                         '會議目的：a\n\n重點：\n- b\n- c')                     # what the AI says after them is not mailed
+        self.assertEqual(minutes_app.summary_of('**會議目的**：a\n\n**重點**：\n\n1. b', 'zh-TW'), '會議目的：a\n\n重點：\n\n1. b')
+        self.assertEqual(minutes_app.summary_of('會議目的：a\n\n重點：\n以下為重點：\n- b', 'zh-TW'), '')   # not a list right under it
+        self.assertEqual(minutes_app.summary_of('好的，以下是：\n\n```\n會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）\n```\n', 'zh-TW'),
+                         '會議目的：談預算。\n\n重點：\n- 預算 10 萬元（Amy）')
+        self.assertEqual(minutes_app.summary_of('Purpose: budget.\n\nHighlights:\n1. Budget 100k (Amy)', 'en'),
+                         'Purpose: budget.\n\nHighlights:\n1. Budget 100k (Amy)')
+        self.assertEqual(minutes_app.summary_of('會議目的：談預算。', 'zh-TW'), '')              # no highlights
+        self.assertEqual(minutes_app.summary_of('會議目的：談預算。\n\n重點：\n- 場地 [__]', 'zh-TW'), '')
+        self.assertEqual(minutes_app.summary_of('', 'zh-TW'), '')
 
 
 class CalendarPick(unittest.TestCase):

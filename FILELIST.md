@@ -29,7 +29,7 @@
 | `scripts/minutes_app.py` | Everything the meeting window asks for: the list, syncing the Doc, saving edits, AI rewrites, comments, history, learning from the user's edits, archiving and deleting meetings, projects and tags |
 | `scripts/ai_runner.py` | Runs Claude Code, Codex or Antigravity, each sandboxed to one meeting's folder; installs each with its maker's own script |
 | `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper, or Qwen3-ASR for Chinese meetings when the user chose it and downloaded it); audio is not uploaded. Reuses the pieces transcribed during the recording and does only the rest |
-| `scripts/live_transcribe.py` | Runs beside the recording: transcribes it in pieces of about five minutes, cut at quiet moments, while the meeting goes on, so little is left to do after Stop |
+| `scripts/live_transcribe.py` | Runs beside the recording: transcribes it in pieces of about five minutes, cut at quiet moments, while the meeting goes on, with the voice prints of each piece's lines, so little is left to do after Stop |
 | `scripts/connect_agents.py` | Adds Vinutes' MCP server to the AI tools installed on the Mac (Claude Code, Codex, Gemini CLI, Claude's app, Antigravity, Cursor); install.sh runs it |
 | `scripts/mcp_server.py` | Vinutes as an MCP server: Claude Code searches and reads past meetings, and names speakers, adds notes, changes words, tags and projects when asked |
 | `scripts/speakers.py` | Tells speakers apart by voice and remembers the names the user gives them |
@@ -51,7 +51,7 @@
 | `scripts/check_update.py` | Looks up the newest version on GitHub |
 | `tests/` | `python3 -m unittest discover -s tests` |
 | `docs/screenshots/` | The README's pictures (English UI, made-up meetings) and `demo_home.py`, which makes the example meetings they were taken with |
-| `docs/bench/` | How a change to transcription is measured on real recordings (pieces against the whole file, a bigger model as the judge, audio cleaning, other recognisers, glossary terms found), how a change to the voice grouping is replayed against the speakers the user kept (`voices.py`), and the figures measured so far; `README.md` there explains |
+| `docs/bench/` | How a change to transcription is measured on real recordings (pieces against the whole file, a bigger model as the judge, audio cleaning, other recognisers, glossary terms found), how a change to the voice grouping is replayed against the speakers the user kept (`voices.py`), whether the voice prints made during a recording are the ones made after Stop (`live_voices.py`), and the figures measured so far; `README.md` there explains |
 | `.github/workflows/ci.yml` | The check GitHub runs on a clean Mac for every push and pull request: the Python tests, the meeting window's scripts, the installer, the plists and both Swift builds. main only takes changes that pass it |
 | `prototypes/` | Design prototypes approved before building a screen |
 

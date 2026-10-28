@@ -40,19 +40,21 @@ EN = {
     'attach_no_items': 'There are no files, links or pictures to add.',
     'attach_no_doc': "This meeting isn't in Google Docs yet. Files and pictures can be added once the minutes are "
                      'published to Google Docs.',
-    'attach_offline': "Not connected to Google, so the files and pictures couldn't be saved to Google Drive. Section 8 "
-                      "hasn't changed. Try again once you're online.",
+    'attach_offline': "Not connected to Google, so the files and pictures couldn't be saved to Google Drive. The "
+                      "Attachments section hasn't changed. Try again once you're online.",
     'attach_no_public': "The picture can't show inside the Google Doc because your Google account doesn't allow "
-                        'sharing files by link. The picture is saved in Google Drive, and section 8 has a link to it.',
-    'attach_login': "Your Google sign-in has expired, so the files weren't saved to Google Drive and section 8 hasn't "
-                    'changed. Sign in again at item 7 of the Setup Checklist.',
-    'attach_no_right': "Your Google account can't save files in the folder this Google Doc is in, so section 8 hasn't "
-                       'changed.',
-    'attach_failed': "The files couldn't be saved to Google Drive, so section 8 hasn't changed. Please try again.",
+                        'sharing files by link. The picture is saved in Google Drive, and the Attachments section has '
+                        'a link to it.',
+    'attach_login': "Your Google sign-in has expired, so the files weren't saved to Google Drive and the Attachments "
+                    "section hasn't changed. Sign in again at item 7 of the Setup Checklist.",
+    'attach_no_right': "Your Google account can't save files in the folder this Google Doc is in, so the Attachments "
+                       "section hasn't changed.",
+    'attach_failed': "The files couldn't be saved to Google Drive, so the Attachments section hasn't changed. Please try again.",
     'attach_crowded': "A colleague was editing the Google Doc at the same moment, so these files and links weren't "
-                      'added to section 8. The files are saved in Google Drive; please add them again.',
-    'attach_no_line': "Section 8 has no line for “{name}”, so this picture wasn't put into the Google Doc.",
-    'attach_not_placed': "The picture “{name}” couldn't go into the Google Doc, so section 8 has a link to it instead.",
+                      'added to the Attachments section. The files are saved in Google Drive; please add them again.',
+    'attach_no_line': "The Attachments section has no line for “{name}”, so this picture wasn't put into the Google Doc.",
+    'attach_not_placed': "The picture “{name}” couldn't go into the Google Doc, so the Attachments section has a link "
+                         'to it instead.',
     'attach_no_file': "Can't find this file: {name}.",
     'attach_no_name': '(no file name)',
     'attach_bad_url': 'Links must start with http:// or https://.',
@@ -221,7 +223,7 @@ EN = {
                     'renamed.',
     'missing_showing_doc': " You're seeing the Google Doc.",
     'missing_put_back': ' To edit it here, put the minutes file back in “{folder}”.',
-    'reply_attached': 'Added to section 8, Attachments: {names}',
+    'reply_attached': 'Added to Attachments: {names}',
     # minutes_app.py: the quick buttons, as the activity log names them
     'quick_short': 'Shorter',
     'quick_detail': 'More detail',
@@ -257,8 +259,8 @@ EN = {
     'log_unlearn': "Won't remember: {text}",
     'log_relearn': 'Will remember again: {text}',
     'log_tables_not_saved': "This change to the table rows or columns wasn't saved to Google Docs",
-    'log_attached': 'Added {names} to section 8, Attachments',
-    'log_noted': 'Added to section 8, Attachments: “{text}”',
+    'log_attached': 'Added {names} to Attachments',
+    'log_noted': 'Added to Attachments: “{text}”',
     'log_replaced': 'Changed “{old}” to “{new}”',
     'note_empty': 'There is nothing to add.',
     'replace_missing': "The minutes don't have that text. Copy it exactly as get_minutes gives it, with the marks for bold and links; someone may also have changed it already.",
@@ -326,15 +328,15 @@ ZH = {
     # attachments.py
     'attach_no_items': '沒有要加進去的檔案、連結或圖片。',
     'attach_no_doc': '這場會議還沒有 Google 文件，附件和圖片要等會議記錄發成 Google 文件之後才能加。',
-    'attach_offline': '沒有連上 Google，檔案和圖片沒辦法存進雲端硬碟，第八章沒有變動。連上網路之後再試一次。',
+    'attach_offline': '沒有連上 Google，檔案和圖片沒辦法存進雲端硬碟，「參考附件」沒有變動。連上網路之後再試一次。',
     'attach_no_public': ('圖片沒辦法直接顯示在 Google 文件裡，因為你的 Google 帳號不允許用連結分享檔案。'
-                         '圖片已經存進雲端硬碟，第八章放的是圖片的連結。'),
-    'attach_login': 'Google 登入已經失效，檔案沒有存進雲端硬碟，第八章沒有變動。請到「環境設定自檢」的第 7 項重新登入。',
-    'attach_no_right': '你的 Google 帳號沒有權限把檔案存進這份文件所在的資料夾，第八章沒有變動。',
-    'attach_failed': '檔案沒辦法存進雲端硬碟，第八章沒有變動。請再試一次。',
-    'attach_crowded': '同事剛好也在修改 Google 文件，這次的檔案和連結沒有加進第八章。檔案已經存進雲端硬碟，請再加一次。',
-    'attach_no_line': '第八章找不到「{name}」這一行，這張圖片沒有放進 Google 文件。',
-    'attach_not_placed': '圖片「{name}」沒辦法放進 Google 文件，第八章放的是這張圖片的連結。',
+                         '圖片已經存進雲端硬碟，「參考附件」放的是圖片的連結。'),
+    'attach_login': 'Google 登入已經失效，檔案沒有存進雲端硬碟，「參考附件」沒有變動。請到「環境設定自檢」的第 7 項重新登入。',
+    'attach_no_right': '你的 Google 帳號沒有權限把檔案存進這份文件所在的資料夾，「參考附件」沒有變動。',
+    'attach_failed': '檔案沒辦法存進雲端硬碟，「參考附件」沒有變動。請再試一次。',
+    'attach_crowded': '同事剛好也在修改 Google 文件，這次的檔案和連結沒有加進「參考附件」。檔案已經存進雲端硬碟，請再加一次。',
+    'attach_no_line': '「參考附件」找不到「{name}」這一行，這張圖片沒有放進 Google 文件。',
+    'attach_not_placed': '圖片「{name}」沒辦法放進 Google 文件，「參考附件」放的是這張圖片的連結。',
     'attach_no_file': '找不到這個檔案：{name}。',
     'attach_no_name': '（沒有檔名）',
     'attach_bad_url': '網址要用 http:// 或 https:// 開頭。',
@@ -472,7 +474,7 @@ ZH = {
     'missing_file': '這台電腦上找不到這場會議的紀錄檔「{name}」，可能已經被移走或改了檔名。',
     'missing_showing_doc': '畫面上是 Google 文件的內容，',
     'missing_put_back': '要在這裡修改，請把紀錄檔放回「{folder}」。',
-    'reply_attached': '已加進第八章「參考附件」：{names}',
+    'reply_attached': '已加進「參考附件」：{names}',
     # minutes_app.py: the quick buttons, as the activity log names them
     'quick_short': '精簡摘要',
     'quick_detail': '完整詳盡',
@@ -507,8 +509,8 @@ ZH = {
     'log_unlearn': '不要記：{text}',
     'log_relearn': '改回要記：{text}',
     'log_tables_not_saved': '這次增減表格的修改沒有存回 Google 文件',
-    'log_attached': '在第八章「參考附件」加了 {names}',
-    'log_noted': '在第八章「參考附件」補了一段：「{text}」',
+    'log_attached': '在「參考附件」加了 {names}',
+    'log_noted': '在「參考附件」補了一段：「{text}」',
     'log_replaced': '把「{old}」改成「{new}」',
     'note_empty': '沒有要加的內容。',
     'replace_missing': '紀錄裡沒有這段文字。要照 get_minutes 拿到的原文完全一樣地複製，粗體、連結的符號也要一起帶；也可能已經有人改過。',

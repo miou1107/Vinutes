@@ -1,0 +1,143 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>改稿時選講者原型</title><style>
+/* Prototype: naming a voice under 人員 while Claude rewrites the minutes (2026-10-28). Colours and parts copied from prompt-queue.html. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --panel: #f6f6f8; --rail: #fbfbfc; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field: #ffffff; --field-line: #cfcfd6;
+  --hover: #e0e0e6; --link: #2a6dd6; --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee;
+  --green: #1e7b34; --red-bg: #fde2e1;
+  --yellow-bg: #fbefc6; --yellow-label: #8a6100;
+  --asis-bg: #fff6f5; --asis-line: #e6a29c; --asis-ink: #9b1c1c;
+  --tobe-bg: #f1f6ff; --tobe-line: #8fb0e6; --tobe-ink: #1c4f9e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e20; --panel: #232326; --rail: #222225; --line: #333338; --line2: #3a3a40;
+    --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field: #2c2c30; --field-line: #46464c;
+    --hover: #303036; --link: #7fb0ff; --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a;
+    --green: #5cc27a; --red-bg: #4a2020;
+    --yellow-bg: #4a3c10; --yellow-label: #e9c46a;
+    --asis-bg: #2e2020; --asis-line: #7a3a36; --asis-ink: #ffb4ad;
+    --tobe-bg: #1c2638; --tobe-line: #3f5f94; --tobe-ink: #a9c6ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
+button { font: inherit; color: inherit; }
+main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+.lead { margin: 0 0 24px; color: var(--muted); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: start; }
+.frame { border-radius: 12px; padding: 12px; }
+.frame.asis { background: var(--asis-bg); border: 2px dashed var(--asis-line); }
+.frame.tobe { background: var(--tobe-bg); border: 2px solid var(--tobe-line); }
+.flag { display: inline-block; margin-bottom: 10px; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.asis .flag { color: var(--asis-ink); background: var(--red-bg); }
+.tobe .flag { color: var(--tobe-ink); background: var(--blue-bg); border: 1px solid var(--blue-line); }
+.cap { margin: 10px 2px 0; color: var(--text2); }
+.screen { display: flex; background: var(--bg); border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; min-height: 330px; }
+.docside { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.doc { flex: 1; padding: 14px 18px; }
+.doc i { display: block; height: 8px; margin: 8px 0; border-radius: 4px; background: var(--line); }
+.busy { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.busy.done { color: var(--green); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line2); border-top-color: var(--blue); animation: rot 1s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+@media (max-width: 520px) { .screen { flex-direction: column; } .rail { width: auto; border-left: none; border-top: 1px solid var(--line); } }
+
+.rail { width: 230px; flex: none; background: var(--rail); border-left: 1px solid var(--line); }
+.railhead { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); }
+.tab { padding: 5px 8px 7px; border-bottom: 2px solid transparent; font-size: 12.5px; color: var(--muted); }
+.tab.on { color: var(--link); font-weight: 600; border-bottom-color: var(--blue); }
+.railbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.phead { font-size: 12px; color: var(--muted); }
+.vcard { padding: 9px 10px; border-radius: 8px; background: var(--field); border: 1px solid var(--line2); display: flex; flex-direction: column; gap: 7px; }
+.vtop { display: flex; align-items: center; gap: 6px; }
+.vtag { padding: 1px 7px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.vtag.a { color: #1c4f9e; background: #dfe9fb; }
+.vtag.b { color: #8a4b00; background: #fbe6cf; }
+.vmin { color: var(--muted); font-size: 12px; }
+.vlisten { margin-left: auto; color: var(--link); font-size: 12px; }
+.vpick { all: unset; box-sizing: border-box; display: flex; align-items: center; height: 32px; padding: 0 10px; border: 1px solid var(--field-line); border-radius: 8px; font-weight: 600; cursor: pointer; }
+.vpick span { margin-left: auto; color: var(--muted); font-size: 11px; }
+.vpick[disabled] { cursor: default; opacity: 0.45; background: var(--panel); }
+.vmenu { display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); }
+.vmenu > div { padding: 6px 9px; border-radius: 6px; cursor: pointer; }
+.vmenu > div:hover { background: var(--hover); }
+.wait { align-self: flex-start; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px; color: var(--yellow-label); background: var(--yellow-bg); }
+.demo { all: unset; cursor: pointer; margin-top: 8px; display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 13px;
+        border: 1px dashed var(--tobe-line); color: var(--tobe-ink); font-size: 12px; }
+.demo[hidden] { display: none; }
+</style></head><body><main>
+
+<h1>Claude 修改時選講者</h1>
+<p class="lead">左邊是目前的畫面，右邊是調整後的畫面。右邊的選人按鈕可以直接操作。</p>
+
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen">
+      <div class="docside"><div class="doc"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i><i style="width:80%"></i></div>
+        <div class="busy"><span class="spin"></span>Claude 正在修改⋯</div></div>
+      <div class="rail"><div class="railhead"><span class="tab">待處理</span><span class="tab on">人員</span><span class="tab">紀錄</span></div>
+        <div class="railbody">
+          <div class="phead">這場錄音有 2 位講者</div>
+          <div class="vcard"><div class="vtop"><span class="vtag a">講者 A</span><span class="vmin">16 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
+            <button class="vpick" disabled>Mia<span>▾</span></button></div>
+          <div class="vcard"><div class="vtop"><span class="vtag b">講者 B</span><span class="vmin">16 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
+            <button class="vpick" disabled>選擇是誰<span>▾</span></button></div>
+        </div></div>
+    </div>
+    <p class="cap">Claude 修改會議紀錄時，選人按鈕全部變灰，要等 Claude 改完才能選講者。</p>
+  </div>
+
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen">
+      <div class="docside"><div class="doc"><i style="width:70%"></i><i style="width:90%"></i><i style="width:55%"></i><i style="width:80%"></i></div>
+        <div class="busy" id="busy"><span class="spin"></span>Claude 正在修改⋯</div></div>
+      <div class="rail"><div class="railhead"><span class="tab">待處理</span><span class="tab on">人員</span><span class="tab">紀錄</span></div>
+        <div class="railbody">
+          <div class="phead">這場錄音有 2 位講者</div>
+          <div class="vcard"><div class="vtop"><span class="vtag a">講者 A</span><span class="vmin">16 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
+            <button class="vpick">Mia<span>▾</span></button></div>
+          <div class="vcard"><div class="vtop"><span class="vtag b">講者 B</span><span class="vmin">16 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
+            <button class="vpick">選擇是誰<span>▾</span></button></div>
+        </div></div>
+    </div>
+    <button class="demo" id="finish">看 Claude 改完的樣子</button>
+    <button class="demo" id="reset" hidden>重來一次</button>
+    <p class="cap">Claude 修改會議紀錄時，照樣可以選講者。選好的名字先顯示在按鈕上，等 Claude 改完再自動寫進會議紀錄。</p>
+  </div>
+</div>
+
+<script>
+const names = ['Kai', 'Mia', 'Lily'];
+let aiBusy = true;
+document.querySelectorAll('.tobe .vpick').forEach((b) => b.addEventListener('click', () => {
+  const card = b.closest('.vcard');
+  const open = card.querySelector('.vmenu');
+  document.querySelectorAll('.tobe .vmenu').forEach((m) => m.remove());
+  if (open) return;
+  const menu = document.createElement('div');
+  menu.className = 'vmenu';
+  menu.innerHTML = names.map((n) => `<div>${n}</div>`).join('');
+  menu.querySelectorAll('div').forEach((d) => d.addEventListener('click', () => {
+    b.innerHTML = `${d.textContent}<span>▾</span>`;
+    menu.remove();
+    card.querySelector('.wait')?.remove();
+    if (aiBusy) card.insertAdjacentHTML('beforeend', '<span class="wait">Claude 改完後寫入紀錄</span>');
+  }));
+  card.appendChild(menu);
+}));
+document.getElementById('finish').addEventListener('click', () => {
+  aiBusy = false;
+  document.querySelectorAll('.tobe .wait').forEach((w) => w.remove());
+  const busy = document.getElementById('busy');
+  busy.className = 'busy done';
+  busy.textContent = '✓ Claude 已改完，講者名字已寫入會議紀錄';
+  document.getElementById('finish').hidden = true;
+  document.getElementById('reset').hidden = false;
+});
+document.getElementById('reset').addEventListener('click', () => location.reload());
+</script>
+</main></body></html>

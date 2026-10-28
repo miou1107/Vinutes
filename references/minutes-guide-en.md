@@ -5,7 +5,7 @@ audience: agent
 This guide is for the AI that writes the minutes after a Vinutes recording, when the minutes are in English: the
 meeting was held in English, or in a language other than Chinese and English while the user's Vinutes is set to
 English. It mirrors the Chinese guide (SKILL.md) section by section, so English and Chinese minutes have the same
-eight sections and the app can read both. A filled-in example is `example-minutes-en.md` (fictional).
+seven sections and the app can read both. A filled-in example is `example-minutes-en.md` (fictional).
 
 ## Automatic mode
 
@@ -54,7 +54,7 @@ The prompt gives you the job folder (written `job` below), the recording's start
    the user; when no meeting matched or it lists nobody, only the user. People in the other sections are not
    recipients (the app adds the meeting's people from its own contacts when the user opens the mail). After the
    paragraph with the link, add `Purpose:` with one sentence from section 2 and `Highlights:` with three to five
-   numbered lines (the agreements of section 4, then the action items of section 6 with the owner after each), so
+   numbered lines (the agreements, then the action items, one sentence each, without who is to do it), so
    a reader knows what the meeting was about without opening the Doc; the app fills these two in from the minutes
    when they are missing. Write the text in the tone of a short note to colleagues, with the line
    `The minutes are ready:` and on the next line, alone, `{doc_url}`; the program puts the Doc's address there, and
@@ -135,7 +135,7 @@ Our company is always `our_company` from `使用者設定.json`; if it is missin
   people's names as the transcript writes them, keep amounts in their own currency (e.g. "¥150,000"), and keep a
   short original term in parentheses when the English is a guess.
 
-## Layout: eight sections, the eighth saying "None" when nothing was attached
+## Layout: seven sections, the seventh saying "None" when nothing was attached
 
 Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Markdown, two `#` headings.
 
@@ -152,16 +152,17 @@ Two title lines, centred: the meeting's subject, then "Meeting Minutes". In Mark
    fact or conclusion, saying whose position it is ("Amy Chen explained", "David Lee proposed"; external:
    "<Client> explained", "<Our company> noted", "Initial direction:"). Link pages and posts that are already live.
 4. **## 4. Agreements**: a numbered list of what was agreed, nothing else.
-5. **## 5. Open Questions**: a table `Item | Details | Confirm with`.
-6. **## 6. Action Items**: a table `No. | Action | Owner | Details and next steps`; put dates in the details,
-   `[__]` when none was given.
-7. **## 7. Other Suggestions**: one paragraph: what the next meeting should focus on, what can wait.
-8. **## 8. Attachments** (in every set of minutes; when there is nothing, the section's only line is "None"):
+5. **## 5. Action Items**: a table `No. | Action | Owner | Details and next steps`; put dates in the details,
+   `[__]` when none was given. What is to be confirmed after the meeting is an action item too: the action says
+   what to confirm, the owner is who will ask (`[__]` when nobody was named), the details say whom to ask and what. One line per
+   thing: what someone is already to ask about is not listed again as something to confirm.
+6. **## 6. Other Suggestions**: one paragraph: what the next meeting should focus on, what can wait.
+7. **## 7. Attachments** (in every set of minutes; when there is nothing, the section's only line is "None"):
    material mentioned that belongs nowhere above, e.g. figures a colleague sent after the meeting,
    reference sites, screenshots. One line each: who provided what, then the link; pictures as `![caption](file or address)`.
    The app adds files and links the user attaches later to the end of this section, in place of "None".
 
-Keep these heading texts exactly ("## 1. Meeting Details" … "## 8. Attachments"): the app finds sections
+Keep these heading texts exactly ("## 1. Meeting Details" … "## 7. Attachments"): the app finds sections
 by them.
 
 ## Tone and wording

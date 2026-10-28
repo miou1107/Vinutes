@@ -8,7 +8,7 @@
 | `FILELIST.md` | This list |
 | `VERSION` | The version number; the update button compares it with GitHub |
 | `SKILL.md` | How Chinese minutes are written (Traditional Chinese, Taiwan usage); the AI reads it for every Chinese meeting |
-| `references/minutes-guide-en.md` | How English minutes are written, with the same eight sections; the AI reads it for every English meeting |
+| `references/minutes-guide-en.md` | How English minutes are written, with the same seven sections; the AI reads it for every English meeting |
 | `references/example-minutes-en.md` | A made-up, complete set of English minutes the AI uses as a model |
 | `references/example-minutes.md` | A made-up, complete set of minutes the AI uses as a model |
 | `references/glossary.md` | Common speech-recognition mistakes and their correct spelling |

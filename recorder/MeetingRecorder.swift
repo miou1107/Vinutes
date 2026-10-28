@@ -1909,7 +1909,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             NSWorkspace.shared.open(dir)
             done(true, [:])
         case "link":
-            // the minutes' own Google Doc, or an item of 「八、參考附件」 under 附件 (any web address there)
+            // the minutes' own Google Doc, or an item of 「參考附件」 under 附件 (any web address there)
             if let url = URL(string: args["url"] as? String ?? "") {
                 let web = ["https", "http"].contains(url.scheme ?? "")
                 let doc = url.scheme == "https" && ["docs.google.com", "drive.google.com"].contains(url.host ?? "")

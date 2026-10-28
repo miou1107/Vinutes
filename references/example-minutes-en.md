@@ -1,7 +1,7 @@
 audience: agent
 
 > A fictional example: names, dates and figures are made up, only to show the layout and tone of English minutes.
-> Section 8, Attachments, is in every set of minutes; it says "None" when nothing was attached. Here it has content to show how.
+> Section 7, Attachments, is in every set of minutes; it says "None" when nothing was attached. Here it has content to show how.
 
 # Member Area Redesign, Second Discussion
 
@@ -45,25 +45,20 @@ This meeting followed the first discussion on September 1. It settled which bloc
 2. The design is final by September 15; the planned launch is October 6.
 3. Members are told by email on launch day; texts depend on the open rate.
 
-## 5. Open Questions
-
-| Item | Details | Confirm with |
-| :---- | :---- | :---- |
-| Launch day versus the long weekend | Whether October 6 falls right before the long weekend | [__] |
-| Text message budget | The cost if texts are sent after the email | Marketing |
-
-## 6. Action Items
+## 5. Action Items
 
 | No. | Action | Owner | Details and next steps |
 | :---- | :---- | :---- | :---- |
 | 1 | Final homepage design | Jessie Chen | Final by September 15 |
 | 2 | Points History connection | David Lee | Show the time of the last update; development about 3 weeks |
 | 3 | Launch email and homepage notice | Ming Wang | Draft by [__] |
+| 4 | Confirm the launch day | [__] | Check whether October 6 falls right before the long weekend |
+| 5 | Confirm the text message budget | [__] | Ask Marketing what texts would cost if sent after the email |
 
-## 7. Other Suggestions
+## 6. Other Suggestions
 
 The next meeting could review the final design and confirm the launch day against the long weekend; the text message decision can wait for the email's open rate.
 
-## 8. Attachments
+## 7. Attachments
 
 * Ming Wang provided last quarter's member email open rates: [Open rates Q2](https://example.com/open-rates)

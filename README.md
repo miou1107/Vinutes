@@ -14,7 +14,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 - **Matches the recording to your Google Calendar** to fill in the title, time, place and attendees. A room booking that names its host and department in the event's note counts too, and the department's people, once confirmed under People, come back at its next meeting.
 - **Publishes a Google Doc** and keeps it in sync: your colleagues' edits and comments show up in the app, and when you edit in the app only the paragraphs you changed are updated, so their comments stay where they were.
 - **Learns from your corrections.** A misheard name you fix once goes into the project's brief (or your glossary, for a meeting without a project), and the next meeting gets it right.
-- **Adds attachments to the minutes.** Add attachments, under the meeting's title, takes files, links and pictures, each with a note of its own. They are saved to Google Drive and listed in section 8 of the minutes, Attachments, which every set of minutes has ("None" until something is attached).
+- **Adds attachments to the minutes.** Add attachments, under the meeting's title, takes files, links and pictures, each with a note of its own. They are saved to Google Drive and listed in Attachments, the last section of the minutes, which every set of minutes has ("None" until something is attached).
 - **Hands the AI something to read.** Files, links and pictures added with ＋ and the picture button beside the box under the minutes go to the AI with your sentence and stay out of the minutes: PDF, Word, Excel, PowerPoint and text files, or a web page's link.
 - **Prepares the email** to the attendees: they are the recipients already, with addresses from the calendar invitation and the company directory, and typing a name offers people to add. The email says what the meeting was for and its highlights; once you have edited the minutes, both are written again from your edited minutes when you open the email. Its last line says which Vinutes version sent it. Nothing is sent until you press Send.
 - **Files meetings by project.** Each meeting belongs to a project, whose name shows under the meeting's title in the list, each project on its own colour. The project name above a meeting moves it to another project or a new one.
@@ -82,7 +82,7 @@ Vinutes is also an MCP server. Installing or updating Vinutes connects it to the
 ~/.config/vin-meeting-minutes-zh/venv/bin/python ~/Vinutes/scripts/connect_agents.py
 ```
 
-Then, in any folder, ask Claude Code (or any of them) "what did last week's project meeting decide?" and it searches your minutes and transcripts and answers with the meeting's date and title. When you ask it to, it can also name a speaker, add a paragraph to section 8, change words in the minutes, and set tags or the project; the Google Doc follows, and the meeting's history says Claude Code made the change. Deleting a meeting and sending mail stay in Vinutes.
+Then, in any folder, ask Claude Code (or any of them) "what did last week's project meeting decide?" and it searches your minutes and transcripts and answers with the meeting's date and title. When you ask it to, it can also name a speaker, add a paragraph to Attachments, change words in the minutes, and set tags or the project; the Google Doc follows, and the meeting's history says Claude Code made the change. Deleting a meeting and sending mail stay in Vinutes.
 
 ## Update
 

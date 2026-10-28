@@ -1166,13 +1166,14 @@ def png(path: Path, w: int = 8, h: int = 6) -> Path:
 
 
 class AttachmentsSection(unittest.TestCase):
-    """「八、參考附件」 is in every set of minutes, 無 when nothing was attached (Vin 2026-10-20); the first attachment
-    takes the place of 無, and old minutes that still say 補充資訊 keep working."""
+    """「參考附件」 is in every set of minutes, 無 when nothing was attached (Vin 2026-10-20); the first attachment
+    takes the place of 無, and old minutes that still say 補充資訊 keep working. It is the seventh section since
+    待確認事項 went into 行動方案 (Vin 2026-10-28); minutes written before then keep it as the eighth."""
 
     def test_the_section_is_named_and_the_first_attachment_replaces_none(self):
         import attachments
-        self.assertEqual(attachments.SECTION, '## 八、參考附件')
-        self.assertEqual(attachments.SECTIONS['en'], '## 8. Attachments')
+        self.assertEqual(attachments.SECTION, '## 七、參考附件')
+        self.assertEqual(attachments.SECTIONS['en'], '## 7. Attachments')
         md = MINUTES + '\n## 八、參考附件\n\n無\n'
         out = attachments.add_lines(md, ['- Amy 的報表：[a.xlsx](https://drive.google.com/file/d/1/view)'])
         self.assertTrue(out.endswith('## 八、參考附件\n\n- Amy 的報表：[a.xlsx](https://drive.google.com/file/d/1/view)\n'))
@@ -1191,7 +1192,21 @@ class AttachmentsSection(unittest.TestCase):
     def test_minutes_without_the_section_get_it_and_old_minutes_keep_their_heading(self):
         import attachments
         out = attachments.add_lines(MINUTES, ['- [a.pdf](https://x/a)'])
-        self.assertTrue(out.endswith('## 八、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        self.assertTrue(out.endswith('## 七、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        seven = MINUTES + '\n## 七、參考附件\n\n無\n'                  # the layout since v0.4.24
+        out = attachments.add_lines(seven, ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 七、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        self.assertEqual(attachments.listed(out)[0]['name'], 'a.pdf')
+        eight = MINUTES + '\n## 七、其他建議\n\n建議下週再談。\n'           # written before it, without the section
+        out = attachments.add_lines(eight, ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 七、其他建議\n\n建議下週再談。\n\n## 八、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        self.assertEqual(attachments.listed(eight + '\n## 八、參考附件\n\n- [b.pdf](https://x/b)\n')[0]['name'], 'b.pdf')
+        self.assertEqual(attachments.listed(eight + '- [c.pdf](https://x/c)\n'), [])   # 其他建議 is not the attachments
+        lower = attachments.add_lines('## 1. Meeting Details\n\n## 7. other suggestions\n\nLater.\n', ['- [a.pdf](https://x/a)'])
+        self.assertTrue(lower.endswith('## 8. Attachments\n\n- [a.pdf](https://x/a)\n'))
+        out = attachments.add_lines('## 1. Meeting Details\n\n- Date: Oct 14\n\n## 7. Other Suggestions\n\nLater.\n',
+                                    ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 8. Attachments\n\n- [a.pdf](https://x/a)\n'))
         old = MINUTES + '\n## 八、補充資訊\n\n- [b.pdf](https://x/b)\n'
         out = attachments.add_lines(old, ['- [a.pdf](https://x/a)'])
         self.assertTrue(out.endswith('## 八、補充資訊\n\n- [b.pdf](https://x/b)\n- [a.pdf](https://x/a)\n'))
@@ -1234,14 +1249,14 @@ class Attach(Flows):
     def state(self) -> dict:
         return json.loads((self.job_dir / '同步.json').read_text(encoding='utf-8'))
 
-    def test_a_file_a_picture_and_a_link_become_lines_of_section_eight(self):
+    def test_a_file_a_picture_and_a_link_become_lines_of_the_attachments(self):
         sidecar = self.root / 'minutes.md.gdoc.json'
         sidecar.write_text(json.dumps({'id': 'D' * 30, 'mails': []}), encoding='utf-8')
         r = self.attach('Amy 提供的資料', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx')},
                         {'kind': 'image', 'path': str(self.files / '主視覺.png')},
                         {'kind': 'link', 'url': 'https://example.com/post'})
         md = self.md_path.read_text(encoding='utf-8')
-        self.assertIn('## 八、參考附件', md)
+        self.assertIn('## 七、參考附件', md)
         self.assertIn('- Amy 提供的資料：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)', md)
         self.assertIn('- Amy 提供的資料：[https://example.com/post](https://example.com/post)', md)
         self.assertIn('![主視覺.png](minutes_附件/主視覺.png)', md)            # the Word file has the picture too
@@ -1263,15 +1278,15 @@ class Attach(Flows):
         self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx')})
         self.attach('# Kai 會後補充', {'kind': 'link', 'url': 'https://example.com/a'})
         md = self.md_path.read_text(encoding='utf-8')
-        tail = md.split('## 八、參考附件', 1)[1].strip().splitlines()
+        tail = md.split('## 七、參考附件', 1)[1].strip().splitlines()
         self.assertEqual(tail, ['- [9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- \\# Kai 會後補充：[https://example.com/a](https://example.com/a)'])
-        self.assertEqual(md.count('## 八、參考附件'), 1)
+        self.assertEqual(md.count('## 七、參考附件'), 1)
 
     def test_each_item_is_led_by_its_own_note_and_the_row_above_the_minutes_lists_them(self):
         r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Pitt 要的\n各通路業績 '},
                         {'kind': 'link', 'url': 'https://example.com/post', 'note': ''})
-        tail = self.md_path.read_text(encoding='utf-8').split('## 八、參考附件', 1)[1].strip().splitlines()
+        tail = self.md_path.read_text(encoding='utf-8').split('## 七、參考附件', 1)[1].strip().splitlines()
         self.assertEqual(tail, ['- Pitt 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- [https://example.com/post](https://example.com/post)'])
         self.assertEqual(r['attachments'], [
@@ -2263,14 +2278,14 @@ class Languages(unittest.TestCase):
         self.assertEqual(i18n.minutes_lang('ja'), 'zh-TW')
         self.assertEqual(i18n.minutes_lang('en'), 'en')
 
-    def test_english_minutes_get_section_8_supporting_materials(self):
+    def test_english_minutes_get_the_attachments_section(self):
         import attachments as at
         md = '# Weekly\n\n## 1. Basic Information\n\n- Date: Oct 14\n\n## 2. Discussion Summary\n\nBudget set.\n'
         lines = at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://example.com/slides'}],
                              'Deck from Amy', 'en')
         self.assertEqual(lines, ['- Deck from Amy: [Slides](https://example.com/slides)'])
         out = at.add_lines(md, lines)
-        self.assertIn('## 8. Attachments\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
+        self.assertIn('## 7. Attachments\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
         self.assertNotIn('參考附件', out)
         self.assertIn('：[Slides]', at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://e.com'}],
                                                 'Amy 的簡報', 'zh-TW')[0])
@@ -3453,11 +3468,11 @@ class McpServer(unittest.TestCase):
         self.assertTrue(err)
         self.assertIn('出現 2 次', many)
 
-    def test_a_note_goes_into_section_eight(self):
+    def test_a_note_goes_into_the_attachments(self):
         done, err = self.ask('add_note', meeting='20261014-103000', text='報價確定為每人 1,200 元。')
         self.assertFalse(err, done)
         md = self.md_path.read_text(encoding='utf-8')
-        self.assertRegex(md, r'## 八、參考附件\n\n- 報價確定為每人 1,200 元。\n$')
+        self.assertRegex(md, r'## 七、參考附件\n\n- 報價確定為每人 1,200 元。\n$')
 
     def test_minutes_already_mailed_say_so(self):
         r = json.loads((self.job_dir / 'result.json').read_text())

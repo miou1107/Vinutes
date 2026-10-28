@@ -320,7 +320,7 @@ TOOLS = [
      {'meeting': MEETING, 'speaker': text('The voice letter, e.g. B.'), 'name': text("The person's name.")},
      ['meeting', 'speaker', 'name']),
     ('add_note', add_note, True,
-     'Add a paragraph at the end of section 八、參考附件 (8. Attachments) of a meeting\'s minutes, and to its '
+     'Add a paragraph at the end of 參考附件 (Attachments), the last section of a meeting\'s minutes, and to its '
      'Google Doc. Only when the user asked; write it in the minutes\' language.',
      {'meeting': MEETING, 'text': text('The paragraph to add.')}, ['meeting', 'text']),
     ('replace_text', replace_text, True,

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.25 (2026-10-28)
+
+- In the list, each meeting's project is a small folder on the project's colour and the project's name in grey, then · 已寄出 2 人 (Sent to 2). In v0.4.24 the name sat on a coloured tag, and a list of many projects read as patches of colour; now only the folder keeps the colour. The meeting titles in the list are a size larger.
+
 ## v0.4.24 (2026-10-28)
 
 - A voice can be named under People while the AI rewrites the minutes. Until now every menu there stayed grey until the rewrite was done, a minute or more. The name picked shows at once, with 「Claude 改完後寫入紀錄」 (Goes into the minutes once Claude is done) under it, and goes into the minutes and the Doc right after the rewrite; names picked meanwhile go in one after another, in the order picked, and a voice named twice before its name went in gets only the last name. Closing the window first still puts them in after the rewrite. Removing a voice, putting one back and taking a name off the list still wait for the rewrite.

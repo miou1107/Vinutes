@@ -277,8 +277,10 @@ function projectMark(name, big = false) {
   const first = name ? [...name][0].toUpperCase() : '';
   return `<span class="pav ${name ? 'p' + projectColour(name) : 'none'}${big ? ' big' : ''}" aria-hidden="true">${esc(first)}</span>`;
 }
-// in the list: the project's name on its colour, before whether the minutes went out (Vin 2026-10-28)
-const projectTag = (name) => `<span class="ptag p${projectColour(name)}">${esc(name)}</span>`;
+// in the list: a folder on the project's colour and its name in grey, then whether the minutes went out
+// (Vin 2026-10-28, prototypes/project-folder-list.html: the names on their colours read as a mess)
+const FOLDER = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h3.6a2 2 0 0 1 1.4.6L12 6h6.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>';
+const projectTag = (name) => `<span class="ptag p${projectColour(name)}">${FOLDER}<span>${esc(name)}</span></span><span class="pdot">·</span>`;
 
 // under a meeting's title in the list: 已寄出 3 人 once mailed, else what it is at
 const listStatus = (j) => (j.status === 'sent' && j.sent_count ? t('sent_short', j.sent_count) : statusText(j.status));

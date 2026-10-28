@@ -1,0 +1,79 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>列表專案改資料夾原型</title><style>
+/* Prototype: the project in the meeting list as a folder mark and grey name instead of a coloured tag (2026-10-28). Colours from hide-tags.html. */
+:root {
+  color-scheme: dark;
+  --bg: #1e1e20; --side: #252528; --line2: #3a3a40;
+  --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --on: #2f3d55;
+  --red-bg: #4a2020; --blue-bg: #24304a; --blue-line: #36507a;
+  --asis-bg: #2e2020; --asis-line: #7a3a36; --asis-ink: #ffb4ad;
+  --tobe-bg: #1c2638; --tobe-line: #3f5f94; --tobe-ink: #a9c6ff;
+  --p0: #085041; --p0-ink: #9fe1cb; --p1: #3c3489; --p1-ink: #cecbf6; --p2: #712b13; --p2-ink: #f5c4b3;
+  --p5: #27500a; --p5-ink: #c0dd97; --p6: #633806; --p6-ink: #fac775;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
+main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+.lead { margin: 0 0 20px; color: var(--muted); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; align-items: start; }
+.frame { border-radius: 12px; padding: 12px; min-width: 0; }
+.frame.asis { background: var(--asis-bg); border: 2px dashed var(--asis-line); }
+.frame.tobe { background: var(--tobe-bg); border: 2px solid var(--tobe-line); }
+.flag { display: inline-block; margin-bottom: 10px; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.asis .flag { color: var(--asis-ink); background: var(--red-bg); }
+.tobe .flag { color: var(--tobe-ink); background: var(--blue-bg); border: 1px solid var(--blue-line); }
+.cap { margin: 10px 2px 0; color: var(--text2); }
+.screen { background: var(--side); border: 1px solid var(--line2); border-radius: 8px; padding: 6px 10px 10px; }
+
+.day { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.day::after { content: ""; flex: 1; height: 1px; background: var(--line2); }
+.item { padding: 7px 8px; border-radius: 8px; }
+.item.on { background: var(--on); }
+.t { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--muted); font-size: 12px; }
+
+/* AS-IS: the name on its colour */
+.ptag { font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 8px; border-radius: 9px; }
+.ptag.p0 { background: var(--p0); color: var(--p0-ink); } .ptag.p1 { background: var(--p1); color: var(--p1-ink); }
+.ptag.p2 { background: var(--p2); color: var(--p2-ink); } .ptag.p5 { background: var(--p5); color: var(--p5-ink); }
+.ptag.p6 { background: var(--p6); color: var(--p6-ink); }
+
+/* TO-BE: a folder in the project's colour, the name grey like the rest of the line */
+.pf { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.pf svg { width: 13px; height: 13px; flex: none; }
+.pf.p0 svg { color: var(--p0-ink); } .pf.p1 svg { color: var(--p1-ink); } .pf.p2 svg { color: var(--p2-ink); }
+.pf.p5 svg { color: var(--p5-ink); } .pf.p6 svg { color: var(--p6-ink); }
+.dot { color: var(--faint); }
+</style></head><body><main>
+
+<h1>會議列表上的專案名稱</h1>
+<p class="lead">左邊是目前的畫面，右邊是調整後的畫面。</p>
+
+<template id="folder"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h3.6a2 2 0 0 1 1.4.6L12 6h6.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg></template>
+
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen" id="asis"></div>
+    <p class="cap">每一場會議底下都有一個彩色的專案標籤，整份列表顏色很多。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen" id="tobe"></div>
+    <p class="cap">專案名稱前面改放一個資料夾圖示，圖示沿用專案原本的顏色，一眼還分得出是哪個專案。專案名稱改成灰字，和「已寄出 2 人」排在同一行。</p>
+  </div>
+</div>
+
+<script>
+const days = [
+  ['10/28（三）', [['官網流量檢討', '官網改版', 1, '已寄出 2 人']]],
+  ['10/27（二）', [['春季活動進度報告', '春季活動', 0, '已寄出 5 人'], ['社群週會', '社群行銷', 6, '已寄出 3 人']]],
+  ['10/21（三）', [['官網 10 月改版報告', '官網改版', 1, '已寄出 3 人'], ['供應商包材報價討論（第二輪）', '包材採購', 2, '已寄出 2 人']]],
+  ['10/20（二）', [['社群週會', '社群行銷', 6, '已寄出 3 人', true], ['包材採購報告預演', '包材採購', 2, '待寄出']]],
+  ['10/19（一）', [['9–10 月工作重點報告', '主管會議', 5, '已寄出 2 人'], ['新人招募面談安排', '新人招募', 6, '已寄出 3 人']]],
+];
+const folder = document.getElementById('folder').innerHTML;
+const draw = (proj) => days.map(([d, rows]) => `<div class="day">${d}</div>` + rows.map(([t, p, c, s, on]) =>
+  `<div class="item${on ? ' on' : ''}"><div class="t">${t}</div><div class="s">${proj(p, c)}<span>${s}</span></div></div>`).join('')).join('');
+document.getElementById('asis').innerHTML = draw((p, c) => `<span class="ptag p${c}">${p}</span>`);
+document.getElementById('tobe').innerHTML = draw((p, c) => `<span class="pf p${c}">${folder}<span>${p}</span></span><span class="dot">·</span>`);
+</script>
+</main></body></html>

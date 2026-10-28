@@ -54,22 +54,15 @@ first drafts can be reviewed at the next meeting.
 2. Short videos get 60% of the budget; 10% of it waits for the first results.
 3. The partner stores are the ten largest only.
 
-## 5. Open Questions
-
-| Item | Details | Confirm with |
-|---|---|---|
-| Store displays | Whether the printer can deliver by February 20 | Priya Patel |
-| Video length | 15 or 30 seconds for the first two | David Lee |
-
-## 6. Action Items
+## 5. Action Items
 
 | No. | Action | Owner | Details and next steps |
 |---|---|---|---|
 | 1 | Draft the newsletter | Amy Chen | First draft by October 23 |
-| 2 | Script the first two videos | David Lee | Scripts by October 27 |
-| 3 | Ask the printer for a delivery date | Priya Patel | Answer by [__] |
+| 2 | Script the first two videos | David Lee | Scripts by October 27; settle 15 or 30 seconds first |
+| 3 | Ask the printer for a delivery date | Priya Patel | Whether the store displays can arrive by February 20 |
 
-## 7. Other Suggestions
+## 6. Other Suggestions
 
 The next meeting should review the newsletter draft and the video scripts; the store displays can wait until the
 printer answers.
@@ -101,7 +94,7 @@ The weekly check on the new website: what changed since last week and what is ne
 
 1. The test launch stays on November 2.
 
-## 6. Action Items
+## 5. Action Items
 
 | No. | Action | Owner | Details and next steps |
 |---|---|---|---|

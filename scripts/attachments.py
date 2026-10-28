@@ -1,4 +1,5 @@
-"""Files, links and pictures added from the box under the Doc go into the minutes' last section, 「八、參考附件」,
+"""Files, links and pictures added from the box under the Doc go into the minutes' last section, 「參考附件」
+(七、參考附件 since v0.4.24, 八、 before it),
 one line each, as SKILL.md §3 writes it: who gave it and what it is, then the link.
 
 Files and pictures are uploaded to the user's Google Drive, into a folder of this meeting's own beside its Doc
@@ -25,9 +26,12 @@ import doc_sync
 import usage
 from i18n import t
 
-SECTION = '## 八、參考附件'
-SECTIONS = {'zh-TW': SECTION, 'en': '## 8. Attachments'}    # the last section, by the minutes' language
-LAST = re.compile(r'##\s*(?:八、|8\.\s)')                      # also 八、補充資訊, the name before v0.4.13
+SECTION = '## 七、參考附件'
+SECTIONS = {'zh-TW': SECTION, 'en': '## 7. Attachments'}    # the last section, by the minutes' language
+# 七、 since v0.4.24, when 待確認事項 went into 行動方案 (Vin 2026-10-28); minutes written before it end with
+# 八、參考附件 (or 八、補充資訊, the name before v0.4.13), after their own 七、其他建議
+LAST = re.compile(r'##\s*(?:八、|8\.\s|七、\s*(?:參考附件|補充資訊)|7\.\s*Attachments)', re.I)
+OLD_LAYOUT = re.compile(r'(?mi)^##\s*(?:七、\s*其他建議|7\.\s*Other Suggestions)')
 NONE_YET = re.compile(r'^\s*(?:無|None|N/A|沒有|—|-)\s*[。.]?\s*$', re.I)   # the section's only line until the first attachment
 UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
 FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -290,7 +294,7 @@ ITEM = re.compile(r'^[-*]\s+(?:(?P<note>.*?)(?:：|:\s*))?\[(?P<name>(?:\\.|[^\\
 
 
 def listed(md: str) -> list[dict]:
-    """What 「八、參考附件」 holds now, for the 附件 row above the minutes: {name, link, note, kind} for each line
+    """What 「參考附件」 holds now, for the 附件 row above the minutes: {name, link, note, kind} for each line
     that is a link, written by 加入會議附件 or typed in the Doc."""
     rows = md.split('\n')
     head = next((i for i, r in enumerate(rows) if LAST.match(r)), None)
@@ -311,7 +315,7 @@ def listed(md: str) -> list[dict]:
 
 
 def add_lines(md: str, lines: list[str], lang: str = '') -> str:
-    """The lines at the end of 「八、參考附件」 (8. Attachments in English minutes), the section made at the
+    """The lines at the end of 「參考附件」 (Attachments in English minutes), the section made at the
     end of the minutes when it is missing. Without `lang` the minutes' own headings tell which language they are."""
     rows = md.rstrip('\n').split('\n')
     head = next((i for i, r in enumerate(rows) if LAST.match(r)), None)
@@ -323,8 +327,10 @@ def add_lines(md: str, lines: list[str], lang: str = '') -> str:
             block += ['', line, '']
         else:
             block.append(line)
-    if head is None:
-        return '\n'.join(rows + ['', SECTIONS[lang], ''] + block).rstrip('\n') + '\n'
+    if head is None:                                 # minutes in the eight sections before v0.4.24: it is the eighth
+        heading = (SECTIONS[lang] if not OLD_LAYOUT.search(md)
+                   else '## 八、參考附件' if lang == 'zh-TW' else '## 8. Attachments')
+        return '\n'.join(rows + ['', heading, ''] + block).rstrip('\n') + '\n'
     end = next((i for i in range(head + 1, len(rows)) if re.match(r'#{1,2}\s', rows[i])), len(rows))
     while end > head + 1 and not rows[end - 1].strip():
         end -= 1

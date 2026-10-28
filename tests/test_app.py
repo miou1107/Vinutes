@@ -4455,6 +4455,16 @@ class QuietList(unittest.TestCase):
         self.assertLess(side.index('projectTag(j.project)'), side.index('listStatus(j)'))
         self.assertEqual(self.strings.count('sent_short:'), 2)          # 已寄出 2 人 in both languages
 
+    def test_the_project_is_a_folder_on_its_colour_and_its_name_in_grey(self):
+        # prototypes/project-folder-list.html (Vin 2026-10-28): only the folder keeps the colour
+        tag = self.src[self.src.index('const projectTag'):]
+        tag = tag[:tag.index('\n')]
+        self.assertLess(tag.index('${FOLDER}'), tag.index('esc(name)'))
+        self.assertIn('·', tag)
+        css = (WINDOW / 'app.css').read_text(encoding='utf-8')
+        self.assertIn('.ptag.p0 svg { color: var(--p0-ink); }', css)
+        self.assertNotIn('.ptag.p0 { background', css)
+
 
 class NameWhileTheAiWrites(unittest.TestCase):
     """人員: a voice can be named while the AI rewrites the minutes (Vin 2026-10-28: 選人那邊卡卡的). The name shows at

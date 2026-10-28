@@ -101,16 +101,19 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .upd.off { opacity: 0.5; cursor: default; filter: none; }
 .item .ico { flex: none; padding-top: 2px; }
 .item .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.item .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .t { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .s { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .s.bad { color: var(--red); }
 .item .s:has(.ptag) { display: flex; align-items: center; gap: 6px; }
 .item .s:has(.ptag) > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ptag { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; font-weight: 600; line-height: 16px; padding: 0 7px; border-radius: 8px; }
-.ptag.p0 { background: var(--p0); color: var(--p0-ink); } .ptag.p1 { background: var(--p1); color: var(--p1-ink); }
-.ptag.p2 { background: var(--p2); color: var(--p2-ink); } .ptag.p3 { background: var(--p3); color: var(--p3-ink); }
-.ptag.p4 { background: var(--p4); color: var(--p4-ink); } .ptag.p5 { background: var(--p5); color: var(--p5-ink); }
-.ptag.p6 { background: var(--p6); color: var(--p6-ink); }
+.ptag { flex: none; max-width: 60%; display: inline-flex; align-items: center; gap: 4px; }
+.ptag svg { flex: none; }
+.ptag > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ptag.p0 svg { color: var(--p0-ink); } .ptag.p1 svg { color: var(--p1-ink); } .ptag.p2 svg { color: var(--p2-ink); }
+.ptag.p3 svg { color: var(--p3-ink); } .ptag.p4 svg { color: var(--p4-ink); } .ptag.p5 svg { color: var(--p5-ink); }
+.ptag.p6 svg { color: var(--p6-ink); }
+.pdot { flex: none; color: var(--faint); }
+.item .s.bad .ptag { color: var(--muted); }
 .item .tgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .item .tg { cursor: pointer; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: var(--field); border: 1px solid var(--line2); color: var(--muted); }
 .item .tg:hover { border-color: var(--blue); color: var(--link); }

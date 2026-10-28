@@ -125,6 +125,8 @@ const S = {
   busyText: '',              // the key of what the line above the box says while busy ('' = Claude is rewriting)
   sending: false,            // a sentence is on its way while the user's own edits are saved: a second Enter waits
   work: {},                  // meeting id → { now, waits }: the request the AI is on and the ones sent after it
+  peopleLater: {},           // meeting id → { voice: name } picked under 人員 while the AI rewrote it, on its way in
+  peopleSending: {},         // meeting id → { group, name } of the one on its way now
   pics: [],                  // pictures pasted or picked beside the box, for the AI to look at with the next sentence
   refs: [],                  // files and links picked with ＋ beside the box, for the AI to read with the next sentence
   askedPic: '',              // the picture that went with the last answered sentence, shown small beside it
@@ -255,7 +257,12 @@ function projects() {
 // the meetings the list can show in the place picked: archived ones only under 已封存
 const inScope = (j) => (S.proj === ARCHIVED) === !!j.archived;
 
+// tags are kept, set by the AI tools and found by the search, but not shown: no 標籤 row above the minutes, no 標籤
+// filter and no tags under each meeting in the list (Vin 2026-10-28: the screen simpler; prototypes/hide-tags.html)
+const SHOW_TAGS = false;
+
 function allTags() {
+  if (!SHOW_TAGS) return [];
   return [...new Set(S.jobs.filter(inScope).flatMap((j) => j.tags || []))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 }
 
@@ -270,6 +277,11 @@ function projectMark(name, big = false) {
   const first = name ? [...name][0].toUpperCase() : '';
   return `<span class="pav ${name ? 'p' + projectColour(name) : 'none'}${big ? ' big' : ''}" aria-hidden="true">${esc(first)}</span>`;
 }
+// in the list: the project's name on its colour, before whether the minutes went out (Vin 2026-10-28)
+const projectTag = (name) => `<span class="ptag p${projectColour(name)}">${esc(name)}</span>`;
+
+// under a meeting's title in the list: 已寄出 3 人 once mailed, else what it is at
+const listStatus = (j) => (j.status === 'sent' && j.sent_count ? t('sent_short', j.sent_count) : statusText(j.status));
 
 function shownJobs() {
   const q = S.q.trim();
@@ -324,11 +336,11 @@ function renderSide() {
       <div class="day"><span>${esc(g.day)}</span><i></i></div>
       ${g.items.map((j) => `
         <div class="item${S.picking ? ' picking' : j.id === S.sel ? ' on' : ''}${S.picked.has(j.id) ? ' picked' : ''}${playingRow(j.id) ? ' playing' : ''}" role="button" tabindex="0" data-id="${esc(j.id)}"${S.picking && pickable(j) ? ` aria-pressed="${S.picked.has(j.id)}"` : ''}>
-          <span class="ico">${S.picking && pickable(j) ? `<span class="cbox${S.picked.has(j.id) ? ' on' : ''}">${ICON.tick}</span>`
-            : j.status === 'working' || j.status === 'failed' ? ICON[j.status] : projectMark(j.project)}</span>
+          ${S.picking && pickable(j) ? `<span class="ico"><span class="cbox${S.picked.has(j.id) ? ' on' : ''}">${ICON.tick}</span></span>`
+            : j.status === 'working' || j.status === 'failed' ? `<span class="ico">${ICON[j.status]}</span>` : ''}
           <span class="txt"><span class="t">${esc(titleOf(j))}</span>
-            <span class="s${j.status === 'failed' ? ' bad' : ''}">${esc(j.time)}　${esc(statusText(j.status))}${S.proj === ALL && j.project ? '　·　' + esc(j.project) : ''}</span>
-            ${(j.tags || []).length ? `<span class="tgs">${j.tags.map((g) => `<span class="tg" data-tag="${esc(g)}">${esc(g)}</span>`).join('')}</span>` : ''}</span>
+            <span class="s${j.status === 'failed' ? ' bad' : ''}">${(S.proj === ALL || S.proj === ARCHIVED) && j.project ? projectTag(j.project) : ''}<span>${esc(listStatus(j))}</span></span>
+            ${SHOW_TAGS && (j.tags || []).length ? `<span class="tgs">${j.tags.map((g) => `<span class="tg" data-tag="${esc(g)}">${esc(g)}</span>`).join('')}</span>` : ''}</span>
           <span class="tools">${j.has_transcript ? `<button class="tb" data-act="read" title="${esc(t('read_transcript'))}" aria-label="${esc(t('read_transcript'))}">${ICON.lines}</button>` : ''}${j.has_audio ? playButton(playingRow(j.id)) : ''}</span>
         </div>`).join('')}`).join('')}
     ${list.length ? '' : `<div class="empty">${esc(t(S.jobs.length ? 'no_match' : 'no_meetings'))}</div>`}</div>
@@ -644,12 +656,15 @@ async function leave() {
 function learnLater(id) { call('learn', { id }).catch(() => {}); }
 window.beforeClose = async () => {
   await flush();
-  // what still waits under 待修改 is done without the window, in order, after what the AI is on now
-  for (const [id, w] of Object.entries(S.work)) {
-    const items = w.waits.map((q) => (q.correct ? { kind: 'correct', item: q.correct.label, text: q.correct.value }
+  // what still waits under 待修改, and the voices named meanwhile, is done without the window, in order, after what
+  // the AI is on now
+  for (const id of new Set([...Object.keys(S.work), ...Object.keys(S.peopleLater)])) {
+    const w = S.work[id] || { waits: [] };
+    const items = namesLeft(id).concat(w.waits.map((q) => (q.correct ? { kind: 'correct', item: q.correct.label, text: q.correct.value }
       : q.quick ? { kind: 'quick', text: q.quick } : { kind: 'ask', text: q.text, pictures: q.pics.map((x) => x.path),
-        refs: refsOut(q.refs) }));
+        refs: refsOut(q.refs) })));
     w.waits = [];
+    delete S.peopleLater[id];
     if (items.length) call('askMany', { id, items }).catch(() => {});
   }
   if (docsMode()) {
@@ -812,6 +827,13 @@ const MAX_TAGS = 8;                                 // minutes_app.py keeps the 
 function renderTags() {
   const el = $('#tagbar');
   if (!el || !S.d) return;
+  if (!SHOW_TAGS) {                                 // only 附件 and the score
+    el.innerHTML = `${attachmentsHTML(false)}${scoreButtonHTML()}`;
+    el.hidden = !el.innerHTML.trim();
+    bindAttachments(el);
+    if ($('#scoreBtn')) $('#scoreBtn').addEventListener('click', toggleScore);
+    return;
+  }
   const tags = S.d.tags || [], offered = S.d.suggested || [];
   el.innerHTML = `<span class="tl">${esc(t('tag'))}</span>
     ${tags.map((g) => `<span class="tchip">${esc(g)}<button data-rm="${esc(g)}" title="${esc(t('remove_tag', g))}" aria-label="${esc(t('remove_tag', g))}">${ICON.xs}</button></span>`).join('')}
@@ -1386,7 +1408,8 @@ function renderDocsRail(el) {
   const check = all.filter((c) => !voiced(c));
   const waiting = todo.length + check.length;
   const shown = d.speakers || {};
-  const unnamed = (d.voices || []).filter((v) => !(v.name || shown[v.group])).length;   // voices nobody is picked for
+  const later = S.peopleLater[S.sel] || {};
+  const unnamed = (d.voices || []).filter((v) => !(later[v.group] || v.name || shown[v.group])).length;   // voices nobody is picked for
   const tabs = ['todo', 'people', 'log', ...(d.score ? ['score'] : [])];
   const tab = tabs.includes(S.tab) ? S.tab : (waiting ? 'todo' : unnamed ? 'people' : 'log');
   const pick = (t) => () => { S.railOpen = true; S.tab = t; renderRail(); };
@@ -1454,13 +1477,16 @@ function peopleHTML(people) {
   const d = S.d;
   const voices = d.voices || [];
   const shown = d.speakers || {};
-  const busy = S.peopleBusy || S.busy || aiBusy();
+  const later = S.peopleLater[S.sel] || {};        // picked while the AI rewrites: goes in after it
+  const busy = S.peopleBusy || S.busy || aiBusy() || peopleQueued();
+  const pickBusy = S.peopleBusy || S.busy;
   if (!voices.length) {
     const names = d.people || [];
     return `${calendarHTML()}<div class="empty">${esc(t('people_no_voices'))}</div>${names.length ? `<div class="pmin silent">${esc(t('people_attending', names.join(t('list_sep'))))}</div>` : ''}${learnedHTML()}${offHTML()}`;
   }
   const cards = voices.map((v) => {
-    const name = v.name || shown[v.group] || '';
+    const waits = v.group in later;
+    const name = later[v.group] || v.name || shown[v.group] || '';
     const playing = S.player.playing && S.peoplePlay === v.group;
     const open = S.pickOpen === v.group;
     const guess = (people.find((c) => c.speaker === v.group) || {}).who || '';
@@ -1469,13 +1495,14 @@ function peopleHTML(people) {
       ? `<div class="addrow"><input id="pIn" class="pin" maxlength="30" autocomplete="off" placeholder="${esc(t('people_add_ph'))}" aria-label="${esc(t('people_add_ph'))}" value="${esc(S.peopleTyped || '')}"><div class="ac" id="pAc" hidden></div></div>`
       : `<div class="menu" role="listbox">${choices.map((n) => `<div class="mi${n === name ? ' on' : ''}" role="option" data-n="${esc(n)}">${esc(n)}${n === guess ? `<span class="gs">${esc(t('people_guess_tag'))}</span>` : ''}</div>`).join('')}
           <div class="mi other" data-other="1">${esc(t('people_other'))}</div>
-          <div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div></div>`;   // also a voice named by mistake (Vin 2026-10-20)
+          ${busy ? '' : `<div class="mi drop" data-drop="1">${esc(t('people_drop', t('people_voice', v.group)))}</div>`}</div>`;   // also a voice named by mistake (Vin 2026-10-20)
     return `<div class="card person${name ? '' : ' guess'}"><div class="prow">
         <span class="pchip" style="${voiceStyle(v.group, !!name)}">${esc(t('people_voice', v.group))}</span>
         <span class="pmin">${esc(t('minutes', v.minutes))}</span><span style="flex:1"></span>
         <button class="plink phear" data-g="${esc(v.group)}">${esc(t(playing ? 'stop_play' : 'hear'))}</button></div>
-      <div class="pickwrap"><button class="pick${name ? ' done' : ''}" data-g="${esc(v.group)}" aria-haspopup="listbox" aria-expanded="${open}"${busy ? ' disabled' : ''}>
-        ${name ? `<b>${esc(name)}</b>` : `<span class="ph">${esc(t('people_pick'))}</span>`}<span class="caret">▾</span></button>${menu}</div></div>`;
+      <div class="pickwrap"><button class="pick${name ? ' done' : ''}" data-g="${esc(v.group)}" aria-haspopup="listbox" aria-expanded="${open}"${pickBusy ? ' disabled' : ''}>
+        ${name ? `<b>${esc(name)}</b>` : `<span class="ph">${esc(t('people_pick'))}</span>`}<span class="caret">▾</span></button>${menu}</div>
+      ${waits ? `<span class="pwait">${esc(t('people_after_ai', aiName()))}</span>` : ''}</div>`;
   });
   const silent = d.silent || [];                   // the server tells names apart (陳怡君（Jessie） is Jessie)
   return `${calendarHTML()}<div class="phead">${esc(t('people_voices_n', voices.length))}</div>${cards.join('')}
@@ -1510,7 +1537,7 @@ function learnedHTML() {
 
 // voices taken off (移除講者 X), each with 復原 (Vin 2026-10-19)
 function offHTML() {
-  const busy = S.peopleBusy || S.busy || aiBusy();
+  const busy = S.peopleBusy || S.busy || aiBusy() || peopleQueued();
   return (S.d.voices_off || []).map((v) => `<div class="pgone"><span>${esc(t('people_off', t('people_voice', v.group)))}</span>
     <button class="plink pback" data-g="${esc(v.group)}"${busy ? ' disabled' : ''}>${esc(t('undo'))}</button></div>`).join('');
 }
@@ -1524,7 +1551,7 @@ function peopleDone(r) {
 
 // true when the change went in
 async function peopleCall(cmd, args) {
-  if (S.peopleBusy || S.busy || aiBusy()) return false;
+  if (S.peopleBusy || S.busy || aiBusy() || peopleQueued()) return false;
   const id = S.sel;
   S.peopleBusy = true; S.editSeq++;                 // a refresh meanwhile does not draw the old names again
   renderRail();
@@ -1534,6 +1561,47 @@ async function peopleCall(cmd, args) {
     peopleDone(r);
     return true;
   } catch (e) { showAlert(e.message); return false; } finally { S.peopleBusy = false; if (S.sel === id) renderRail(); }
+}
+
+const peopleQueued = (id = S.sel) => Object.keys(S.peopleLater[id] || {}).length > 0 || !!S.peopleSending[id];
+
+// A voice named while the AI rewrites the minutes (Vin 2026-10-28: he could only wait): the name shows at once and
+// goes in after the AI, since the app does one change to a meeting at a time. One name goes at a time; a voice named
+// again before its name went sends only the last one.
+function nameLater(group, name) {
+  const id = S.sel;
+  (S.peopleLater[id] || (S.peopleLater[id] = {}))[group] = name;
+  S.editSeq++;                                      // a refresh meanwhile does not draw the old name again
+  renderRail();
+  if (!S.peopleSending[id]) sendLater(id);
+}
+
+async function sendLater(id) {
+  const went = {};                                  // voice → the name this run put in
+  for (;;) {
+    const later = S.peopleLater[id] || {};
+    const group = Object.keys(later).find((g) => went[g] !== later[g]);
+    if (!group) break;
+    const name = later[group];
+    S.peopleSending[id] = { group, name };
+    try {
+      const r = await call('speaker', { id, group, name });
+      if (S.sel === id) peopleDone(r);
+    } catch (e) { showAlert(e.message); }           // also from another meeting: the name did not go in
+    went[group] = name;
+    if (later[group] === name) delete later[group];
+  }
+  delete S.peopleSending[id];
+  if (!Object.keys(S.peopleLater[id] || {}).length) delete S.peopleLater[id];
+  if (S.sel === id) renderRail();
+}
+
+// the names not sent yet when the window closes go with what still waits under 待修改, ahead of it
+function namesLeft(id) {
+  const now = S.peopleSending[id];
+  return Object.entries(S.peopleLater[id] || {})
+    .filter(([g, n]) => !(now && now.group === g && now.name === n))
+    .map(([group, name]) => ({ kind: 'speaker', group, name }));
 }
 
 function closePick() { S.pickOpen = null; S.pickTyping = null; S.peopleTyped = ''; }
@@ -1566,8 +1634,9 @@ function wirePeople(el) {
   const choose = (g, name) => {
     closePick();
     name = (name || '').trim();
-    if (name) peopleCall('speaker', { group: g, name });   // into the minutes, and the voice is remembered
-    else renderRail();
+    if (!name) renderRail();
+    else if (aiBusy() || peopleQueued()) nameLater(g, name);
+    else peopleCall('speaker', { group: g, name });   // into the minutes, and the voice is remembered
   };
   el.querySelectorAll('.menu .mi').forEach((m) => m.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1839,7 +1908,7 @@ async function switchAi(key) {
   }
 }
 
-// --- 附件: files, links and pictures for 「八、參考附件」 ------------------------------------------
+// --- 附件: files, links and pictures for 「參考附件」 ------------------------------------------
 
 function renderAttachMenu() {
   const menu = $('#attachMenu');
@@ -1913,7 +1982,7 @@ async function pickRef(kind) {
 
 // ⌘V of a picture (a screenshot, an image copied from a page, a picture file copied in Finder): shown small above
 // the box and sent with the next sentence for the AI to look at; it does not go into the minutes (Vin 2026-10-19: a
-// screenshot pasted to show what to change had become an attachment). Pictures for 「八、參考附件」 come from the
+// screenshot pasted to show what to change had become an attachment). Pictures for 「參考附件」 come from the
 // picture button. Text pastes as text.
 async function pastePicture(e) {
   const clip = e.clipboardData;
@@ -1938,15 +2007,15 @@ async function pastePicture(e) {
   } catch (err) { showAlert(err.message); } finally { S.pasting = false; }
 }
 
-// --- 加入會議附件: files, links and pictures for 「八、參考附件」, each with its own 說明 ---------------------
+// --- 加入會議附件: files, links and pictures for 「參考附件」, each with its own 說明 ---------------------
 
-// in the tag bar: what section 8 holds (a click opens it) and 加入會議附件, when the minutes have a Google Doc
-function attachmentsHTML() {
+// in the tag bar: what 「參考附件」 holds (a click opens it) and 加入會議附件, when the minutes have a Google Doc
+function attachmentsHTML(after = true) {           // after the tags: a line between them
   const d = S.d, list = d.attachments || [];
   const can = !!(d.doc_url && !d.readonly);
   if (!list.length && !can) return '';
   const icon = { image: ICON.image, link: ICON.link, file: ICON.clip };
-  return `<span class="tsep"></span><span class="tl">${esc(t('attachments'))}</span>
+  return `${after ? '<span class="tsep"></span>' : ''}<span class="tl">${esc(t('attachments'))}</span>
     ${list.map((a, i) => `<button class="tfile" data-open="${i}" title="${esc(a.note ? `${a.note}${t('colon')}${a.name}` : a.name)}">${icon[a.kind] || ICON.clip}<span>${esc(a.name)}</span></button>`).join('')}
     ${can ? `<button class="tadd" id="attOpen"${S.busy ? ' disabled' : ''}>${ICON.plusSm}<span>${esc(t('add_attachment'))}</span></button>` : ''}`;
 }
@@ -2042,7 +2111,7 @@ async function pickAttach(kind) {
   } catch (e) { m.err = e.message; renderAttachSheet(); }
 }
 
-// 加入: one line each in 「八、參考附件」, led by its note. The sheet stays open while the files go to Drive, and
+// 加入: one line each in 「參考附件」, led by its note. The sheet stays open while the files go to Drive, and
 // opens again with what was typed if they could not
 async function sendAttach() {
   const m = S.att, id = S.sel;

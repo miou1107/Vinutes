@@ -455,7 +455,7 @@ def units(doc: dict) -> list[Unit]:
 
 
 def worded(blocks: list) -> list:
-    """The Markdown's blocks that have words. A paragraph holding only a picture (「八、參考附件」, attachments.py)
+    """The Markdown's blocks that have words. A paragraph holding only a picture (「參考附件」, attachments.py)
     is kept for the Word file; in the Doc the picture is placed by itself and takes no part in syncing."""
     return [b for b in blocks if b.kind == 'cell' or norm(b.plain)]
 
@@ -897,7 +897,7 @@ def plan_push(doc: dict, base_md: str, new_md: str) -> Plan:
             expected[to_doc[i]] = (nb.kind == 'cell', plain(nb.md))
 
     def past_pictures(u: Unit) -> Unit:
-        """The paragraphs holding only a picture right after `u` belong to it (「八、參考附件」 puts a picture under
+        """The paragraphs holding only a picture right after `u` belong to it (「參考附件」 puts a picture under
         its line): text added after `u` goes after them."""
         k = next(i for i, x in enumerate(every) if x is u)
         while k + 1 < len(every) and every[k + 1].kind != 'cell' and every[k + 1].text \

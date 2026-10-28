@@ -104,6 +104,13 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .item .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .s { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .s.bad { color: var(--red); }
+.item .s:has(.ptag) { display: flex; align-items: center; gap: 6px; }
+.item .s:has(.ptag) > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ptag { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; font-weight: 600; line-height: 16px; padding: 0 7px; border-radius: 8px; }
+.ptag.p0 { background: var(--p0); color: var(--p0-ink); } .ptag.p1 { background: var(--p1); color: var(--p1-ink); }
+.ptag.p2 { background: var(--p2); color: var(--p2-ink); } .ptag.p3 { background: var(--p3); color: var(--p3-ink); }
+.ptag.p4 { background: var(--p4); color: var(--p4-ink); } .ptag.p5 { background: var(--p5); color: var(--p5-ink); }
+.ptag.p6 { background: var(--p6); color: var(--p6-ink); }
 .item .tgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .item .tg { cursor: pointer; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: var(--field); border: 1px solid var(--line2); color: var(--muted); }
 .item .tg:hover { border-color: var(--blue); color: var(--link); }
@@ -137,6 +144,7 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .pmenu .merr { padding: 4px 10px; font-size: 12px; color: var(--red); }
 /* under the path: the meeting's tags */
 .tagbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 24px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.tagbar[hidden] { display: none; }
 .tagbar .tl { color: var(--muted); }
 .tagbar .tl.ai { margin-left: 10px; }
 .tchip { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 9px; border-radius: 11px;
@@ -612,6 +620,8 @@ input, textarea, select { font: inherit; color: var(--text); -webkit-user-select
 .pick[disabled] { opacity: 0.5; cursor: default; }
 .pick .ph { font-weight: 600; }
 .pick .caret { margin-left: auto; color: var(--muted); font-size: 11px; }
+/* a name picked while the AI rewrites: shown at once, written in after it */
+.pwait { align-self: flex-start; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9px; color: var(--yellow-label); background: var(--yellow-bg); }
 .menu { border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
 .mi { padding: 7px 10px; border-radius: 6px; font-size: 13px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .mi:hover, .mi.on { background: var(--blue-bg); color: var(--blue); }

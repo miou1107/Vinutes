@@ -1166,13 +1166,14 @@ def png(path: Path, w: int = 8, h: int = 6) -> Path:
 
 
 class AttachmentsSection(unittest.TestCase):
-    """「八、參考附件」 is in every set of minutes, 無 when nothing was attached (Vin 2026-10-20); the first attachment
-    takes the place of 無, and old minutes that still say 補充資訊 keep working."""
+    """「參考附件」 is in every set of minutes, 無 when nothing was attached (Vin 2026-10-20); the first attachment
+    takes the place of 無, and old minutes that still say 補充資訊 keep working. It is the seventh section since
+    待確認事項 went into 行動方案 (Vin 2026-10-28); minutes written before then keep it as the eighth."""
 
     def test_the_section_is_named_and_the_first_attachment_replaces_none(self):
         import attachments
-        self.assertEqual(attachments.SECTION, '## 八、參考附件')
-        self.assertEqual(attachments.SECTIONS['en'], '## 8. Attachments')
+        self.assertEqual(attachments.SECTION, '## 七、參考附件')
+        self.assertEqual(attachments.SECTIONS['en'], '## 7. Attachments')
         md = MINUTES + '\n## 八、參考附件\n\n無\n'
         out = attachments.add_lines(md, ['- Amy 的報表：[a.xlsx](https://drive.google.com/file/d/1/view)'])
         self.assertTrue(out.endswith('## 八、參考附件\n\n- Amy 的報表：[a.xlsx](https://drive.google.com/file/d/1/view)\n'))
@@ -1191,7 +1192,21 @@ class AttachmentsSection(unittest.TestCase):
     def test_minutes_without_the_section_get_it_and_old_minutes_keep_their_heading(self):
         import attachments
         out = attachments.add_lines(MINUTES, ['- [a.pdf](https://x/a)'])
-        self.assertTrue(out.endswith('## 八、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        self.assertTrue(out.endswith('## 七、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        seven = MINUTES + '\n## 七、參考附件\n\n無\n'                  # the layout since v0.4.24
+        out = attachments.add_lines(seven, ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 七、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        self.assertEqual(attachments.listed(out)[0]['name'], 'a.pdf')
+        eight = MINUTES + '\n## 七、其他建議\n\n建議下週再談。\n'           # written before it, without the section
+        out = attachments.add_lines(eight, ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 七、其他建議\n\n建議下週再談。\n\n## 八、參考附件\n\n- [a.pdf](https://x/a)\n'))
+        self.assertEqual(attachments.listed(eight + '\n## 八、參考附件\n\n- [b.pdf](https://x/b)\n')[0]['name'], 'b.pdf')
+        self.assertEqual(attachments.listed(eight + '- [c.pdf](https://x/c)\n'), [])   # 其他建議 is not the attachments
+        lower = attachments.add_lines('## 1. Meeting Details\n\n## 7. other suggestions\n\nLater.\n', ['- [a.pdf](https://x/a)'])
+        self.assertTrue(lower.endswith('## 8. Attachments\n\n- [a.pdf](https://x/a)\n'))
+        out = attachments.add_lines('## 1. Meeting Details\n\n- Date: Oct 14\n\n## 7. Other Suggestions\n\nLater.\n',
+                                    ['- [a.pdf](https://x/a)'])
+        self.assertTrue(out.endswith('## 8. Attachments\n\n- [a.pdf](https://x/a)\n'))
         old = MINUTES + '\n## 八、補充資訊\n\n- [b.pdf](https://x/b)\n'
         out = attachments.add_lines(old, ['- [a.pdf](https://x/a)'])
         self.assertTrue(out.endswith('## 八、補充資訊\n\n- [b.pdf](https://x/b)\n- [a.pdf](https://x/a)\n'))
@@ -1234,14 +1249,14 @@ class Attach(Flows):
     def state(self) -> dict:
         return json.loads((self.job_dir / '同步.json').read_text(encoding='utf-8'))
 
-    def test_a_file_a_picture_and_a_link_become_lines_of_section_eight(self):
+    def test_a_file_a_picture_and_a_link_become_lines_of_the_attachments(self):
         sidecar = self.root / 'minutes.md.gdoc.json'
         sidecar.write_text(json.dumps({'id': 'D' * 30, 'mails': []}), encoding='utf-8')
         r = self.attach('Amy 提供的資料', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx')},
                         {'kind': 'image', 'path': str(self.files / '主視覺.png')},
                         {'kind': 'link', 'url': 'https://example.com/post'})
         md = self.md_path.read_text(encoding='utf-8')
-        self.assertIn('## 八、參考附件', md)
+        self.assertIn('## 七、參考附件', md)
         self.assertIn('- Amy 提供的資料：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)', md)
         self.assertIn('- Amy 提供的資料：[https://example.com/post](https://example.com/post)', md)
         self.assertIn('![主視覺.png](minutes_附件/主視覺.png)', md)            # the Word file has the picture too
@@ -1263,15 +1278,15 @@ class Attach(Flows):
         self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx')})
         self.attach('# Ken 會後補充', {'kind': 'link', 'url': 'https://example.com/a'})
         md = self.md_path.read_text(encoding='utf-8')
-        tail = md.split('## 八、參考附件', 1)[1].strip().splitlines()
+        tail = md.split('## 七、參考附件', 1)[1].strip().splitlines()
         self.assertEqual(tail, ['- [9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- \\# Ken 會後補充：[https://example.com/a](https://example.com/a)'])
-        self.assertEqual(md.count('## 八、參考附件'), 1)
+        self.assertEqual(md.count('## 七、參考附件'), 1)
 
     def test_each_item_is_led_by_its_own_note_and_the_row_above_the_minutes_lists_them(self):
         r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Pitt 要的\n各通路業績 '},
                         {'kind': 'link', 'url': 'https://example.com/post', 'note': ''})
-        tail = self.md_path.read_text(encoding='utf-8').split('## 八、參考附件', 1)[1].strip().splitlines()
+        tail = self.md_path.read_text(encoding='utf-8').split('## 七、參考附件', 1)[1].strip().splitlines()
         self.assertEqual(tail, ['- Pitt 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- [https://example.com/post](https://example.com/post)'])
         self.assertEqual(r['attachments'], [
@@ -2263,14 +2278,14 @@ class Languages(unittest.TestCase):
         self.assertEqual(i18n.minutes_lang('ja'), 'zh-TW')
         self.assertEqual(i18n.minutes_lang('en'), 'en')
 
-    def test_english_minutes_get_section_8_supporting_materials(self):
+    def test_english_minutes_get_the_attachments_section(self):
         import attachments as at
         md = '# Weekly\n\n## 1. Basic Information\n\n- Date: Oct 14\n\n## 2. Discussion Summary\n\nBudget set.\n'
         lines = at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://example.com/slides'}],
                              'Deck from Amy', 'en')
         self.assertEqual(lines, ['- Deck from Amy: [Slides](https://example.com/slides)'])
         out = at.add_lines(md, lines)
-        self.assertIn('## 8. Attachments\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
+        self.assertIn('## 7. Attachments\n\n- Deck from Amy: [Slides](https://example.com/slides)', out)
         self.assertNotIn('參考附件', out)
         self.assertIn('：[Slides]', at.lines_for([{'kind': 'link', 'name': 'Slides', 'link': 'https://e.com'}],
                                                 'Amy 的簡報', 'zh-TW')[0])
@@ -3453,11 +3468,11 @@ class McpServer(unittest.TestCase):
         self.assertTrue(err)
         self.assertIn('出現 2 次', many)
 
-    def test_a_note_goes_into_section_eight(self):
+    def test_a_note_goes_into_the_attachments(self):
         done, err = self.ask('add_note', meeting='20261014-103000', text='報價確定為每人 1,200 元。')
         self.assertFalse(err, done)
         md = self.md_path.read_text(encoding='utf-8')
-        self.assertRegex(md, r'## 八、參考附件\n\n- 報價確定為每人 1,200 元。\n$')
+        self.assertRegex(md, r'## 七、參考附件\n\n- 報價確定為每人 1,200 元。\n$')
 
     def test_minutes_already_mailed_say_so(self):
         r = json.loads((self.job_dir / 'result.json').read_text())
@@ -4404,3 +4419,123 @@ class VoiceOff(unittest.TestCase):
     def test_an_unknown_voice_is_refused(self):
         with self.assertRaises(SystemExit):
             minutes_app.cmd_drop_voice(self.job(), 'Z')
+
+
+WINDOW = Path(__file__).resolve().parent.parent / 'recorder' / 'app'
+
+
+def js_function(src: str, start: str) -> str:
+    """The text of the function in app.js that begins with `start`, up to its closing brace."""
+    at = src.index(start)
+    depth = 0
+    for j in range(src.index('{', at), len(src)):
+        depth += {'{': 1, '}': -1}.get(src[j], 0)
+        if depth == 0:
+            return src[at:j + 1]
+    raise AssertionError(start)
+
+
+class QuietList(unittest.TestCase):
+    """The tags are kept but not shown, and each meeting in the list reads 好好玩 FUNIT on its colour, then 已寄出 2 人;
+    no time, no round mark in front (Vin 2026-10-28, prototypes/hide-tags.html)."""
+    src = (WINDOW / 'app.js').read_text(encoding='utf-8')
+    strings = (WINDOW / 'strings.js').read_text(encoding='utf-8')
+
+    def test_the_tags_are_kept_but_not_shown(self):
+        self.assertIn('const SHOW_TAGS = false;', self.src)
+        self.assertIn('if (!SHOW_TAGS) return [];', js_function(self.src, 'function allTags'))   # no 標籤 filter
+        tags = js_function(self.src, 'function renderTags')
+        self.assertLess(tags.index('if (!SHOW_TAGS)'), tags.index("t('tag')"))   # 附件 and the score only
+        self.assertIn("'tags'", self.src)                  # the agent's tools and the search still have them
+
+    def test_each_meeting_shows_its_project_on_its_colour_then_who_got_it(self):
+        side = js_function(self.src, 'function renderSide')
+        self.assertNotIn('projectMark(j.project)', side)
+        self.assertNotIn('esc(j.time)', side)
+        self.assertLess(side.index('projectTag(j.project)'), side.index('listStatus(j)'))
+        self.assertEqual(self.strings.count('sent_short:'), 2)          # 已寄出 2 人 in both languages
+
+
+class NameWhileTheAiWrites(unittest.TestCase):
+    """人員: a voice can be named while the AI rewrites the minutes (Vin 2026-10-28: 選人那邊卡卡的). The name shows at
+    once and goes in after the rewrite, one name after another in the order they were picked."""
+    src = (WINDOW / 'app.js').read_text(encoding='utf-8')
+
+    def test_the_pick_stays_open_while_the_ai_writes(self):
+        people = js_function(self.src, 'function peopleHTML')
+        self.assertIn('const pickBusy = S.peopleBusy || S.busy;', people)
+        self.assertIn("pickBusy ? ' disabled' : ''", people)
+        self.assertIn("t('people_after_ai', aiName())", people)
+        choose = self.src[self.src.index('const choose = (g, name)'):]
+        self.assertIn('else if (aiBusy() || peopleQueued()) nameLater(g, name);', choose[:400])
+        strings = (WINDOW / 'strings.js').read_text(encoding='utf-8')
+        self.assertEqual(strings.count('people_after_ai:'), 2)
+
+    def test_a_name_sent_during_a_rewrite_waits_for_it(self):
+        import fcntl
+        import threading
+        import time
+        folder = Path(tempfile.mkdtemp(prefix='job-'))
+        (folder / 'job.json').write_text('{}')
+        job = minutes_app.Job(folder)
+        rewrite = open(folder / '.app.lock', 'w')
+        fcntl.flock(rewrite, fcntl.LOCK_EX)              # the AI's rewrite holds the meeting
+        threading.Timer(0.8, lambda: (fcntl.flock(rewrite, fcntl.LOCK_UN), rewrite.close())).start()
+        began = time.time()
+        turn = minutes_app.wait_for_turn(job)           # what the window's 人員 pick runs through
+        self.assertGreaterEqual(time.time() - began, 0.7)
+        turn.close()
+        shutil.rmtree(folder)
+
+    def run_picks(self, script: str) -> dict:
+        """nameLater and sendLater from app.js with a stand-in server that answers each name after a while."""
+        if not shutil.which('node'):
+            self.skipTest('node is not installed')
+        code = '\n'.join([
+            "const S = { sel: 'm1', peopleLater: {}, peopleSending: {}, editSeq: 0 };",
+            'const sent = [], done = [], alerts = []; let open = 0, most = 0;',
+            'const call = (cmd, a) => { open++; most = Math.max(most, open); sent.push(`${a.group}=${a.name}`);',
+            "  return new Promise((ok, no) => setTimeout(() => { open--; a.name === 'Bad' ? no(new Error('busy'))",
+            '    : ok({ voices: [a.group] }); }, 30)); };',
+            'const peopleDone = (r) => done.push(r.voices[0]); const renderRail = () => {};',
+            'const showAlert = (m) => alerts.push(m);',
+            next(line for line in self.src.splitlines() if line.startswith('const peopleQueued')),
+            js_function(self.src, 'function nameLater'),
+            js_function(self.src, 'async function sendLater'),
+            js_function(self.src, 'function namesLeft'),
+            'let snap = null;', script,
+            'const end = setInterval(() => { if (!peopleQueued(\'m1\')) { clearInterval(end);',
+            '  console.log(JSON.stringify({ sent, done, alerts, most, left: S.peopleLater, snap })); } }, 5);',
+        ])
+        return json.loads(subprocess.run(['node', '-e', code], capture_output=True, text=True, check=True, timeout=10).stdout)
+
+    def test_the_names_go_in_one_after_another(self):
+        out = self.run_picks("nameLater('B', 'Mia'); nameLater('A', 'Leo'); nameLater('C', 'Bad'); nameLater('A', 'Leo');")
+        self.assertEqual(out, {'sent': ['B=Mia', 'A=Leo', 'C=Bad'], 'done': ['B', 'A'], 'alerts': ['busy'], 'most': 1,
+                               'left': {}, 'snap': None})
+
+    def test_a_voice_named_again_sends_only_its_last_name(self):
+        out = self.run_picks("nameLater('A', 'Leo'); nameLater('B', 'Mia'); nameLater('B', 'Lily');")
+        self.assertEqual(out['sent'], ['A=Leo', 'B=Lily'])           # Mia never went: not remembered, not listed
+        out = self.run_picks("nameLater('B', 'Mia'); nameLater('B', 'Lily'); nameLater('B', 'Mia');")
+        self.assertEqual(out['sent'], ['B=Mia'])                     # back to the name on its way: nothing more
+        out = self.run_picks("nameLater('B', 'Mia'); setTimeout(() => nameLater('B', 'Lily'), 10);")
+        self.assertEqual(out['sent'], ['B=Mia', 'B=Lily'])           # changed while Mia went: Lily follows
+
+    def test_the_names_not_sent_go_with_the_window_closing(self):
+        out = self.run_picks("nameLater('A', 'Leo'); nameLater('B', 'Mia'); nameLater('A', 'Ken'); snap = namesLeft('m1');")
+        self.assertEqual(out['snap'], [{'kind': 'speaker', 'group': 'A', 'name': 'Ken'},    # Leo is on its way already
+                                       {'kind': 'speaker', 'group': 'B', 'name': 'Mia'}])
+        src = js_function(self.src, 'window.beforeClose = async')
+        self.assertIn('namesLeft(id).concat(', src)
+
+    def test_the_server_names_a_voice_left_by_a_closed_window(self):
+        job = Flows.job
+        MeetingPeople.setUp(self)
+        try:
+            minutes_app.cmd_ask_many(job(self), json.dumps([{'kind': 'speaker', 'group': 'B', 'name': 'Mia'},
+                                                            {'kind': 'speaker', 'group': 'b', 'name': 'Zed'}]))
+            self.assertIn('Mia 說明：', self.md_path.read_text(encoding='utf-8'))
+            self.assertNotIn('Zed', self.md_path.read_text(encoding='utf-8'))   # not a voice letter
+        finally:
+            MeetingPeople.tearDown(self)

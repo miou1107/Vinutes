@@ -4404,3 +4404,123 @@ class VoiceOff(unittest.TestCase):
     def test_an_unknown_voice_is_refused(self):
         with self.assertRaises(SystemExit):
             minutes_app.cmd_drop_voice(self.job(), 'Z')
+
+
+WINDOW = Path(__file__).resolve().parent.parent / 'recorder' / 'app'
+
+
+def js_function(src: str, start: str) -> str:
+    """The text of the function in app.js that begins with `start`, up to its closing brace."""
+    at = src.index(start)
+    depth = 0
+    for j in range(src.index('{', at), len(src)):
+        depth += {'{': 1, '}': -1}.get(src[j], 0)
+        if depth == 0:
+            return src[at:j + 1]
+    raise AssertionError(start)
+
+
+class QuietList(unittest.TestCase):
+    """The tags are kept but not shown, and each meeting in the list reads 好好玩 FUNIT on its colour, then 已寄出 2 人;
+    no time, no round mark in front (Vin 2026-10-28, prototypes/hide-tags.html)."""
+    src = (WINDOW / 'app.js').read_text(encoding='utf-8')
+    strings = (WINDOW / 'strings.js').read_text(encoding='utf-8')
+
+    def test_the_tags_are_kept_but_not_shown(self):
+        self.assertIn('const SHOW_TAGS = false;', self.src)
+        self.assertIn('if (!SHOW_TAGS) return [];', js_function(self.src, 'function allTags'))   # no 標籤 filter
+        tags = js_function(self.src, 'function renderTags')
+        self.assertLess(tags.index('if (!SHOW_TAGS)'), tags.index("t('tag')"))   # 附件 and the score only
+        self.assertIn("'tags'", self.src)                  # the agent's tools and the search still have them
+
+    def test_each_meeting_shows_its_project_on_its_colour_then_who_got_it(self):
+        side = js_function(self.src, 'function renderSide')
+        self.assertNotIn('projectMark(j.project)', side)
+        self.assertNotIn('esc(j.time)', side)
+        self.assertLess(side.index('projectTag(j.project)'), side.index('listStatus(j)'))
+        self.assertEqual(self.strings.count('sent_short:'), 2)          # 已寄出 2 人 in both languages
+
+
+class NameWhileTheAiWrites(unittest.TestCase):
+    """人員: a voice can be named while the AI rewrites the minutes (Vin 2026-10-28: 選人那邊卡卡的). The name shows at
+    once and goes in after the rewrite, one name after another in the order they were picked."""
+    src = (WINDOW / 'app.js').read_text(encoding='utf-8')
+
+    def test_the_pick_stays_open_while_the_ai_writes(self):
+        people = js_function(self.src, 'function peopleHTML')
+        self.assertIn('const pickBusy = S.peopleBusy || S.busy;', people)
+        self.assertIn("pickBusy ? ' disabled' : ''", people)
+        self.assertIn("t('people_after_ai', aiName())", people)
+        choose = self.src[self.src.index('const choose = (g, name)'):]
+        self.assertIn('else if (aiBusy() || peopleQueued()) nameLater(g, name);', choose[:400])
+        strings = (WINDOW / 'strings.js').read_text(encoding='utf-8')
+        self.assertEqual(strings.count('people_after_ai:'), 2)
+
+    def test_a_name_sent_during_a_rewrite_waits_for_it(self):
+        import fcntl
+        import threading
+        import time
+        folder = Path(tempfile.mkdtemp(prefix='job-'))
+        (folder / 'job.json').write_text('{}')
+        job = minutes_app.Job(folder)
+        rewrite = open(folder / '.app.lock', 'w')
+        fcntl.flock(rewrite, fcntl.LOCK_EX)              # the AI's rewrite holds the meeting
+        threading.Timer(0.8, lambda: (fcntl.flock(rewrite, fcntl.LOCK_UN), rewrite.close())).start()
+        began = time.time()
+        turn = minutes_app.wait_for_turn(job)           # what the window's 人員 pick runs through
+        self.assertGreaterEqual(time.time() - began, 0.7)
+        turn.close()
+        shutil.rmtree(folder)
+
+    def run_picks(self, script: str) -> dict:
+        """nameLater and sendLater from app.js with a stand-in server that answers each name after a while."""
+        if not shutil.which('node'):
+            self.skipTest('node is not installed')
+        code = '\n'.join([
+            "const S = { sel: 'm1', peopleLater: {}, peopleSending: {}, editSeq: 0 };",
+            'const sent = [], done = [], alerts = []; let open = 0, most = 0;',
+            'const call = (cmd, a) => { open++; most = Math.max(most, open); sent.push(`${a.group}=${a.name}`);',
+            "  return new Promise((ok, no) => setTimeout(() => { open--; a.name === 'Bad' ? no(new Error('busy'))",
+            '    : ok({ voices: [a.group] }); }, 30)); };',
+            'const peopleDone = (r) => done.push(r.voices[0]); const renderRail = () => {};',
+            'const showAlert = (m) => alerts.push(m);',
+            next(line for line in self.src.splitlines() if line.startswith('const peopleQueued')),
+            js_function(self.src, 'function nameLater'),
+            js_function(self.src, 'async function sendLater'),
+            js_function(self.src, 'function namesLeft'),
+            'let snap = null;', script,
+            'const end = setInterval(() => { if (!peopleQueued(\'m1\')) { clearInterval(end);',
+            '  console.log(JSON.stringify({ sent, done, alerts, most, left: S.peopleLater, snap })); } }, 5);',
+        ])
+        return json.loads(subprocess.run(['node', '-e', code], capture_output=True, text=True, check=True, timeout=10).stdout)
+
+    def test_the_names_go_in_one_after_another(self):
+        out = self.run_picks("nameLater('B', 'Mia'); nameLater('A', 'Leo'); nameLater('C', 'Bad'); nameLater('A', 'Leo');")
+        self.assertEqual(out, {'sent': ['B=Mia', 'A=Leo', 'C=Bad'], 'done': ['B', 'A'], 'alerts': ['busy'], 'most': 1,
+                               'left': {}, 'snap': None})
+
+    def test_a_voice_named_again_sends_only_its_last_name(self):
+        out = self.run_picks("nameLater('A', 'Leo'); nameLater('B', 'Mia'); nameLater('B', 'Lily');")
+        self.assertEqual(out['sent'], ['A=Leo', 'B=Lily'])           # Mia never went: not remembered, not listed
+        out = self.run_picks("nameLater('B', 'Mia'); nameLater('B', 'Lily'); nameLater('B', 'Mia');")
+        self.assertEqual(out['sent'], ['B=Mia'])                     # back to the name on its way: nothing more
+        out = self.run_picks("nameLater('B', 'Mia'); setTimeout(() => nameLater('B', 'Lily'), 10);")
+        self.assertEqual(out['sent'], ['B=Mia', 'B=Lily'])           # changed while Mia went: Lily follows
+
+    def test_the_names_not_sent_go_with_the_window_closing(self):
+        out = self.run_picks("nameLater('A', 'Leo'); nameLater('B', 'Mia'); nameLater('A', 'Ken'); snap = namesLeft('m1');")
+        self.assertEqual(out['snap'], [{'kind': 'speaker', 'group': 'A', 'name': 'Ken'},    # Leo is on its way already
+                                       {'kind': 'speaker', 'group': 'B', 'name': 'Mia'}])
+        src = js_function(self.src, 'window.beforeClose = async')
+        self.assertIn('namesLeft(id).concat(', src)
+
+    def test_the_server_names_a_voice_left_by_a_closed_window(self):
+        job = Flows.job
+        MeetingPeople.setUp(self)
+        try:
+            minutes_app.cmd_ask_many(job(self), json.dumps([{'kind': 'speaker', 'group': 'B', 'name': 'Mia'},
+                                                            {'kind': 'speaker', 'group': 'b', 'name': 'Zed'}]))
+            self.assertIn('Mia 說明：', self.md_path.read_text(encoding='utf-8'))
+            self.assertNotIn('Zed', self.md_path.read_text(encoding='utf-8'))   # not a voice letter
+        finally:
+            MeetingPeople.tearDown(self)

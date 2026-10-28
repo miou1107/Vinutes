@@ -1742,6 +1742,14 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             var items: [[String: Any]] = []
             for item in args["items"] as? [[String: Any]] ?? [] {
                 let kind = item["kind"] as? String ?? ""
+                if kind == "speaker" {                   // a voice named under 人員 while the AI rewrote the minutes
+                    let group = item["group"] as? String ?? ""
+                    let name = (item["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if group.range(of: #"^[A-Z]$"#, options: .regularExpression) != nil, !name.isEmpty, name.count <= 30 {
+                        items.append(["kind": kind, "group": group, "name": name])
+                    }
+                    continue
+                }
                 guard ["ask", "quick", "correct"].contains(kind) else { continue }
                 items.append(["kind": kind, "text": item["text"] as? String ?? "", "item": item["item"] as? String ?? "",
                               "pictures": (item["pictures"] as? [String] ?? []).filter { picked.contains($0) },

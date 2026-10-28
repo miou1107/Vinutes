@@ -2404,8 +2404,8 @@ def cmd_correct(job: Job, label: str, right: str):
 
 def cmd_ask_many(job: Job, raw: str):
     """What was still waiting under 待修改 when the window closed (each {kind: ask | quick | correct, text, item,
-    pictures, refs}), done in order in this one process, which holds the meeting's turn; one that cannot be done is
-    passed over and the rest still go."""
+    pictures, refs}), and the voices named under 人員 meanwhile ({kind: speaker, group, name}), done in order in this
+    one process, which holds the meeting's turn; one that cannot be done is passed over and the rest still go."""
     try:
         items = [x for x in json.loads(raw) if isinstance(x, dict)]
     except ValueError:
@@ -2416,6 +2416,8 @@ def cmd_ask_many(job: Job, raw: str):
         try:
             if kind == 'correct':
                 cmd_correct(job, str(x.get('item') or ''), text)
+            elif kind == 'speaker' and re.fullmatch(r'[A-Z]', str(x.get('group') or '')) and 0 < len(name := str(x.get('name') or '').strip()) <= 30:
+                cmd_speaker(job, x['group'], name)
             elif kind == 'quick' and QUICK_NAMES.get(text, text) in QUICK['en']:
                 key = QUICK_NAMES.get(text, text)
                 ai_edit(job, QUICK[job.lang][key], key)

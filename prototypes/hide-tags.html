@@ -1,0 +1,134 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>標籤收起來原型</title><style>
+/* Prototype: the tags kept but no longer shown, above the minutes and in the list on the left (2026-10-28). Colours from prompt-queue.html. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --panel: #f6f6f8; --side: #f3f3f6; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field: #ffffff; --field-line: #cfcfd6;
+  --link: #2a6dd6; --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee; --on: #dfe9fb;
+  --red-bg: #fde2e1;
+  --asis-bg: #fff6f5; --asis-line: #e6a29c; --asis-ink: #9b1c1c;
+  --tobe-bg: #f1f6ff; --tobe-line: #8fb0e6; --tobe-ink: #1c4f9e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e20; --panel: #232326; --side: #252528; --line: #333338; --line2: #3a3a40;
+    --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field: #2c2c30; --field-line: #46464c;
+    --link: #7fb0ff; --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a; --on: #24304a;
+    --red-bg: #4a2020;
+    --asis-bg: #2e2020; --asis-line: #7a3a36; --asis-ink: #ffb4ad;
+    --tobe-bg: #1c2638; --tobe-line: #3f5f94; --tobe-ink: #a9c6ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
+main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+.lead { margin: 0 0 24px; color: var(--muted); }
+h2 { margin: 32px 0 10px; font-size: 16px; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: start; }
+.frame { border-radius: 12px; padding: 12px; min-width: 0; }
+.frame.asis { background: var(--asis-bg); border: 2px dashed var(--asis-line); }
+.frame.tobe { background: var(--tobe-bg); border: 2px solid var(--tobe-line); }
+.flag { display: inline-block; margin-bottom: 10px; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.asis .flag { color: var(--asis-ink); background: var(--red-bg); }
+.tobe .flag { color: var(--tobe-ink); background: var(--blue-bg); border: 1px solid var(--blue-line); }
+.cap { margin: 10px 2px 0; color: var(--text2); }
+.screen { background: var(--bg); border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; }
+
+/* the bar above the minutes */
+.path { padding: 10px 14px 6px; font-size: 13px; }
+.path b { color: var(--link); font-weight: 500; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 14px 10px; border-bottom: 1px solid var(--line); }
+.tl { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.tl.ai { margin-left: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; font-size: 12px;
+        background: var(--blue-bg); border: 1px solid var(--blue-line); color: var(--blue-ink); }
+.chip.sug { border-style: dashed; background: none; }
+.add { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 12px; font-size: 12px; border: 1px solid var(--field-line); }
+.sep { width: 1px; height: 18px; background: var(--line2); margin: 0 4px; }
+.score { margin-left: auto; color: var(--faint); font-size: 12px; }
+.doc { height: 70px; padding: 10px 24px; }
+.doc i { display: block; height: 8px; margin: 8px 0; border-radius: 4px; background: var(--line); }
+
+/* the list on the left */
+.side { background: var(--side); padding: 12px; }
+.shead { display: flex; align-items: center; font-weight: 700; font-size: 14px; }
+.shead span { margin-left: auto; font-weight: 400; font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--field-line); }
+.search { margin: 10px 0 8px; height: 30px; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--field-line); border-radius: 8px; background: var(--field); color: var(--faint); font-size: 12px; }
+.sel { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.sel label { width: 28px; color: var(--muted); font-size: 12px; }
+.sel div { flex: 1; height: 28px; display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--field-line); border-radius: 7px; background: var(--field); }
+.day { margin: 12px 0 6px; color: var(--muted); font-size: 12px; }
+.item { display: flex; gap: 8px; padding: 8px; border-radius: 8px; margin-bottom: 4px; }
+.item.on { background: var(--on); }
+.ico { flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.t { font-weight: 600; }
+.s { color: var(--muted); font-size: 12px; }
+.tgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pj { display: inline-flex; align-items: center; gap: 3px; }
+.pj svg { width: 12px; height: 12px; flex: none; }
+.pjtag.first { margin-left: 0; }
+.pjtag { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 9px; border: 1px solid; font-size: 11px; font-weight: 600; }
+.c1 { background: #eeedfe; color: #3c3489; border-color: #cfcbf6; } .c6 { background: #faeeda; color: #633806; border-color: #f0d6aa; }
+@media (prefers-color-scheme: dark) { .c1 { background: #3c3489; color: #cecbf6; border-color: #3c3489; } .c6 { background: #633806; color: #fac775; border-color: #633806; } }
+.ico.c1, .ico.c6 { border-radius: 50%; font-weight: 700; }
+.tg { padding: 0 7px; border-radius: 9px; border: 1px solid var(--line2); background: var(--field); font-size: 11px; color: var(--muted); }
+</style></head><body><main>
+
+<h1>標籤收起來的畫面</h1>
+<p class="lead">左邊是目前的畫面，右邊是調整後的畫面。</p>
+
+<h2>會議紀錄上方</h2>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen">
+      <div class="path"><b>官網改版</b>　›　10/28（官網流量檢討）</div>
+      <div class="bar"><span class="tl">標籤</span><span class="chip">官網 ×</span><span class="chip">內部 ×</span><span class="chip">SEO ×</span>
+        <span class="add">＋ 加標籤</span><span class="tl ai">Claude 建議</span><span class="chip sug">＋ 春季活動</span>
+        <span class="sep"></span><span class="tl">附件</span><span class="add">＋ 加入會議附件</span><span class="score">88</span></div>
+      <div class="doc"><i style="width:60%"></i><i style="width:85%"></i><i style="width:45%"></i></div>
+    </div>
+    <p class="cap">標籤、加標籤和 Claude 建議的標籤，都排在附件前面。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen">
+      <div class="path"><b>官網改版</b>　›　10/28（官網流量檢討）</div>
+      <div class="bar"><span class="tl">附件</span><span class="add">＋ 加入會議附件</span><span class="score">88</span></div>
+      <div class="doc"><i style="width:60%"></i><i style="width:85%"></i><i style="width:45%"></i></div>
+    </div>
+    <p class="cap">這一排只留附件和評分。</p>
+  </div>
+</div>
+
+<h2>左邊的會議列表</h2>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen side">
+      <div class="shead">所有會議記錄 (11)<span>選取</span></div>
+      <div class="search">🔍 日期或關鍵字</div>
+      <div class="sel"><label>專案</label><div>全部</div></div>
+      <div class="sel"><label>標籤</label><div>全部</div></div>
+      <div class="day">10/28（三）</div>
+      <div class="item on"><span class="ico c1">官</span><div><div class="t">官網流量檢討</div><div class="s">10:30　已寄出　·　官網改版</div>
+        <div class="tgs"><span class="tg">官網</span><span class="tg">內部</span><span class="tg">SEO</span></div></div></div>
+      <div class="day">10/27（二）</div>
+      <div class="item"><span class="ico c6">社</span><div><div class="t">社群週會</div><div class="s">15:21　已寄出　·　社群行銷</div>
+        <div class="tgs"><span class="tg">內部</span><span class="tg">社群週會</span></div></div></div>
+    </div>
+    <p class="cap">列表上方有標籤篩選，每場會議底下也列出標籤。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen side">
+      <div class="shead">所有會議記錄 (11)<span>選取</span></div>
+      <div class="search">🔍 日期或關鍵字</div>
+      <div class="sel"><label>專案</label><div>全部</div></div>
+      <div class="day">10/28（三）</div>
+      <div class="item on"><div><div class="t">官網流量檢討</div><div class="s"><span class="pjtag c1 first">官網改版</span>　已寄出 2 人</div></div></div>
+      <div class="day">10/27（二）</div>
+      <div class="item"><div><div class="t">社群週會</div><div class="s"><span class="pjtag c6 first">社群行銷</span>　已寄出 3 人</div></div></div>
+    </div>
+    <p class="cap">最左邊的圓圈字移除，專案名稱改成標籤，每個專案一個顏色。會議時間不再顯示，專案標籤放在最前面，後面寫寄給幾個人。標籤篩選和每場會議底下的標籤都收起來，之前貼過的標籤都還保留著。</p>
+  </div>
+</div>
+
+</main></body></html>

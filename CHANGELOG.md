@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.26 (2026-10-29)
+
+- The 待補充 (To fill) cards beside the minutes now follow the minutes as they stand, not the list made when the minutes were first written. After the assistant translated a set of minutes from English into Chinese, the cards stayed in English and kept showing fields that were already filled (the chair, say), because the panel read its labels from that first list and only looked at the Doc to tell whether a blank was still open — and the English labels no longer matched the Chinese Doc. Now each card is read from the current minutes: a card shows only while its own `[__]` is still open, and any blank the first list no longer names is read straight from the Doc (the field before it, a table row's first cell, or the section heading it sits under). So the cards are always in the minutes' own language, and a blank that has been filled no longer shows.
+
 ## v0.4.25 (2026-10-28)
 
 - In the list, each meeting's project is a small folder on the project's colour and the project's name in grey, then · 已寄出 2 人 (Sent to 2). In v0.4.24 the name sat on a coloured tag, and a list of many projects read as patches of colour; now only the folder keeps the colour. The meeting titles in the list are a size larger.

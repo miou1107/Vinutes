@@ -693,20 +693,46 @@ def todo_items(job: Job, md: str) -> list[dict]:
     for b in blocks:
         if b.kind == 'cell':
             rows[(b.table, b.row)] = rows.get((b.table, b.row), '') + ' | ' + b.plain
-    units = [rows[(b.table, b.row)] if b.kind == 'cell' else b.plain for b in blocks]
+    units, section, where = [], '', {}
+    for b in blocks:
+        if b.kind.startswith('h'):                   # the section a later blank sits under, e.g. ## 四、行動方案
+            section = b.plain
+        unit = rows[(b.table, b.row)] if b.kind == 'cell' else b.plain
+        units.append(unit)
+        where.setdefault(unit, section)
     units = list(dict.fromkeys(units))
-    any_blank = any(BLANK in u for u in units)
-    items = []
+    items, matched = [], set()
     for raw in job.result.get('todo') or []:
         label, anchor = (raw.get('label', ''), raw.get('line', '')) if isinstance(raw, dict) else (str(raw), '')
         label = label.strip()
         if not label:
             continue
         hits = [u for u in units if anchor and anchor in u] or [u for u in units if label in u]
-        still = any(BLANK in u for u in hits) if hits else any_blank
-        if still:
+        if not hits:                                 # the stored label is no longer in the minutes (e.g. they
+            continue                                 #  were translated); the Doc's own blanks are listed below
+        matched.update(hits)
+        if any(BLANK in u for u in hits):
             items.append({'label': label, 'anchor': anchor or label, 'find': find_words(plains, anchor, label)})
+    for u in units:                                  # a blank the stored list never named: read it from the Doc,
+        if BLANK in u and u not in matched:          #  so its label is in the minutes' current language
+            label = blank_label(u, where.get(u, ''))
+            if label:
+                items.append({'label': label, 'anchor': label, 'find': find_words(plains, label)})
     return items
+
+
+def blank_label(unit: str, fallback: str = '') -> str:
+    """A short name for a blank the stored to-fill list did not name, read from the minutes line it sits on:
+    the first real cell of a table row, else the words before the blank; the section heading when the line
+    itself names no field, so a bare blank is never dropped."""
+    if ' | ' in unit:                                # a table row: name it after its first real cell
+        for cell in (c.strip() for c in unit.split('|')):
+            name = cell.replace(BLANK, '').strip(' :：')
+            if name and not name.isdigit():
+                return name[:40]
+        return fallback[:40]
+    head = unit.split(BLANK)[0].lstrip('-*#.、0123456789 ').rstrip().rstrip(':：').strip()   # words before the blank
+    return (head or fallback)[:40]
 
 
 GUESS = re.compile(r'「(.+?)」\s*(?:推測是|推測為|應該是|可能是|改為|改成|暫寫成|寫成)\s*「?([^「」，。,]+?)」?\s*$')

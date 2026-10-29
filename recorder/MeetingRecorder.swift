@@ -1618,6 +1618,14 @@ final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+/// The Google Doc's web view. While a find asked with `keep` runs (`keepOut` above 0, one per find, as a second
+/// card can be picked before the first find is back) it refuses the keyboard, so the Doc moving to some words does
+/// not pull it out of the box where the user is about to type.
+final class DocView: WKWebView {
+    var keepOut = 0
+    override var acceptsFirstResponder: Bool { keepOut > 0 ? false : super.acceptsFirstResponder }
+}
+
 
 /// The meeting window. The page (Resources/app/index.html) sends {id, cmd, args} to the "app" handler; every
 /// request runs a script and the answer goes back as window.reply(id, ok, data). Events the page did not ask
@@ -1628,7 +1636,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     weak var owner: AppDelegate?
     let window: NSWindow
     var web: WKWebView!
-    var docView: WKWebView?
+    var docView: DocView?
     var docURL = ""                  // the Doc asked for: its address as the page sent it
     var docWanted = false            // the page has a place for it right now
     var docReady = false             // the Doc asked for has started to show (until then the page's spinner shows)
@@ -1761,7 +1769,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
         let text = args["text"] as? String ?? ""
         let needJob: Set<String> = ["open", "learn", "log", "undo", "save", "ask", "quick", "unlearn", "relearn", "reply",
                                      "resolve", "confirm", "retry", "folder", "audio", "mailPrepare", "send", "refresh",
-                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "correct", "dropVoice", "askMany",
+                                     "speaker", "attach", "move", "tags", "people", "moveLearned", "skip", "skipBlank", "correct", "dropVoice", "askMany",
                                      "suggest", "contacts", "mailSummary"]
         if needJob.contains(cmd) && !isJob && !(cmd == "audio" && (args["action"] as? String) != "play") {
             return done(false, ["message": tr("err.noJob")])
@@ -1794,8 +1802,18 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             placeDoc(args)
             done(true, [:])
         case "find":
+            // a blank picked in the side panel: its question waits in the box under the Doc, so the keyboard stays
+            // there while the Doc runs its find (that find opens Google's dialog, which would take the keyboard)
+            let keep = args["keep"] as? Bool ?? false
+            let held = keep ? docView : nil
+            held?.keepOut += 1
+            if held != nil && window.firstResponder !== web { window.makeFirstResponder(web) }   // also when the Doc had it
             findInDoc(dir, text) { [weak self] ok, data in
                 if args["blink"] as? Bool ?? false { self?.blinkDoc() }
+                if let held = held, let self = self {
+                    held.keepOut -= 1
+                    if held.keepOut == 0 && self.window.firstResponder !== self.web { self.window.makeFirstResponder(self.web) }
+                }
                 done(ok, data)
             }
         case "blink":
@@ -1864,6 +1882,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
             app(["drop_voice", dir.path, group] + ((args["back"] as? Bool ?? false) ? ["back"] : []), done)
         case "skip":
             app(["skip", dir.path, args["item"] as? String ?? ""], done)
+        case "skipBlank":
+            app(["skip_blank", dir.path, args["item"] as? String ?? ""], done)
         case "correct":
             app(["correct", dir.path, args["item"] as? String ?? "", text], done)
         case "pick":
@@ -2473,7 +2493,7 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     func makeDocView() -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()                 // the Google sign-in is kept between launches
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = DocView(frame: .zero, configuration: config)
         // Google Docs draws the page at a quarter of its resolution for a web view that calls itself Safari, and
         // sharp for Chrome; typing, the input methods and the toolbar work the same either way. The version keeps
         // up with Chrome's (one every four weeks since 140 on 2025-09-02), so Docs never calls the browser too old.

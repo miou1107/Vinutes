@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.26 (2026-10-29)
+
+- Beside the mixed `錄音.caf`, each recording now also keeps two tracks of its own: `me.caf` (your microphone alone) and `other.caf` (the Mac's sound alone — the other side of an online meeting). The mix is unchanged, and the captions and the transcriber still read it. The two side tracks make it possible to tell, after a meeting, whether the other side was recorded at all — a silent `other.caf` means it was not — and to tell the two voices apart. Groundwork for the Bluetooth-headset case, where the other side can come through poorly; it does not yet change how that case is handled.
+
 ## v0.4.25 (2026-10-28)
 
 - In the list, each meeting's project is a small folder on the project's colour and the project's name in grey, then · 已寄出 2 人 (Sent to 2). In v0.4.24 the name sat on a coloured tag, and a list of many projects read as patches of colour; now only the folder keeps the colour. The meeting titles in the list are a size larger.

@@ -699,7 +699,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let rec = try MeetingCapture(url: dir.appendingPathComponent("錄音.caf"))
             rec.note = { appLog("recording: \($0)") }
             try rec.start()
-            writeJSON(["audio": "錄音.caf", "started": isoString(now), "ended": NSNull()], dir.appendingPathComponent("job.json"))
+            writeJSON(["audio": "錄音.caf", "me": "me.caf", "other": "other.caf", "started": isoString(now), "ended": NSNull()],
+                      dir.appendingPathComponent("job.json"))
             recorder = rec
             currentJob = dir
             startedAt = now

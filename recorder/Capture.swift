@@ -179,6 +179,8 @@ final class MeetingCapture {
     let url: URL
     private let engine = AVAudioEngine()
     private var file: AVAudioFile?
+    private var meFile: AVAudioFile?       // the microphone alone (your voice), beside the mix
+    private var otherFile: AVAudioFile?    // the Mac's sound alone (the other side), beside the mix
     private var stopped = false
     private var failures = 0
     private var micResampler: Resampler?
@@ -198,6 +200,14 @@ final class MeetingCapture {
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1,
                                        AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
         file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        // Two side tracks beside the mix: me.caf is the microphone alone, other.caf is the Mac's sound alone. They
+        // let a later listen tell the two voices apart, and a silent other.caf shows the other side never came in.
+        // They are optional: if they cannot open, the mix (which captions and the transcriber read) records as before.
+        let dir = url.deletingLastPathComponent()
+        meFile = try? AVAudioFile(forWriting: dir.appendingPathComponent("me.caf"), settings: settings,
+                                  commonFormat: .pcmFormatFloat32, interleaved: false)
+        otherFile = try? AVAudioFile(forWriting: dir.appendingPathComponent("other.caf"), settings: settings,
+                                     commonFormat: .pcmFormatFloat32, interleaved: false)
     }
 
     /// the microphone, and the Mac's sound when macOS lets Vinutes tap it
@@ -272,27 +282,57 @@ final class MeetingCapture {
         try engine.start()
     }
 
-    /// the microphone's samples plus as many of the Mac's sound, written and measured
-    private func mix(_ mic: AVAudioPCMBuffer) {
+    /// From one microphone buffer and the matching Mac-sound samples, make the two side tracks and mix the Mac's
+    /// sound into `mic` in place. Returns the microphone-alone track, the Mac's-sound-alone track, and the mix's
+    /// RMS. Pure (no files, no locks, no `self`), so it can be unit-tested; `mix` and the writers do the I/O.
+    /// `me` is a copy of the microphone taken before the mix overwrites it; `other` is the Mac's sound alone,
+    /// the same length as the mix. The three tracks advance together frame for frame; alignment is best-effort,
+    /// since a side track whose buffer can't be allocated or written in a given callback is skipped (rare — the
+    /// buffers are a few KB). The silent-`other.caf` signal and speaker separation tolerate such a rare slip.
+    static func tracks(mic: AVAudioPCMBuffer, other: [Float]) -> (me: AVAudioPCMBuffer?, other: AVAudioPCMBuffer?, rms: Float) {
         let n = Int(mic.frameLength)
-        let other = system.take(n)
-        guard let data = mic.floatChannelData?[0] else { return }
+        guard let data = mic.floatChannelData?[0] else { return (nil, nil, 0) }
+        let meTrack = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: mic.frameLength)
+        meTrack?.frameLength = mic.frameLength
+        if n > 0 { meTrack?.floatChannelData?[0].update(from: data, count: n) }
+        let otherTrack = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(max(n, 1)))
+        if n > 0, let od = otherTrack?.floatChannelData?[0] {
+            otherTrack?.frameLength = AVAudioFrameCount(n)
+            other.withUnsafeBufferPointer { od.update(from: $0.baseAddress!, count: min(n, other.count)) }
+            if other.count < n { for i in other.count..<n { od[i] = 0 } }
+        }
         var sum: Float = 0
         for i in 0..<n {
-            let v = data[i] + other[i]
+            let v = data[i] + (i < other.count ? other[i] : 0)
             let s = v > 1 ? 1 : v < -1 ? -1 : v
             data[i] = s
             sum += s * s
         }
         let rms = n > 0 ? sqrt(sum / Float(n)) : 0
+        return (meTrack, otherTrack, rms)
+    }
+
+    /// the microphone's samples plus as many of the Mac's sound, written and measured. The mix goes to the main
+    /// file; the microphone alone and the Mac's sound alone go to the two side tracks, so the two voices can be
+    /// told apart later and a silent other.caf shows the other side never came in.
+    private func mix(_ mic: AVAudioPCMBuffer) {
+        let n = Int(mic.frameLength)
+        let other = system.take(n)
+        let (meTrack, otherTrack, rms) = Self.tracks(mic: mic, other: other)
         powerLock.lock(); power = rms > 0 ? 20 * log10(rms) : -160; powerLock.unlock()
         writing.async { [weak self] in
-            guard let self, !self.stopped, !self.paused, let file = self.file else { return }
-            do { try file.write(from: mic) } catch {
-                self.failures += 1                       // a full disk: say so now and then, not every 85 ms
-                if self.failures == 1 || self.failures % 100 == 0 {
-                    self.note("could not write (\(self.failures)×): \(error.localizedDescription)")
+            guard let self, !self.stopped, !self.paused else { return }
+            if let file = self.file {
+                do { try file.write(from: mic) } catch {
+                    self.failures += 1                       // a full disk: say so now and then, not every 85 ms
+                    if self.failures == 1 || self.failures % 100 == 0 {
+                        self.note("could not write (\(self.failures)×): \(error.localizedDescription)")
+                    }
                 }
+            }
+            if n > 0 {                                   // both side tracks advance by n together, or neither does
+                if let meFile = self.meFile, let meTrack { try? meFile.write(from: meTrack) }
+                if let otherFile = self.otherFile, let otherTrack { try? otherFile.write(from: otherTrack) }
             }
         }
     }
@@ -320,9 +360,11 @@ final class MeetingCapture {
         engine.stop()
         if #available(macOS 14.2, *) { (systemSound as? SystemSound)?.stop() }
         systemSound = nil
-        writing.sync {                                      // everything heard is in the file, and it is closed
+        writing.sync {                                      // everything heard is in the files, and they are closed
             stopped = true
             file = nil
+            meFile = nil
+            otherFile = nil
         }
     }
 }

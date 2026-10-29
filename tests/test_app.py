@@ -914,6 +914,33 @@ class DocInWindow(Flows):
         r = self.typed_by({'me': True}, '主持人：[__]', '主持人：王小明')
         self.assertEqual([t['label'] for t in r['todo']], ['負責'])
 
+    def test_translated_minutes_relabel_the_side_panel_from_the_doc(self):
+        # The minutes were translated after they were generated: the stored to-fill list is still in the
+        # old language, but the Doc (MINUTES, Chinese) is what the user reads. The side panel must follow
+        # the Doc, not the stale list -- no old-language label survives, every card points at a blank still
+        # in the Doc, and a field that has been filled never shows.
+        result = json.loads((self.job_dir / 'result.json').read_text(encoding='utf-8'))
+        result['todo'] = [{'label': 'Chair', 'line': 'Chair:'},
+                          {'label': 'Other requirements', 'line': 'Further requirements discussed:'}]
+        (self.job_dir / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+        items = minutes_app.todo_items(self.job(), MINUTES)
+        labels = [it['label'] for it in items]
+        self.assertNotIn('Chair', labels)                        # the stale English label is gone
+        self.assertNotIn('Other requirements', labels)
+        self.assertTrue(labels)                                  # MINUTES still has blanks, so there are cards
+        for it in items:
+            self.assertIn(it['label'], MINUTES)                  # the label is taken from the Doc itself
+            self.assertIn(it['find'], MINUTES)                   # and so is the text to jump to
+
+    def test_a_blank_with_no_field_name_of_its_own_still_gets_a_card(self):
+        # A blank can sit where its own line names no field (a table cell). When the stored list does not
+        # name it either, the card must not vanish: the section heading stands in so the blank still shows.
+        md = ('# M\n\n## Section A\n\n| No | Item | Owner |\n|---|---|---|\n| 1 | [__] | [__] |\n')
+        result = json.loads((self.job_dir / 'result.json').read_text(encoding='utf-8'))
+        result['todo'] = [{'label': 'Owner', 'line': 'Owner missing'}]     # does not match the data row's blank
+        (self.job_dir / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+        self.assertEqual([it['label'] for it in minutes_app.todo_items(self.job(), md)], ['Section A'])
+
     def test_an_edit_drive_has_not_listed_yet_waits_for_the_next_refresh(self):
         r = self.typed_by({'me': True}, 'Threads 與 Instagram', 'Threads 與 IG', listed='2026-10-15T01:40:00.000Z')
         self.assertEqual(r['learned'], [])

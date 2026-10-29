@@ -1,8 +1,12 @@
 # Changelog
 
-## v0.4.26 (2026-10-29)
+## v0.4.27 (2026-10-29)
 
 - Beside the mixed `錄音.caf`, each recording now also keeps two tracks of its own: `me.caf` (your microphone alone) and `other.caf` (the Mac's sound alone — the other side of an online meeting). The mix is unchanged, and the captions and the transcriber still read it. The two side tracks make it possible to tell, after a meeting, whether the other side was recorded at all — a silent `other.caf` means it was not — and to tell the two voices apart. Groundwork for the Bluetooth-headset case, where the other side can come through poorly; it does not yet change how that case is handled.
+
+## v0.4.26 (2026-10-29)
+
+- The 待補充 (To fill) cards beside the minutes now follow the minutes as they stand, not the list made when the minutes were first written. After the assistant translated a set of minutes from English into Chinese, the cards stayed in English and kept showing fields that were already filled (the chair, say), because the panel read its labels from that first list and only looked at the Doc to tell whether a blank was still open — and the English labels no longer matched the Chinese Doc. Now each card is read from the current minutes: a card shows only while its own `[__]` is still open, and any blank the first list no longer names is read straight from the Doc (the field before it, a table row's first cell, or the section heading it sits under). So the cards are always in the minutes' own language, and a blank that has been filled no longer shows.
 
 ## v0.4.25 (2026-10-28)
 

@@ -66,6 +66,43 @@ enum CaptureTests {
             check(near(arr(mic), [0.3, 0.3, 0.1, 0.1]), "mix uses system where present, mic alone after")
         }
 
+        // 5. RateWatch: the Mac's sound that keeps coming at the rate it was set up for is left alone.
+        do {
+            var w = RateWatch(assumed: 48000)
+            var changed: [Double] = []
+            var t = 0.0
+            for _ in 0..<1000 { t += 0.01; if let r = w.add(480, at: t) { changed.append(r) } }   // 48 000 a second
+            check(changed.isEmpty, "a steady 48 kHz source is never switched")
+        }
+
+        // 6. RateWatch: Bluetooth earphones switch to their call mode and the output drops to 16 kHz.
+        do {
+            var w = RateWatch(assumed: 48000)
+            var changed: [Double] = []
+            var t = 0.0
+            for _ in 0..<300 { t += 0.01; if let r = w.add(480, at: t) { changed.append(r) } }   // 3 s at 48 kHz
+            for _ in 0..<500 { t += 0.01; if let r = w.add(160, at: t) { changed.append(r) } }   // then 16 kHz
+            check(changed == [16000], "a drop to 16 kHz is noticed once and named 16000 (got \(changed))")
+            check(w.assumed == 16000, "after the switch the watch expects 16 kHz")
+        }
+
+        // 7. RateWatch: one slow stretch (the tap starting up, a busy moment) is not taken for a new rate.
+        do {
+            var w = RateWatch(assumed: 48000)
+            var changed: [Double] = []
+            var t = 0.0
+            for _ in 0..<150 { t += 0.01; if let r = w.add(300, at: t) { changed.append(r) } }   // 1.5 s short
+            for _ in 0..<600 { t += 0.01; if let r = w.add(480, at: t) { changed.append(r) } }   // then normal
+            check(changed.isEmpty, "a single slow window does not switch the rate (got \(changed))")
+        }
+
+        // 8. RateWatch: 44.1 kHz is recognised as such, a rate nowhere near a usual one is ignored.
+        do {
+            check(RateWatch.nearest(44_000) == 44100, "44 000 a second is 44.1 kHz")
+            check(RateWatch.nearest(16_300) == 16000, "16 300 a second is 16 kHz")
+            check(RateWatch.nearest(37_000) == nil, "37 000 a second matches no usual rate")
+        }
+
         print(fails == 0 ? "\nALL PASSED" : "\n\(fails) FAILED")
         exit(fails == 0 ? 0 : 1)
     }

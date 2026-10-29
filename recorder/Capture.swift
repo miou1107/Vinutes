@@ -67,6 +67,44 @@ final class Resampler {
     }
 }
 
+/// Counts the frames a source really delivers against the clock. Bluetooth earphones switch to their call mode when a
+/// meeting app opens their microphone, and the Mac's output drops from 48 kHz to 16 kHz; read as 48 kHz, the other
+/// side of the 2026-10-29 meeting came out three times too fast. macOS tells the device's new rate, but not always
+/// in time: this notices it from the samples themselves.
+struct RateWatch {
+    static let rates: [Double] = [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000]
+    static let window: TimeInterval = 1.5
+    private(set) var assumed: Double
+    private var since: TimeInterval?
+    private var frames = 0
+    private var candidate: Double?
+
+    init(assumed: Double) { self.assumed = assumed }
+
+    /// `frames` came in at `now` (seconds). Answers the rate the source really runs at once two windows in a row
+    /// found the same usual rate, more than 4 % off `assumed`: one slow stretch (a tap starting up) is not enough.
+    mutating func add(_ frames: Int, at now: TimeInterval) -> Double? {
+        guard let start = since else { since = now; return nil }       // the first buffer only starts the clock
+        self.frames += frames
+        let span = now - start
+        guard span >= Self.window else { return nil }
+        let measured = Double(self.frames) / span
+        since = now
+        self.frames = 0
+        guard abs(measured - assumed) / assumed > 0.04, let rate = Self.nearest(measured) else { candidate = nil; return nil }
+        guard candidate == rate else { candidate = rate; return nil }
+        candidate = nil
+        assumed = rate
+        return rate
+    }
+
+    /// the usual sample rate within 4 % of `rate`, if there is one
+    static func nearest(_ rate: Double) -> Double? {
+        guard let best = rates.min(by: { abs($0 - rate) < abs($1 - rate) }), abs(best - rate) / best < 0.04 else { return nil }
+        return best
+    }
+}
+
 /// The sound every other app plays, from a process tap and a private aggregate device clocked by the output.
 @available(macOS 14.2, *)
 final class SystemSound {
@@ -75,10 +113,18 @@ final class SystemSound {
     private var proc: AudioDeviceIOProcID?
     private var resampler: Resampler?
     private var tapBuffers = 1
+    private var layout = AudioStreamBasicDescription()     // the tap's channels and sample format; the rate follows the device
+    private var watch = RateWatch(assumed: 48000)
+    private var rateListener: AudioObjectPropertyListenerBlock?
+    private let target: AVAudioFormat
+    private let note: (String) -> Void
     private let queue = DispatchQueue(label: "vinutes.system-sound")
 
     /// starts delivering 16 kHz mono buffers to `deliver`; throws when macOS has no way to tap
-    init(_ target: AVAudioFormat, deliver: @escaping (AVAudioPCMBuffer) -> Void) throws {
+    init(_ target: AVAudioFormat, note: @escaping (String) -> Void = { _ in },
+         deliver: @escaping (AVAudioPCMBuffer) -> Void) throws {
+        self.target = target
+        self.note = note
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: ownProcess().map { [$0] } ?? [])
         desc.uuid = UUID()
         desc.name = "Vinutes"
@@ -91,10 +137,10 @@ final class SystemSound {
         var address = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal,
                                                  mElement: kAudioObjectPropertyElementMain)
         try check(AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &format), "read the tap's format")
-        guard let source = AVAudioFormat(streamDescription: &format), let r = Resampler(from: source, to: target) else {
+        guard let source = AVAudioFormat(streamDescription: &format) else {
             throw NSError(domain: "capture", code: 1, userInfo: [NSLocalizedDescriptionKey: "unusable tap format"])
         }
-        resampler = r
+        layout = format
         tapBuffers = source.isInterleaved ? 1 : Int(source.channelCount)
 
         let output = try defaultOutputUID()
@@ -110,22 +156,56 @@ final class SystemSound {
                                                kAudioSubTapUIDKey: desc.uuid.uuidString]],
         ]
         try check(AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &device), "create the device")
+        // The samples come at the rate the output runs at, which is not always the tap's: Bluetooth earphones in their
+        // call mode run at 16 kHz. Read it from the device, follow it when it changes, and count it as a last resort.
+        let running = nominalRate(device)
+        useRate(running > 0 ? running : format.mSampleRate, why: "starts")
+        var rateAddress = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+                                                     mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self else { return }
+            let rate = nominalRate(self.device)
+            if rate > 0, rate != self.watch.assumed { self.useRate(rate, why: "macOS says it changed") }
+        }
+        rateListener = listener
+        AudioObjectAddPropertyListenerBlock(device, &rateAddress, queue, listener)
         try check(AudioDeviceCreateIOProcIDWithBlock(&proc, device, queue) { [weak self] _, input, _, _, _ in
             // the tap's buffers come last: an output that also has a microphone (a headset) puts its own first
-            guard let self, let r = self.resampler else { return }
+            guard let self, self.resampler != nil else { return }
             let all = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
             guard all.count >= self.tapBuffers else { return }
             let list = AudioBufferList.allocate(maximumBuffers: self.tapBuffers)
             defer { free(list.unsafeMutablePointer) }
             for i in 0..<self.tapBuffers { list[i] = all[all.count - self.tapBuffers + i] }
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: r.converter.inputFormat, bufferListNoCopy: list.unsafePointer),
+            let frames = Int(list[0].mDataByteSize) / max(1, Int(self.layout.mBytesPerFrame))
+            if let rate = self.watch.add(frames, at: CACurrentMediaTime()) { self.useRate(rate, why: "counted") }
+            guard let r = self.resampler,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: r.converter.inputFormat, bufferListNoCopy: list.unsafePointer),
                   let mono = r.convert(buffer) else { return }
             deliver(mono)
         }, "listen to the device")
         try check(AudioDeviceStart(device, proc), "start the device")
     }
 
+    /// From now on read the samples as `rate` a second (on `queue`, or before the device starts).
+    private func useRate(_ rate: Double, why: String) {
+        var asbd = layout
+        asbd.mSampleRate = rate
+        guard let source = AVAudioFormat(streamDescription: &asbd), let r = Resampler(from: source, to: target) else {
+            return note("the Mac's sound at \(Int(rate)) Hz cannot be converted")
+        }
+        resampler = r
+        watch = RateWatch(assumed: rate)
+        note("the Mac's sound runs at \(Int(rate)) Hz (\(why))")
+    }
+
     func stop() {
+        if let rateListener {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+                                                     mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(device, &address, queue, rateListener)
+        }
+        rateListener = nil
         if let proc {
             AudioDeviceStop(device, proc)
             AudioDeviceDestroyIOProcID(device, proc)
@@ -158,6 +238,15 @@ private func ownProcess() -> AudioObjectID? {
     return status == noErr && object != kAudioObjectUnknown ? object : nil
 }
 
+/// the rate a device runs at now, 0 when it cannot be read
+private func nominalRate(_ device: AudioObjectID) -> Double {
+    var rate = 0.0
+    var size = UInt32(MemoryLayout<Double>.size)
+    var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
+                                             mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    return AudioObjectGetPropertyData(device, &address, 0, nil, &size, &rate) == noErr ? rate : 0
+}
+
 private func defaultOutputUID() throws -> String {
     var device = AudioObjectID(kAudioObjectUnknown)
     var size = UInt32(MemoryLayout<AudioObjectID>.size)
@@ -171,6 +260,84 @@ private func defaultOutputUID() throws -> String {
     try check(AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid), "read the output's id")
     guard let name = uid?.takeRetainedValue() as String? else { throw NSError(domain: "capture", code: 2) }
     return name
+}
+
+/// A microphone of this Mac, as the 麥克風 menu lists it; settings.json keeps the chosen one's uid ("microphone").
+struct Microphone {
+    let uid: String
+    let name: String
+}
+
+private func stringProperty(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
+    var value: Unmanaged<CFString>?
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                             mElement: kAudioObjectPropertyElementMain)
+    guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr else { return nil }
+    return value?.takeRetainedValue() as String?
+}
+
+private func objects(_ selector: AudioObjectPropertySelector) -> [AudioObjectID] {
+    var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                             mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+    var list = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &list) == noErr else { return [] }
+    return list
+}
+
+private func inputChannels(_ device: AudioObjectID) -> Int {
+    var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration,
+                                             mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else { return 0 }
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+    defer { raw.deallocate() }
+    let list = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, list) == noErr else { return 0 }
+    return UnsafeMutableAudioBufferListPointer(list).reduce(0) { $0 + Int($1.mNumberChannels) }
+}
+
+/// every microphone macOS has now (built in, Bluetooth earphones, a headset on the cable), Vinutes' own devices left out
+func microphones() -> [Microphone] {
+    objects(kAudioHardwarePropertyDevices).compactMap { device in
+        guard inputChannels(device) > 0, let uid = stringProperty(device, kAudioDevicePropertyDeviceUID),
+              !uid.hasPrefix("vinutes-"), let name = stringProperty(device, kAudioObjectPropertyName) else { return nil }
+        return Microphone(uid: uid, name: name)
+    }
+}
+
+private func device(uid: String) -> AudioObjectID? {
+    var id = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var cf = uid as CFString
+    var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+                                             mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    let status = withUnsafeMutablePointer(to: &cf) {
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address,
+                                   UInt32(MemoryLayout<CFString>.size), $0, &size, &id)
+    }
+    return status == noErr && id != kAudioObjectUnknown ? id : nil
+}
+
+/// Whether another app has a microphone open right now: Teams, Zoom or a browser in a call do, a room meeting has none.
+/// The bar only warns that the other side is silent while this is so.
+func otherAppUsesMicrophone() -> Bool {
+    guard #available(macOS 14.2, *) else { return false }
+    let me = getpid()
+    return objects(kAudioHardwarePropertyProcessObjectList).contains { process in
+        var pid: pid_t = 0
+        var running: UInt32 = 0
+        var size = UInt32(MemoryLayout<pid_t>.size)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyPID, mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(process, &address, 0, nil, &size, &pid) == noErr, pid != me else { return false }
+        size = UInt32(MemoryLayout<UInt32>.size)
+        address.mSelector = kAudioProcessPropertyIsRunningInput
+        return AudioObjectGetPropertyData(process, &address, 0, nil, &size, &running) == noErr && running != 0
+    }
 }
 
 /// The recording: microphone plus the Mac's sound, written as they come in. Replaces AVAudioRecorder.
@@ -189,10 +356,15 @@ final class MeetingCapture {
     private let writing = DispatchQueue(label: "vinutes.capture")
     private var paused = false
     private var power: Float = -160
+    private var mePower: Float = -160
+    private var otherPower: Float = -160
+    private var otherHeardAt = CACurrentMediaTime()
     private let powerLock = NSLock()
     private var observer: NSObjectProtocol?
     private var outputListener: AudioObjectPropertyListenerBlock?
     private(set) var hearsSystem = false
+    /// the microphone to record, by uid; "" records the one macOS uses now (自動)
+    var microphone = ""
     var note: (String) -> Void = { _ in }
 
     init(url: URL) throws {
@@ -248,7 +420,9 @@ final class MeetingCapture {
             systemSound = nil
             system.clear()
             do {
-                systemSound = try SystemSound(Self.format) { [weak self] in self?.system.push($0) }
+                systemSound = try SystemSound(Self.format, note: { [weak self] in self?.note($0) }) { [weak self] in
+                    self?.system.push($0)
+                }
                 hearsSystem = true
                 note("asked for the Mac's sound too (silent if macOS was not allowed to share it)")
             } catch {
@@ -260,8 +434,28 @@ final class MeetingCapture {
         }
     }
 
+    /// Records `uid` from now on ("" for the one macOS uses), also in the middle of a recording.
+    func useMicrophone(_ uid: String) throws {
+        microphone = uid
+        guard !stopped else { return }
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        system.clear()                              // what queued meanwhile would come late
+        try startMicrophone()
+    }
+
     private func startMicrophone() throws {
         let input = engine.inputNode
+        if !microphone.isEmpty {
+            // the chosen one when it is here; gone (earphones put away), the one macOS uses, as with 自動
+            if var id = device(uid: microphone), let unit = input.audioUnit {
+                let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                                  &id, UInt32(MemoryLayout<AudioObjectID>.size))
+                note(status == noErr ? "microphone: \(microphone)" : "could not choose the microphone (\(status))")
+            } else {
+                note("the chosen microphone is not connected: recording the Mac's own choice")
+            }
+        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0,
               let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1,
@@ -319,7 +513,14 @@ final class MeetingCapture {
         let n = Int(mic.frameLength)
         let other = system.take(n)
         let (meTrack, otherTrack, rms) = Self.tracks(mic: mic, other: other)
-        powerLock.lock(); power = rms > 0 ? 20 * log10(rms) : -160; powerLock.unlock()
+        let meRMS = meTrack.map { Self.rms($0) } ?? 0
+        let otherRMS = otherTrack.map { Self.rms($0) } ?? 0
+        powerLock.lock()
+        power = Self.decibels(rms)
+        mePower = Self.decibels(meRMS)
+        otherPower = Self.decibels(otherRMS)
+        if otherPower > Self.heard { otherHeardAt = CACurrentMediaTime() }
+        powerLock.unlock()
         writing.async { [weak self] in
             guard let self, !self.stopped, !self.paused else { return }
             if let file = self.file {
@@ -341,11 +542,32 @@ final class MeetingCapture {
 
     func resume() {
         system.clear()
+        powerLock.lock(); otherHeardAt = CACurrentMediaTime(); powerLock.unlock()   // a pause is not the other side's silence
         writing.async { self.paused = false }
     }
 
     /// how loud the last moment was, in dB (about -50 is a quiet room, 0 loud)
     var averagePower: Float { powerLock.lock(); defer { powerLock.unlock() }; return power }
+
+    /// the last moment of the microphone alone (我) and of the Mac's sound alone (對方), in dB
+    var levels: (me: Float, other: Float) { powerLock.lock(); defer { powerLock.unlock() }; return (mePower, otherPower) }
+
+    /// how many seconds the Mac's sound has been silent (below -55 dB)
+    var otherSilentFor: TimeInterval {
+        powerLock.lock(); defer { powerLock.unlock() }
+        return CACurrentMediaTime() - otherHeardAt
+    }
+
+    static let heard: Float = -55
+
+    static func rms(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let d = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
+        var sum: Float = 0
+        for i in 0..<Int(buffer.frameLength) { sum += d[i] * d[i] }
+        return sqrt(sum / Float(buffer.frameLength))
+    }
+
+    static func decibels(_ rms: Float) -> Float { rms > 0 ? 20 * log10(rms) : -160 }
 
     func stop() {
         if let observer { NotificationCenter.default.removeObserver(observer) }

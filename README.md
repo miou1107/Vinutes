@@ -6,7 +6,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 
 ## What it does
 
-- **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on. In an online meeting it records the other side too, also with headphones on (macOS 14.2 and later).
+- **Records from the menu bar.** Start with one click or ⌃⌥R, pause and resume while the meeting goes on. In an online meeting it records the other side too, with Bluetooth earphones, wired headphones or the speakers (macOS 14.2 and later). While it records, 我 (Me) and 對方 (Others) each have their own bars, so you can see both sides coming in; Settings > Microphone picks which microphone to record.
 - **Transcribes on your Mac.** Audio is turned into text locally with Whisper and is not uploaded. Most of it is transcribed while the meeting is still going, a few minutes at a time, so the transcript is ready about a minute after you press Stop. For Chinese meetings you can switch to Qwen3-ASR in the setup checklist (item 3, Change): it hears names and quiet speakers better and punctuates, at the cost of a 4 GB download.
 - **Shows live captions.** CC on the floating bar shows what people are saying, under the bar, as they say it (macOS 26 and later). The captions are made on your Mac and are not written into the transcript.
 - **Tells speakers apart** by their voices. In the People tab you pick who each voice is: the minutes and the email change to that name, and the next meeting recognises the voice. You can pick while the AI is rewriting the minutes; the name goes in once it is done.

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.28 (2026-10-29)
+
+- The other side of an online meeting is recorded right with Bluetooth earphones too. When a meeting app opens the earphones' microphone, the earphones switch to their call mode and the Mac plays sound at 16 kHz instead of 48 kHz; Vinutes kept reading it as 48 kHz, so the other side came out three times too fast, and the transcript of the 2026-10-29 meeting was English-looking noise. Vinutes now follows the rate macOS reports, and also counts the samples coming in, so a change macOS does not report is caught within about three seconds. The same holds when the output changes in the middle of a meeting (earphones connected, wired headphones plugged in, back to the speakers).
+- Settings has 麥克風 (Microphone): 自動 (Automatic, the one macOS uses) or any microphone of this Mac, such as the built-in one or the earphones. Picking one while recording switches at once. A chosen microphone that is not connected records the Mac's own choice.
+- While recording, 我 (Me) and 對方 (Others) each have their own bars on the floating bar and in the menu-bar panel. When another app has a microphone open (an online meeting is on) and the other side has been silent for two minutes, the floating bar shows 沒收到對方聲音 (No sound from the other side) in yellow, until sound comes in again.
+
 ## v0.4.27 (2026-10-29)
 
 - Beside the mixed `錄音.caf`, each recording now also keeps two tracks of its own: `me.caf` (your microphone alone) and `other.caf` (the Mac's sound alone — the other side of an online meeting). The mix is unchanged, and the captions and the transcriber still read it. The two side tracks make it possible to tell, after a meeting, whether the other side was recorded at all — a silent `other.caf` means it was not — and to tell the two voices apart. Groundwork for the Bluetooth-headset case, where the other side can come through poorly; it does not yet change how that case is handled.

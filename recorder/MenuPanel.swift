@@ -9,7 +9,9 @@ import AppKit
 final class MenuPanel: NSObject, NSPopoverDelegate {
     weak var owner: AppDelegate?
     let popover = NSPopover()
-    let bars = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))
+    let bars = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))          // 我: the microphone
+    let otherBars = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))     // 對方: the Mac's sound
+    private let meters = NSStackView()
     private let round = RoundButton()
     private let label = NSTextField(labelWithString: "")
     private let hint = NSTextField(labelWithString: "")
@@ -61,8 +63,21 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         hint.textColor = .secondaryLabelColor
         labelRow.orientation = .horizontal
         labelRow.spacing = 8
-        labelRow.addArrangedSubview(bars)
         labelRow.addArrangedSubview(label)
+        // under the time, 我 and 對方 each with its own bars (Vin 2026-10-29): a glance shows both sides come in
+        meters.orientation = .vertical
+        meters.alignment = .leading
+        meters.spacing = 2
+        for (name, view) in [(tr("bar.me"), bars), (tr("bar.other"), otherBars)] {
+            let tag = NSTextField(labelWithString: name)
+            tag.font = .systemFont(ofSize: 12, weight: .semibold)
+            tag.textColor = .secondaryLabelColor
+            tag.widthAnchor.constraint(equalToConstant: 36).isActive = true
+            let line = NSStackView(views: [tag, view])
+            line.orientation = .horizontal
+            line.spacing = 6
+            meters.addArrangedSubview(line)
+        }
         pause.bezelStyle = .rounded
         pause.controlSize = .large
         pause.target = self
@@ -72,7 +87,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         controls.spacing = 8
         controls.addArrangedSubview(pause)
 
-        let top = NSStackView(views: [round, labelRow, hint, controls])
+        let top = NSStackView(views: [round, labelRow, meters, hint, controls])
         top.orientation = .vertical
         top.alignment = .centerX
         top.spacing = 6
@@ -185,7 +200,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         let rec = owner.recording
         round.recording = rec
         round.setAccessibilityLabel(rec ? tr("menu.stop") : tr("menu.start"))
-        bars.isHidden = !rec
+        meters.isHidden = !rec
         if rec {
             label.stringValue = clock(owner.elapsed)
             label.textColor = owner.paused ? .secondaryLabelColor : .labelColor
@@ -193,7 +208,7 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
             pause.title = owner.paused ? tr("panel.resume") : tr("menu.pause")
             pause.image = symbol(owner.paused ? "play.fill" : "pause.fill", 12, .semibold)
             pause.imagePosition = .imageLeading
-            if owner.paused { bars.show(level: 0, paused: true) }
+            if owner.paused { bars.show(level: 0, paused: true); otherBars.show(level: 0, paused: true) }
         } else {
             label.stringValue = tr("menu.start")
             label.textColor = .labelColor
@@ -250,10 +265,11 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         versionRow.setHuggingPriority(.defaultLow, for: .horizontal)
     }
 
-    /// The level bars jump with the microphone, as on the floating bar.
-    func listen(level: CGFloat, paused: Bool) {
+    /// The two rows of bars jump with the microphone (我) and the Mac's sound (對方), as on the floating bar.
+    func listen(me: CGFloat, other: CGFloat, paused: Bool) {
         guard popover.isShown else { return }
-        bars.show(level: level, paused: paused)
+        bars.show(level: me, paused: paused)
+        otherBars.show(level: other, paused: paused)
     }
 
     /// Whether GitHub has a newer version: the same check the meeting window's corner uses (at most once an hour).

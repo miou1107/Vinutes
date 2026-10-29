@@ -94,6 +94,8 @@ let STRINGS: [String: [String: String]] = [
         "menu.languageAuto": "Same as Mac",
         "menu.meetingLanguage": "Meeting Language",
         "menu.meetingAuto": "Detect Automatically",
+        "menu.microphone": "Microphone",
+        "menu.microphoneAuto": "Automatic",
         "panel.all": "All Meetings",
         "panel.usage": "Usage",
         "panel.quit": "Quit",
@@ -130,6 +132,9 @@ let STRINGS: [String: [String: String]] = [
         "bar.stop": "Stop recording (⌃⌥R)",
         "bar.captions": "Live captions on your screen only; not saved in the transcript",
         "bar.captionLanguage": "Caption language",
+        "bar.me": "Me",
+        "bar.other": "Others",
+        "bar.noOther": "No sound from the other side",
         "caption.downloading": "Downloading %@ captions, the first time only…",
         "caption.unsupported": "No live captions for this language",
         "caption.failed": "Captions stopped. Press CC twice to try again.",
@@ -206,6 +211,8 @@ let STRINGS: [String: [String: String]] = [
         "menu.languageAuto": "自動判斷",
         "menu.meetingLanguage": "會議語言",
         "menu.meetingAuto": "自動判斷",
+        "menu.microphone": "麥克風",
+        "menu.microphoneAuto": "自動",
         "panel.all": "所有會議",
         "panel.usage": "用量統計",
         "panel.quit": "退出",
@@ -242,6 +249,9 @@ let STRINGS: [String: [String: String]] = [
         "bar.stop": "結束錄音（⌃⌥R）",
         "bar.captions": "即時字幕：只顯示在你的螢幕上，不會寫進逐字稿",
         "bar.captionLanguage": "字幕語言",
+        "bar.me": "我",
+        "bar.other": "對方",
+        "bar.noOther": "沒收到對方聲音",
         "caption.downloading": "正在下載%@字幕資料，只有第一次要等…",
         "caption.unsupported": "這個語言沒有即時字幕",
         "caption.failed": "字幕停了，按兩下 CC 可以重試",
@@ -504,6 +514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sub.addItem(.separator())
         sub.addItem(languageItem())
         sub.addItem(meetingLanguageItem())
+        sub.addItem(microphoneItem())
         sub.addItem(.separator())
         sub.addItem(item(tr("menu.folder"), #selector(openFolder), image: "folder"))
         return sub
@@ -571,6 +582,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard let lang = sender.representedObject as? String else { return }
         setLanguage(lang)
         manager?.languageChanged()
+    }
+
+    /// Settings > Microphone: 自動 (the one macOS uses) or one of this Mac's microphones, like a screen recorder's
+    /// source list (Vin 2026-10-29). The Mac's sound, the other side of an online meeting, is always recorded too.
+    func microphoneItem() -> NSMenuItem {
+        let it = item(tr("menu.microphone"), #selector(noop), image: "mic")
+        it.action = nil
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let current = readJSON(settingsFile)["microphone"] as? String ?? ""
+        let mics = microphones()
+        let chosen = mics.contains { $0.uid == current } ? current : ""     // a chosen one put away shows as 自動
+        let auto = item(tr("menu.microphoneAuto"), #selector(pickMicrophone(_:)))
+        auto.representedObject = ""
+        auto.state = chosen.isEmpty ? .on : .off
+        sub.addItem(auto)
+        sub.addItem(.separator())
+        for mic in mics {
+            let choice = item(mic.name, #selector(pickMicrophone(_:)))
+            choice.representedObject = mic.uid
+            choice.state = mic.uid == chosen ? .on : .off
+            sub.addItem(choice)
+        }
+        it.submenu = sub
+        return it
+    }
+
+    @objc func pickMicrophone(_ sender: NSMenuItem) {
+        guard let uid = sender.representedObject as? String else { return }
+        saveSetting("microphone", uid)
+        appLog("microphone: \(uid.isEmpty ? "automatic" : uid)")
+        do { try recorder?.useMicrophone(uid) } catch { appLog("recording: the microphone could not start: \(error.localizedDescription)") }
     }
 
     @objc func pickMeetingLanguage(_ sender: NSMenuItem) {
@@ -698,8 +741,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // the microphone and the sound the Mac plays (an online meeting's other side) together (Capture.swift)
             let rec = try MeetingCapture(url: dir.appendingPathComponent("錄音.caf"))
             rec.note = { appLog("recording: \($0)") }
+            rec.microphone = readJSON(settingsFile)["microphone"] as? String ?? ""
             try rec.start()
-            writeJSON(["audio": "錄音.caf", "started": isoString(now), "ended": NSNull()], dir.appendingPathComponent("job.json"))
+            writeJSON(["audio": "錄音.caf", "me": "me.caf", "other": "other.caf", "started": isoString(now), "ended": NSNull()],
+                      dir.appendingPathComponent("job.json"))
             recorder = rec
             currentJob = dir
             startedAt = now
@@ -1322,7 +1367,12 @@ final class LevelBars: NSView {
 final class RecordingBar: NSObject {
     weak var owner: AppDelegate?
     let panel: NSPanel
-    let dot = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))
+    let dot = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))         // 我: the microphone
+    let otherDot = LevelBars(frame: NSRect(x: 0, y: 0, width: 23, height: 18))    // 對方: the Mac's sound
+    let warning = NSStackView()
+    var row: NSStackView!
+    var inCall = false
+    var ticks = 0
     var meter: Timer?
     var ccButton: NSButton?
     var langButton: NSButton?
@@ -1363,9 +1413,24 @@ final class RecordingBar: NSObject {
         panel.contentView = fx
 
         time.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        // as wide as an hour-long recording from the start, so the bar does not grow past 1:00:00
+        let hour = NSAttributedString(string: "0:00:00", attributes: [.font: time.font!]).size().width
+        time.widthAnchor.constraint(equalToConstant: ceil(hour) + 2).isActive = true
         pauseButton = button("pause.fill", #selector(AppDelegate.togglePause), tr("bar.pause"))
         stopButton = button("stop.fill", #selector(AppDelegate.stopRecording), tr("bar.stop"))
-        var views: [NSView] = [dot, time]
+        // 我 and 對方 each with its own bars (Vin 2026-10-29), and a yellow 沒收到對方聲音 after the time when an online
+        // meeting runs but the other side has been silent for two minutes
+        let meLabel = barLabel(tr("bar.me")), otherLabel = barLabel(tr("bar.other"))
+        let warn = NSTextField(labelWithString: tr("bar.noOther"))
+        warn.font = .systemFont(ofSize: 11, weight: .semibold)
+        warn.textColor = .black
+        warning.addArrangedSubview(warn)
+        warning.edgeInsets = NSEdgeInsets(top: 2, left: 8, bottom: 2, right: 8)
+        warning.wantsLayer = true
+        warning.layer?.backgroundColor = NSColor.systemYellow.cgColor
+        warning.layer?.cornerRadius = 9
+        warning.isHidden = true
+        var views: [NSView] = [meLabel, dot, otherLabel, otherDot, time, warning]
         if #available(macOS 26.0, *) {
             let cc = NSButton(image: symbol("captions.bubble", 14, .semibold) ?? NSImage(), target: self, action: #selector(toggleCaptions))
             cc.isBordered = false
@@ -1380,9 +1445,11 @@ final class RecordingBar: NSObject {
         }
         views += [pauseButton, stopButton]
         let row = NSStackView(views: views)
+        self.row = row
         row.orientation = .horizontal
         row.spacing = 10
-        row.setCustomSpacing(6, after: dot)
+        row.setCustomSpacing(4, after: meLabel)
+        row.setCustomSpacing(4, after: otherLabel)
         if let cc = ccButton { row.setCustomSpacing(1, after: cc) }
         row.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 12)
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -1391,11 +1458,28 @@ final class RecordingBar: NSObject {
                                      row.trailingAnchor.constraint(equalTo: fx.trailingAnchor),
                                      row.centerYAnchor.constraint(equalTo: fx.centerYAnchor)])
         panel.setFrameAutosaveName("RecordingBar")
-        if ccButton != nil { panel.setContentSize(NSSize(width: 204, height: 38)) }
+        panel.setContentSize(NSSize(width: ceil(row.fittingSize.width), height: 38))
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.align = self.captions.place(under: self.panel.frame)
         }
+    }
+
+    func barLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    /// 沒收到對方聲音 shown or hidden; the bar grows or shrinks to the left, so its right end stays where it was
+    func showWarning(_ on: Bool) {
+        guard warning.isHidden == on else { return }
+        warning.isHidden = !on
+        let right = panel.frame.maxX
+        let width = ceil(row.fittingSize.width)
+        panel.setFrame(NSRect(x: right - width, y: panel.frame.minY, width: width, height: panel.frame.height), display: true)
+        align = captions.place(under: panel.frame)
     }
 
     func button(_ image: String, _ action: Selector, _ tip: String) -> NSButton {
@@ -1410,6 +1494,12 @@ final class RecordingBar: NSObject {
         if !panel.setFrameUsingName("RecordingBar"), let screen = NSScreen.main?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: screen.maxX - panel.frame.width - 24, y: screen.maxY - panel.frame.height - 14))
         }
+        // a width saved before 我 and 對方 were on the bar is too narrow: fit the bar again, keeping its right end
+        warning.isHidden = true
+        inCall = false
+        ticks = 0
+        let saved = panel.frame, width = ceil(row.fittingSize.width)
+        panel.setFrame(NSRect(x: saved.maxX - width, y: saved.minY, width: width, height: saved.height), display: false)
         // a place saved when the bar was narrower can leave its right end off the screen
         if let screen = (NSScreen.screens.first { $0.frame.intersects(panel.frame) } ?? NSScreen.main)?.visibleFrame {
             let f = panel.frame
@@ -1489,14 +1579,21 @@ final class RecordingBar: NSObject {
     /// about -50 dB and below counts as a quiet room, 0 dB as loud
     func listen() {
         guard let owner, owner.recording, let rec = owner.recorder else { return }
-        let level = CGFloat(max(0, min(1, (rec.averagePower + 50) / 50)))
-        dot.show(level: level, paused: owner.paused)
-        owner.panel?.listen(level: level, paused: owner.paused)
+        let (me, other) = rec.levels
+        let meLevel = CGFloat(max(0, min(1, (me + 50) / 50)))
+        let otherLevel = CGFloat(max(0, min(1, (other + 50) / 50)))
+        dot.show(level: meLevel, paused: owner.paused)
+        otherDot.show(level: otherLevel, paused: owner.paused)
+        owner.panel?.listen(me: meLevel, other: otherLevel, paused: owner.paused)
+        // every two seconds: is an online meeting running (another app has a microphone open)?
+        ticks += 1
+        if ticks % 15 == 1 { inCall = otherAppUsesMicrophone() }
+        showWarning(!owner.paused && inCall && rec.otherSilentFor >= 120)
     }
 
     func update() {
         guard let owner, owner.recording else { return }
-        if owner.paused { dot.show(level: 0, paused: true) }
+        if owner.paused { dot.show(level: 0, paused: true); otherDot.show(level: 0, paused: true) }
 
         time.stringValue = clock(owner.elapsed)
         time.textColor = owner.paused ? .secondaryLabelColor : .labelColor

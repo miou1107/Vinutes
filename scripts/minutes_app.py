@@ -17,6 +17,7 @@ Usage (the app runs these; each prints one last line `JSON {...}`, or exits with
   minutes_app.py resolve <job> <comment id>        mark a comment resolved
   minutes_app.py confirm <job> <item>              the user checked one of Claude's guesses (待確認)
   minutes_app.py skip <job> <item>                 the user leaves a guess as it is: the card goes, nothing learned
+  minutes_app.py skip_blank <job> <item>           a 待補充 blank left unfilled: it goes from the minutes
   minutes_app.py drop_voice <job> <letter> [back]  移除講者 X under 人員 (a voice that is no one), or put it back
   minutes_app.py correct <job> <item> <right>      the user puts a guess right: Claude changes the minutes to it
   minutes_app.py ask_many <job> <json>             requests still waiting when the window closed, one after another
@@ -719,6 +720,83 @@ def todo_items(job: Job, md: str) -> list[dict]:
             if label:
                 items.append({'label': label, 'anchor': label, 'find': find_words(plains, label)})
     return items
+
+
+CLAUSE_ENDS, SENTENCE_ENDS = '；;，,。.', '。.'
+LEAD = re.compile(r'^\s*(?:(?:[-*+]|\d+[.)])\s+|#+\s+)?')     # a list mark or heading, never the ** of bold
+
+
+def without_blank(md: str, label: str, anchor: str) -> str:
+    """The minutes with the blanks of one 待補充 item taken out (略過), on the line `anchor` or `label` points at:
+    each blank goes with the words around it up to the next ；，。 (「；時程 [__]」), a line left with nothing goes,
+    and a table cell left with nothing stays as an empty cell. Every blank on that line goes, as the item stands
+    for the line. Unchanged when no such line holds a blank."""
+    lines = md.splitlines(keepends=True)
+    at = blank_line(lines, label, anchor)
+    if at is None:
+        return md
+    line = lines[at]
+    body, end = line.rstrip('\n'), line[len(line.rstrip('\n')):]
+    while BLANK in body:
+        body = clause_out(body, body.find(BLANK))
+        if body is None:
+            return ''.join(lines[:at] + lines[at + 1:])
+    lines[at] = body + end
+    return ''.join(lines)
+
+
+def blank_line(lines: list[str], label: str, anchor: str) -> int | None:
+    """The line holding the item's blank, found the way todo_items names it: a table row whose cell is the name
+    (簡報, not the row 簡報修正), else a line holding the words, else a bare blank under the section it is named after."""
+    plain = lambda s: re.sub(r'\*\*|__(?!\])|`', '', s)
+    cells = lambda s: [plain(c).strip() for c in s.split('|')] if s.lstrip().startswith('|') else []
+    keys = [k for k in (anchor, label) if k]
+    for match in (lambda k, s: k in cells(s), lambda k, s: k in plain(s)):
+        for key in keys:
+            hit = next((i for i, s in enumerate(lines) if BLANK in s and match(key, s)), None)
+            if hit is not None:
+                return hit
+    for i, s in enumerate(lines):
+        if s.lstrip().startswith('#') and any(plain(s).strip('# \n') == k for k in keys):
+            for j in range(i + 1, len(lines)):
+                if lines[j].lstrip().startswith('#'):
+                    break
+                if BLANK in lines[j] and not lines[j].split(BLANK)[0].lstrip('-*#.、0123456789 ').strip():
+                    return j
+    return None
+
+
+def clause_out(body: str, k: int) -> str | None:
+    """`body` (one line) without the blank at `k` and its clause; None when the line is left with nothing."""
+    cell = body.lstrip().startswith('|')
+    if cell:
+        lo, hi = body.rfind('|', 0, k) + 1, body.find('|', k)
+        hi = len(body) if hi < 0 else hi
+    else:
+        lo, hi = LEAD.match(body).end(), len(body)
+    seg = body[lo:hi]
+    first = lo + len(seg) - len(seg.lstrip())
+    last = lo + len(seg.rstrip())
+    ends = lambda a, b: [i for i in range(a, b) if body[i] in CLAUSE_ENDS
+                         and (body[i] != '.' or i + 1 >= last or body[i + 1] == ' ')]   # 2.5 is no end
+    before = max(ends(first, k), default=-1)
+    after = min(ends(k + len(BLANK), last), default=-1)
+    if before >= 0 and body[before] in SENTENCE_ENDS:  # the sentence before it stays whole, with its 。
+        first, before = before + 1, -1
+        while first < k and body[first] == ' ':
+            first += 1
+    if before >= 0 and after >= 0:
+        return body[:before] + body[after:]
+    if after >= 0:
+        rest = after + 1
+        while rest < last and body[rest] == ' ':
+            rest += 1
+        return body[:first] + body[rest:]
+    if before >= 0:
+        return body[:before] + body[last:]
+    if body[lo:first].strip():                       # only the sentence before the blank is left
+        return body[:first].rstrip() + body[last:]
+    return body[:lo] + '  ' + body[hi:] if cell else None
 
 
 def blank_label(unit: str, fallback: str = '') -> str:
@@ -2375,6 +2453,38 @@ def cmd_skip(job: Job, label: str):
     out({'check': check_items(job)})
 
 
+def cmd_skip_blank(job: Job, label: str):
+    """略過 on a 待補充 item: the blank is not going to be filled, so it goes from the minutes with the words that
+    ask for it (without_blank). Kept for 復原 the way a change by Claude is."""
+    learned = cmd_learn(job)
+    if job.doc_id and not connect():                 # from the Doc as it is now
+        sync_up(job)
+        try:
+            pull(job)
+        except SystemExit:
+            pass
+    md = job.md
+    item = next((i for i in todo_items(job, md) if i['label'] == label), None)
+    new = without_blank(md, item['label'], item['anchor']) if item else md
+    if new == md:
+        sys.exit(t('check_missing'))
+    if job.doc_id and doc_sync.shapes(doc_sync.parse(md)[1]) != doc_sync.shapes(doc_sync.parse(new)[1]):
+        why = whole_upload_blocked(job)              # a line taken out: the Doc is sent again as a whole
+        if why:
+            sys.exit(why)
+    (job.dir / '復原.md').write_text(md, encoding='utf-8')
+    (job.dir / '復原後.md').write_text(new, encoding='utf-8')
+    relearn(job, md, new)                            # not learned as the user's way of writing
+    result = push_edit(job, new, who=me())
+    if result['dropped']:
+        for name in ('復原.md', '復原後.md'):
+            (job.dir / name).unlink(missing_ok=True)
+    else:
+        job.log(me(), t('log_skipped', label=label), 'edit')
+    job.save_state()
+    answer(job, result, html=True, learned=learned)
+
+
 # what the AI is told when the user puts a guess right, in the minutes' language
 CORRECT = {
     'zh-TW': {'heard': '逐字稿的「{heard}」在會議記錄裡寫成「{meant}」，正確的是「{right}」。把指這個的「{meant}」都改成'
@@ -3008,8 +3118,8 @@ def cmd_locate(job: Job, words: str):
 
 TURN: list = []
 CHANGES = {'attach', 'save', 'learn', 'unlearn', 'relearn', 'move_learned', 'ask', 'quick', 'undo', 'reply', 'resolve', 'confirm', 'refresh',
-           'people', 'speaker', 'note', 'replace', 'skip', 'correct', 'drop_voice', 'ask_many'}
-NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace', 'correct', 'ask_many'}
+           'people', 'speaker', 'note', 'replace', 'skip', 'skip_blank', 'correct', 'drop_voice', 'ask_many'}
+NEEDS_FILE = {'attach', 'save', 'learn', 'ask', 'quick', 'undo', 'note', 'replace', 'skip_blank', 'correct', 'ask_many'}
 
 
 def wait_for_turn(job: Job):
@@ -3129,6 +3239,8 @@ def main():
         cmd_drop_voice(job, rest[0], len(rest) > 1 and rest[1] == 'back')
     elif cmd == 'skip' and rest:
         cmd_skip(job, ' '.join(rest))
+    elif cmd == 'skip_blank' and rest:
+        cmd_skip_blank(job, ' '.join(rest))
     elif cmd == 'correct' and len(rest) == 2:
         cmd_correct(job, rest[0], rest[1])
     elif cmd == 'attach' and len(rest) >= 2:

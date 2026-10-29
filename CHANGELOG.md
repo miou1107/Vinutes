@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.29 (2026-10-29)
+
+- A 待補充 (To fill) card has 略過 (Skip) in its corner. Pressing it takes that blank out of the minutes and the Google Doc together with the words that ask for it: 「設計稿會後提供；時程 [__]」 becomes 「設計稿會後提供」, a line that is only a blank (「簡報連結：[__]」) goes, and a table cell that is only a blank is left empty. Every blank on the card's line goes, so the card does not come back. 復原 (Undo) brings it back.
+- Picking a 待補充 card puts its question in the box under the Doc and keeps the keyboard there, so the answer can be typed or pasted at once. Before, the Doc moving to that place opened Google's find in the background, which took the keyboard, and a paste went nowhere until the box was clicked.
+
 ## v0.4.28 (2026-10-29)
 
 - The other side of an online meeting is recorded right with Bluetooth earphones too. When a meeting app opens the earphones' microphone, the earphones switch to their call mode and the Mac plays sound at 16 kHz instead of 48 kHz; Vinutes kept reading it as 48 kHz, so the other side came out three times too fast, and the transcript of the 2026-10-29 meeting was English-looking noise. Vinutes now follows the rate macOS reports, and also counts the samples coming in, so a change macOS does not report is caught within about three seconds. The same holds when the output changes in the middle of a meeting (earphones connected, wired headphones plugged in, back to the speakers).

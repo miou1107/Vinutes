@@ -227,9 +227,12 @@ setInterval(() => {
 
 // a 待補充 or 待確認 item: the Doc moves to where it is and selects it (the keyboard stays here, so nothing typed
 // next lands on the selected words)
-function showInDoc(words, blink = false) {
+function showInDoc(words, blink = false, keep = false) {
   if (!words || !docsMode()) return;
-  call('find', { id: S.sel, text: words, blink }).catch(() => {});
+  call('find', { id: S.sel, text: words, blink, keep }).then(() => {
+    const input = $('#promptInput');
+    if (keep && input && document.activeElement === input) input.focus();
+  }).catch(() => {});
 }
 
 // every [__] blinks three times, then keeps its pale red: on opening a meeting, and on picking a 待補充 item
@@ -1431,7 +1434,8 @@ function renderDocsRail(el) {
   }
   el.className = 'rail';
   const body = tab === 'todo'
-    ? (waiting ? todo.map((it, i) => `<button class="todo" data-t="${i}"><span class="kind red">${esc(t('to_fill'))}</span><b>${esc(it.label)}</b>${it.anchor && it.anchor !== it.label ? `<span>${esc(it.anchor)}</span>` : ''}</button>`).join('')
+    ? (waiting ? todo.map((it, i) => `<div class="todo" data-t="${i}"><div class="todohead"><span class="kind red">${esc(t('to_fill'))}</span>
+            <button class="fixb ghost" data-skipt="${i}">${esc(t('skip'))}</button></div><button class="todobody"><b>${esc(it.label)}</b>${it.anchor && it.anchor !== it.label ? `<span>${esc(it.anchor)}</span>` : ''}</button></div>`).join('')
         + check.map((c, i) => `<div class="card guess"><span class="kind yellow">${esc(t(c.person ? 'new_person' : 'to_confirm'))}</span>${c.person
             ? `<div class="text"><b>${esc(c.person)}</b>${c.role ? `<span class="role">${esc(c.role)}</span>` : ''}</div>` : `<div class="text">${esc(c.label)}</div>`}
           ${S.fixing === c.label ? `<div class="fix"><input data-c="${i}" value="${esc(S.fixText)}" aria-label="${esc(t('fix'))}"
@@ -1460,11 +1464,15 @@ function renderDocsRail(el) {
   $('#collapse').addEventListener('click', () => { S.railOpen = false; renderRail(); markScoreButton(); });
   if (tab === 'score') wireScore(el, d.score);
   if (tab === 'todo') {
-    el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', () => {
+    // the whole card picks the item; its words are a button of their own for the keyboard, beside 略過
+    el.querySelectorAll('.todo').forEach((b) => b.addEventListener('click', (e) => {
+      if (e.target.closest('[data-skipt]')) return;
       const item = todo[Number(b.dataset.t)];
-      showInDoc(item.find, true);
+      const answering = !S.busy;                     // the box takes the question only when nothing is running
+      showInDoc(item.find, true, answering);         // and then the keyboard stays there, ready for the answer
       askAbout(item);
     }));
+    el.querySelectorAll('[data-skipt]').forEach((b) => b.addEventListener('click', () => skipBlank(todo[Number(b.dataset.skipt)])));
     el.querySelectorAll('.card.guess .text').forEach((x, i) => x.addEventListener('click', () => showInDoc(check[i].find)));
     el.querySelectorAll('.okc2[data-c]').forEach((b) => b.addEventListener('click', () => { b.disabled = true; confirmCheck(check[Number(b.dataset.c)]); }));
     wireFix(el, check, renderRail);
@@ -2429,6 +2437,28 @@ async function skipCheck(item) {
     S.d.check = checkShown(r.check);
     renderFoot(); renderRail(); refreshLog();
   } catch (e) { S.skipping.delete(item.label); if (S.sel === id) { putBack(item); showAlert(e.message); } }
+}
+
+// 略過 on a 待補充 item: nobody is going to fill it, so its blank goes from the minutes (復原 brings it back). The
+// card goes at once and comes back if the minutes could not be changed.
+async function skipBlank(item) {
+  const id = S.sel;
+  if (S.busy || aiBusy(id) || !(await savedFirst())) return;   // 復原 stays for the change Claude is making
+  S.busy = true; S.editSeq++;
+  S.d.todo = (S.d.todo || []).filter((x) => x.label !== item.label);
+  renderRail(); renderFoot(); renderAsk();
+  try {
+    const r = await call('skipBlank', { id, item: item.label });
+    if (S.sel === id) afterEdit(r);
+  } catch (e) {
+    if (S.sel === id && S.d && !(S.d.todo || []).some((x) => x.label === item.label)) {
+      S.d.todo = [...(S.d.todo || []), item];
+      showAlert(e.message);
+    }
+  } finally {
+    if (S.sel === id) { S.busy = false; renderAsk(); renderFoot(); renderRail(); refreshLog(); }
+    runNext(id);
+  }
 }
 
 // 修改 on a guess: what it should be goes to the AI like a sentence typed in the box (a voice is named at once). The

@@ -1192,6 +1192,87 @@ def png(path: Path, w: int = 8, h: int = 6) -> Path:
     return path
 
 
+class SkipBlank(unittest.TestCase):
+    """略過 on a 待補充 item: the blank goes with the words that ask for it, the rest of the line stays."""
+
+    def drop(self, md, label, anchor=''):
+        return minutes_app.without_blank(md, label, anchor or label)
+
+    def test_the_clause_holding_the_blank_goes_in_a_table_cell(self):
+        md = '| 5 | 主選單細節 | 甲方 | 想法會後提供；時程 [__] |\n'
+        self.assertEqual(self.drop(md, '主選單時程', '想法會後提供'), '| 5 | 主選單細節 | 甲方 | 想法會後提供 |\n')
+
+    def test_a_clause_in_the_middle_goes_with_one_comma(self):
+        md = '- 整理資料，於 [__] 前完成，交給乙方\n'
+        self.assertEqual(self.drop(md, '交期', '整理資料'), '- 整理資料，交給乙方\n')
+
+    def test_a_clause_at_the_start_goes_with_the_comma_after_it(self):
+        self.assertEqual(self.drop('- 於 [__] 前完成，交給乙方\n', '交期', '交給乙方'), '- 交給乙方\n')
+
+    def test_a_line_that_is_only_the_blank_goes(self):
+        md = '- 主持人：Amy\n- 簡報連結：[__]\n- 地點：三樓\n'
+        self.assertEqual(self.drop(md, '簡報連結'), '- 主持人：Amy\n- 地點：三樓\n')
+
+    def test_a_cell_that_is_only_the_blank_is_left_empty(self):
+        md = '| 1 | 報名流程 | [__] |\n'
+        self.assertEqual(self.drop(md, '報名流程'), '| 1 | 報名流程 |  |\n')
+
+    def test_only_the_line_the_item_points_at_changes(self):
+        md = '- A 案；時程 [__]\n- B 案；時程 [__]\n'
+        self.assertEqual(self.drop(md, 'B 案時程', 'B 案'), '- A 案；時程 [__]\n- B 案\n')
+
+    def test_every_blank_on_the_items_row_goes(self):
+        md = '| 1 | 社群活動 | [__] | 時程 [__] |\n'
+        self.assertEqual(self.drop(md, '社群活動'), '| 1 | 社群活動 |  |  |\n')
+
+    def test_a_row_whose_name_holds_the_label_is_left_alone(self):
+        md = '| 1 | 簡報修正 | 王 | [__] |\n| 2 | 簡報 | 李 | [__] |\n'
+        self.assertEqual(self.drop(md, '簡報'), '| 1 | 簡報修正 | 王 | [__] |\n| 2 | 簡報 | 李 |  |\n')
+
+    def test_a_bare_blank_named_after_its_section_goes(self):
+        md = '## 四、行動方案\n\n- 已排定\n- [__]\n\n## 五、附件\n'
+        self.assertEqual(self.drop(md, '四、行動方案'), '## 四、行動方案\n\n- 已排定\n\n## 五、附件\n')
+
+    def test_bold_marks_are_not_taken_for_a_bullet(self):
+        self.assertEqual(self.drop('**預算 [__]**，時程六月\n', '預算'), '時程六月\n')
+
+    def test_an_english_sentence_after_the_blank_stays(self):
+        self.assertEqual(self.drop('- Timeline [__]. Budget approved.\n', 'Timeline'), '- Budget approved.\n')
+        self.assertEqual(self.drop('- Budget approved. Timeline [__]\n', 'Timeline'), '- Budget approved.\n')
+        self.assertEqual(self.drop('| 1 | 選單 | 會後提供。時程 [__] |\n', '選單'), '| 1 | 選單 | 會後提供。 |\n')
+
+    def test_no_blank_for_the_item_changes_nothing(self):
+        md = '- A 案；時程 11/18\n'
+        self.assertEqual(self.drop(md, 'A 案時程', 'A 案'), md)
+
+
+class SkipBlankFlow(Flows):
+    """略過 on a 待補充 card takes the blank out of the Doc, and 復原 brings it back."""
+
+    def test_the_blank_leaves_the_doc_and_undo_brings_it_back(self):
+        sent = []
+        ds.push = lambda doc_id, base, new: (sent.append(new), (ds.Plan([{'x': 1}], [], []), fake_doc(new), True))[1]
+        saved_connect = minutes_app.connect
+        minutes_app.connect = lambda: 'OFFLINE'
+        try:
+            label = next(i['label'] for i in minutes_app.todo_items(self.job(), MINUTES) if '社群活動執行' in i['anchor']
+                         or i['label'] == '社群活動執行')
+            minutes_app.cmd_skip_blank(self.job(), label)
+            md = self.md_path.read_text(encoding='utf-8')
+            self.assertIn('| 1 | 社群活動執行 |', md)
+            self.assertNotIn(label, [i['label'] for i in self.outs[-1]['todo']])
+            self.assertEqual(sent[-1], md)
+            self.assertTrue(self.outs[-1]['can_undo'])
+            minutes_app.cmd_undo(self.job())
+            self.assertEqual(self.md_path.read_text(encoding='utf-8'), MINUTES)
+        finally:
+            minutes_app.connect = saved_connect
+
+    def test_an_item_with_no_blank_left_is_refused(self):
+        with self.assertRaises(SystemExit):
+            minutes_app.cmd_skip_blank(self.job(), '沒有這一項')
+
+
 class AttachmentsSection(unittest.TestCase):
     """「參考附件」 is in every set of minutes, 無 when nothing was attached (Vin 2026-10-20); the first attachment
     takes the place of 無, and old minutes that still say 補充資訊 keep working. It is the seventh section since

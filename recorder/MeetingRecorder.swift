@@ -1413,6 +1413,9 @@ final class RecordingBar: NSObject {
         panel.contentView = fx
 
         time.font = .monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+        // as wide as an hour-long recording from the start, so the bar does not grow past 1:00:00
+        let hour = NSAttributedString(string: "0:00:00", attributes: [.font: time.font!]).size().width
+        time.widthAnchor.constraint(equalToConstant: ceil(hour) + 2).isActive = true
         pauseButton = button("pause.fill", #selector(AppDelegate.togglePause), tr("bar.pause"))
         stopButton = button("stop.fill", #selector(AppDelegate.stopRecording), tr("bar.stop"))
         // 我 and 對方 each with its own bars (Vin 2026-10-29), and a yellow 沒收到對方聲音 after the time when an online

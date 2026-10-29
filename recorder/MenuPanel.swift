@@ -68,11 +68,15 @@ final class MenuPanel: NSObject, NSPopoverDelegate {
         meters.orientation = .vertical
         meters.alignment = .leading
         meters.spacing = 2
-        for (name, view) in [(tr("bar.me"), bars), (tr("bar.other"), otherBars)] {
+        let tags = [tr("bar.me"), tr("bar.other")].map { name -> NSTextField in
             let tag = NSTextField(labelWithString: name)
             tag.font = .systemFont(ofSize: 12, weight: .semibold)
             tag.textColor = .secondaryLabelColor
-            tag.widthAnchor.constraint(equalToConstant: 36).isActive = true
+            return tag
+        }
+        let tagWidth = ceil(tags.map { $0.fittingSize.width }.max() ?? 36)    // "Others" is wider than 我
+        for (tag, view) in zip(tags, [bars, otherBars]) {
+            tag.widthAnchor.constraint(equalToConstant: tagWidth).isActive = true
             let line = NSStackView(views: [tag, view])
             line.orientation = .horizontal
             line.spacing = 6

@@ -162,14 +162,15 @@ final class SystemSound {
         useRate(running > 0 ? running : format.mSampleRate, why: "starts")
         var rateAddress = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
                                                      mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let tapDevice = device
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
-            let rate = nominalRate(self.device)
+            let rate = nominalRate(tapDevice)
             if rate > 0, rate != self.watch.assumed { self.useRate(rate, why: "macOS says it changed") }
         }
         rateListener = listener
         AudioObjectAddPropertyListenerBlock(device, &rateAddress, queue, listener)
-        try check(AudioDeviceCreateIOProcIDWithBlock(&proc, device, queue) { [weak self] _, input, _, _, _ in
+        try check(AudioDeviceCreateIOProcIDWithBlock(&proc, device, queue) { [weak self] _, input, inputTime, _, _ in
             // the tap's buffers come last: an output that also has a microphone (a headset) puts its own first
             guard let self, self.resampler != nil else { return }
             let all = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
@@ -178,7 +179,10 @@ final class SystemSound {
             defer { free(list.unsafeMutablePointer) }
             for i in 0..<self.tapBuffers { list[i] = all[all.count - self.tapBuffers + i] }
             let frames = Int(list[0].mDataByteSize) / max(1, Int(self.layout.mBytesPerFrame))
-            if let rate = self.watch.add(frames, at: CACurrentMediaTime()) { self.useRate(rate, why: "counted") }
+            // when the samples were heard, not when this queue got to them: a busy moment must not look like a new rate
+            let host = inputTime.pointee.mHostTime
+            let heard = host > 0 ? Double(AudioConvertHostTimeToNanos(host)) / 1e9 : CACurrentMediaTime()
+            if let rate = self.watch.add(frames, at: heard) { self.useRate(rate, why: "counted") }
             guard let r = self.resampler,
                   let buffer = AVAudioPCMBuffer(pcmFormat: r.converter.inputFormat, bufferListNoCopy: list.unsafePointer),
                   let mono = r.convert(buffer) else { return }
@@ -192,6 +196,7 @@ final class SystemSound {
         var asbd = layout
         asbd.mSampleRate = rate
         guard let source = AVAudioFormat(streamDescription: &asbd), let r = Resampler(from: source, to: target) else {
+            watch = RateWatch(assumed: rate)        // not again every three seconds
             return note("the Mac's sound at \(Int(rate)) Hz cannot be converted")
         }
         resampler = r
@@ -344,7 +349,7 @@ func otherAppUsesMicrophone() -> Bool {
 final class MeetingCapture {
     static let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
     let url: URL
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var file: AVAudioFile?
     private var meFile: AVAudioFile?       // the microphone alone (your voice), beside the mix
     private var otherFile: AVAudioFile?    // the Mac's sound alone (the other side), beside the mix
@@ -384,23 +389,8 @@ final class MeetingCapture {
 
     /// the microphone, and the Mac's sound when macOS lets Vinutes tap it
     func start() throws {
-        try startMicrophone()
+        try openMicrophone()
         listenToSystem()
-        // a new microphone (headphones plugged in, AirPods connected) stops the engine: start it again
-        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
-                                                          queue: .main) { [weak self] _ in
-            guard let self, !self.stopped else { return }
-            self.note("the microphone changed, listening again")
-            self.engine.inputNode.removeTap(onBus: 0)
-            self.system.clear()                          // what queued meanwhile would come late
-            do { try self.startMicrophone() } catch {
-                self.note("the microphone could not start again: \(error.localizedDescription); trying once more")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                    guard let self, !self.stopped else { return }
-                    do { try self.startMicrophone() } catch { self.note("no microphone: \(error.localizedDescription)") }
-                }
-            }
-        }
         // the sound follows the Mac's output (AirPods connected or gone): tap it again on the new one
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
                                                  mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
@@ -438,15 +428,28 @@ final class MeetingCapture {
     func useMicrophone(_ uid: String) throws {
         microphone = uid
         guard !stopped else { return }
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
         system.clear()                              // what queued meanwhile would come late
-        try startMicrophone()
+        try openMicrophone()
     }
 
-    private func startMicrophone() throws {
+    /// The chosen microphone, or the one macOS uses when it cannot start: a recording never goes on hearing nothing.
+    private func openMicrophone() throws {
+        do { try startMicrophone(chosen: true) } catch where !microphone.isEmpty {
+            note("the chosen microphone could not start (\(error.localizedDescription)): recording the Mac's own choice")
+            try startMicrophone(chosen: false)
+        }
+    }
+
+    /// (Again) the microphone, on a new engine each time: an engine once told to use one microphone keeps it after
+    /// it is gone or 自動 is picked again, and may still give the old one's format.
+    private func startMicrophone(chosen: Bool) throws {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine = AVAudioEngine()
         let input = engine.inputNode
-        if !microphone.isEmpty {
+        if chosen, !microphone.isEmpty {
             // the chosen one when it is here; gone (earphones put away), the one macOS uses, as with 自動
             if var id = device(uid: microphone), let unit = input.audioUnit {
                 let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
@@ -474,6 +477,23 @@ final class MeetingCapture {
         }
         engine.prepare()
         try engine.start()
+        // a new microphone (headphones plugged in, AirPods connected) stops the engine: start a new one. Watched only
+        // once this engine runs, so choosing the microphone above does not set it off again.
+        let running = engine
+        let started = CACurrentMediaTime()
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: running,
+                                                          queue: .main) { [weak self] _ in
+            guard let self, !self.stopped, self.engine === running, CACurrentMediaTime() - started > 1 else { return }
+            self.note("the microphone changed, listening again")
+            self.system.clear()                          // what queued meanwhile would come late
+            do { try self.openMicrophone() } catch {
+                self.note("the microphone could not start again: \(error.localizedDescription); trying once more")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard let self, !self.stopped else { return }
+                    do { try self.openMicrophone() } catch { self.note("no microphone: \(error.localizedDescription)") }
+                }
+            }
+        }
     }
 
     /// From one microphone buffer and the matching Mac-sound samples, make the two side tracks and mix the Mac's

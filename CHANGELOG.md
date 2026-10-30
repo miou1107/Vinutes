@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.30 (2026-10-30)
+
+- A new app icon: a brown calligraphic V whose right stroke ends in a quill, on cream card, in place of the white microphone on navy. The Dock and Finder show it after this update. The same drawing comes as an iOS app icon and as web favicons under `icon/`, for a phone app or a web page later. The menu-bar icon stays the microphone.
+
 ## v0.4.29 (2026-10-29)
 
 - A 待補充 (To fill) card has 略過 (Skip) in its corner. Pressing it takes that blank out of the minutes and the Google Doc together with the words that ask for it: 「設計稿會後提供；時程 [__]」 becomes 「設計稿會後提供」, a line that is only a blank (「簡報連結：[__]」) goes, and a table cell that is only a blank is left empty. Every blank on the card's line goes, so the card does not come back. 復原 (Undo) brings it back.

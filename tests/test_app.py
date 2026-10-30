@@ -803,7 +803,7 @@ class SentForReal(unittest.TestCase):
         for gone in ('## 六、參考附件\n\n無\n', '\n無\n', '## 五、其他建議\n\n下次再談。\n\n## 六、參考附件\n\n無\n',
                      '## 三、初步共識\n\n1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n\n## 五、其他建議\n\n下次再談。\n\n'
                      '## 六、參考附件\n\n無\n'):
-            new = md.replace('# 週會', '# 營運處週會').replace(gone, '')
+            new = md.replace('# 週會', '# 部門週會').replace(gone, '')
             plan = ds.plan_push(fake_doc(md), md, new)
             self.assertEqual(plan.conflicts, [])
             self.assertEqual(docsim.after_push(fake_doc(md), plan), docsim.want(new), gone[:8])
@@ -1404,13 +1404,13 @@ class Attach(Flows):
         self.assertEqual(md.count('## 七、參考附件'), 1)
 
     def test_each_item_is_led_by_its_own_note_and_the_row_above_the_minutes_lists_them(self):
-        r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Pitt 要的\n各通路業績 '},
+        r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Leo 要的\n各通路業績 '},
                         {'kind': 'link', 'url': 'https://example.com/post', 'note': ''})
         tail = self.md_path.read_text(encoding='utf-8').split('## 七、參考附件', 1)[1].strip().splitlines()
-        self.assertEqual(tail, ['- Pitt 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
+        self.assertEqual(tail, ['- Leo 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- [https://example.com/post](https://example.com/post)'])
         self.assertEqual(r['attachments'], [
-            {'name': '9月流量報表.xlsx', 'link': 'https://drive.google.com/file/d/id1/view', 'note': 'Pitt 要的 各通路業績',
+            {'name': '9月流量報表.xlsx', 'link': 'https://drive.google.com/file/d/id1/view', 'note': 'Leo 要的 各通路業績',
              'kind': 'file'},
             {'name': 'https://example.com/post', 'link': 'https://example.com/post', 'note': '', 'kind': 'link'}])
 
@@ -4534,7 +4534,7 @@ class VoiceOff(unittest.TestCase):
         r['check'] = ['講者 B 推測是主管，請補姓名', '講者 C 只有附和，未列與會']
         (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
         data = json.loads((self.job_dir / '講者.json').read_text(encoding='utf-8'))
-        data['groups']['B']['name'] = '主管（營運處處長 Pitt）'
+        data['groups']['B']['name'] = '主管（部門主管 Leo）'
         (self.job_dir / '講者.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
         items = minutes_app.check_items(self.job())
         self.assertEqual([(c['label'], c.get('voice')) for c in items], [('講者 C 只有附和，未列與會', 'C')])

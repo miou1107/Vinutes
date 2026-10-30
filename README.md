@@ -86,7 +86,7 @@ Then, in any folder, ask Claude Code (or any of them) "what did last week's proj
 
 ## Update
 
-When a newer version is on GitHub, the meeting window shows an update button. You can also update by hand:
+When a newer version is on GitHub, the meeting window shows an update button. Settings > Check for Updates in the menu bar looks at once. You can also update by hand:
 
 ```bash
 git -C ~/Vinutes pull && ~/Vinutes/recorder/install.sh

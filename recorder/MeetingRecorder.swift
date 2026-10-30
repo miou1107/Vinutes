@@ -87,6 +87,15 @@ let STRINGS: [String: [String: String]] = [
         "menu.recent": "Recent Meetings",
         "menu.none": "No recordings yet",
         "menu.folder": "Open Recordings Folder",
+        "menu.checkUpdate": "Check for Updates",
+        "check.newTitle": "Version %@ is available",
+        "check.latestTitle": "Vinutes is up to date",
+        "check.current": "This Mac has version %@.",
+        "check.failTitle": "Vinutes couldn't check for updates",
+        "check.failText": "GitHub didn't answer. Please try again later.",
+        "check.recording": "Vinutes can update once the recording ends.",
+        "check.update": "Update",
+        "check.later": "Later",
         "menu.settings": "Settings",
         "menu.setup": "Setup Checklist",
         "menu.login": "Open at Login",
@@ -204,6 +213,15 @@ let STRINGS: [String: [String: String]] = [
         "menu.recent": "最近會議",
         "menu.none": "還沒有錄音",
         "menu.folder": "打開錄音資料夾",
+        "menu.checkUpdate": "檢查更新",
+        "check.newTitle": "有新版本 %@",
+        "check.latestTitle": "已是最新版本",
+        "check.current": "目前版本 %@",
+        "check.failTitle": "無法檢查更新",
+        "check.failText": "沒有連上 GitHub，請稍後再試。",
+        "check.recording": "錄音結束後才能更新。",
+        "check.update": "版本更新",
+        "check.later": "稍後",
         "menu.settings": "設定",
         "menu.setup": "環境設定自檢",
         "menu.login": "開機時自動開啟",
@@ -517,6 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         sub.addItem(microphoneItem())
         sub.addItem(.separator())
         sub.addItem(item(tr("menu.folder"), #selector(openFolder), image: "folder"))
+        sub.addItem(item(tr("menu.checkUpdate"), #selector(checkForUpdates), image: "arrow.triangle.2.circlepath"))
         return sub
     }
 
@@ -538,6 +557,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
         if let manager, manager.window.isVisible { manager.finish(run) } else { run() }
+    }
+
+    /// Settings > Check for Updates: GitHub is asked now, not at the hourly look-up (Vin 2026-10-30: a version out at
+    /// 22:31 waited for the next one at 23:31). A newer version offers 版本更新, the same update as the panel's.
+    @objc func checkForUpdates() {
+        let mine = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        runScript("minutes_app.py", ["version", mine, "now"]) { [weak self] code, out in
+            guard let self else { return }
+            guard code == 0, let obj = lastObject(out, prefix: "JSON "), obj["checked"] as? Bool == true else {
+                return self.showError(tr("check.failTitle"), tr("check.failText"))
+            }
+            let current = String(format: tr("check.current"), obj["version"] as? String ?? mine)
+            let alert = NSAlert()
+            if obj["update"] as? Bool == true {
+                alert.messageText = String(format: tr("check.newTitle"), obj["newest"] as? String ?? "")
+                alert.informativeText = self.recording ? current + "\n" + tr("check.recording") : current
+                if !self.recording { alert.addButton(withTitle: tr("check.update")) }
+                alert.addButton(withTitle: self.recording ? tr("btn.ok") : tr("check.later"))
+            } else {
+                alert.messageText = tr("check.latestTitle")
+                alert.informativeText = current
+                alert.addButton(withTitle: tr("btn.ok"))
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            let update = alert.runModal() == .alertFirstButtonReturn && obj["update"] as? Bool == true && !self.recording
+            if update { self.updateApp() }   // the panel reads the new answer the next time it opens
+        }
     }
 
     @objc func noop() {}
@@ -2457,6 +2503,8 @@ final class ManagerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKU
     /// The Doc did not load (no network, Google down): the page shows the minutes as this computer has them.
     func docFailed(_ webView: WKWebView, _ error: Error) {
         guard webView === docView, (error as NSError).code != NSURLErrorCancelled else { return }
+        let err = error as NSError
+        appLog("the Google Doc did not load: \(err.domain) \(err.code) \(err.localizedDescription)")
         webView.isHidden = true
         docURL = ""
         blinkWaiting = false

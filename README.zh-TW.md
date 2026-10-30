@@ -86,7 +86,7 @@ Vinutes 也可以當 MCP 伺服器用。安裝或更新 Vinutes 時，會自動�
 
 ## 怎麼更新
 
-GitHub 上有新版時，會議視窗會出現更新按鈕。也可以自己更新：
+GitHub 上有新版時，會議視窗會出現更新按鈕。想馬上確認有沒有新版，可以按選單列的「設定」>「檢查更新」。也可以自己更新：
 
 ```bash
 git -C ~/Vinutes pull && ~/Vinutes/recorder/install.sh

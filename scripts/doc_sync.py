@@ -863,6 +863,7 @@ def plan_push(doc: dict, base_md: str, new_md: str) -> Plan:
     sim_insert: dict[int, list] = {}                 # unit index -> units inserted before it
     sim_after: dict[int, list] = {}                  # unit index -> units inserted after it
     removed: set[int] = set()
+    cut: dict[int, tuple] = {}                       # unit index -> the op deleting that whole paragraph
 
     def look_for(kind: str) -> dict | None:
         """The look of text in an existing paragraph of this kind (or any body paragraph)."""
@@ -979,15 +980,25 @@ def plan_push(doc: dict, base_md: str, new_md: str) -> Plan:
             removed.add(j)
             return
         if u.end >= body_end:                        # the Doc's last newline cannot go; take the one before it
-            prev = us[j - 1] if j > 0 else None
-            if prev is None or prev.kind == 'cell':
-                ops.append((u.start, 2, [{'deleteContentRange': {'range': {'startIndex': u.start,
-                                                                           'endIndex': u.end - 1}}}]))
+            # the paragraphs right before it go too (a heading and its line): one delete for them all, since
+            # theirs, run first, would leave this one reaching past the end (Google refused it, 2026-10-30)
+            k = j - 1
+            while k >= 0 and k in cut:
+                ops.remove(cut.pop(k))
+                k -= 1
+            prev, first = (us[k] if k >= 0 else None), us[k + 1]
+            if prev is None or prev.kind == 'cell' or prev.kind != u.kind:
+                # joining `prev` to the last newline would give it the last paragraph's look (a numbered item
+                # turned plain): empty the last paragraph instead and make it plain
+                reqs = [{'deleteContentRange': {'range': {'startIndex': first.start, 'endIndex': u.end - 1}}}] \
+                    if u.end - 1 > first.start else []
+                ops.append((first.start, 2, reqs + kind_requests(first.start, first.start + 1, u.kind, 'p')))
             else:
                 ops.append((prev.end - 1, 2, [{'deleteContentRange': {'range': {'startIndex': prev.end - 1,
                                                                                 'endIndex': u.end - 1}}}]))
         else:
-            ops.append((u.start, 2, [{'deleteContentRange': {'range': {'startIndex': u.start, 'endIndex': u.end}}}]))
+            cut[j] = (u.start, 2, [{'deleteContentRange': {'range': {'startIndex': u.start, 'endIndex': u.end}}}])
+            ops.append(cut[j])
         removed.add(j)
 
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [b.key for b in base], [b.key for b in new],

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.31 (2026-10-30)
+
+- Editing the minutes in the preview saves to the Google Doc again when the last section of the minutes was removed too. On 2026-10-30 a title was changed while 「七、參考附件」 and the 無 under it at the very end were gone; Vinutes sent Google two deletes, the second reaching past the end of the Doc, and Google refused the whole save, so the edit stayed on this Mac only (先存在這台電腦). The paragraphs at the end now go in one delete, and the paragraph left last keeps its own look. An edit held that way goes to the Doc the next time the meeting is opened.
+- When the Google Doc does not load in the meeting window, a yellow line above the minutes says so: 「Google 文件載入失敗，目前顯示這台電腦上的版本」, with 重新載入 (Reload) to open the Doc again. Before, the window switched to the minutes on this Mac without a word, and the side panel lost 待處理 (To do). Why the Doc did not load is written to the app log.
+- Settings > 檢查更新 (Check for Updates) in the menu bar asks GitHub at once, instead of waiting for the hourly look-up. A newer version comes with 版本更新 (Update), the same update as the panel's; during a recording it says the update waits for the end. Before, a version released at 22:31 on 2026-10-30 showed up only after the next look-up at 23:31.
+
 ## v0.4.30 (2026-10-30)
 
 - A new app icon: a brown calligraphic V whose right stroke ends in a quill, on cream card, in place of the white microphone on navy. The Dock and Finder show it after this update. The same drawing comes as an iOS app icon and as web favicons under `icon/`, for a phone app or a web page later. The menu-bar icon stays the microphone. If the icon file is missing, the update still goes through, without an icon.

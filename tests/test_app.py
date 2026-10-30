@@ -796,6 +796,18 @@ class SentForReal(unittest.TestCase):
         plan = ds.plan_push(fake_doc(MINUTES), MINUTES, new)
         self.assertEqual(docsim.after_push(fake_doc(MINUTES), plan), docsim.want(new))
 
+    def test_removing_the_last_section_of_the_doc(self):
+        # the heading and the line under it at the very end go together, with an edit at the top (Vin 2026-10-30:
+        # Google refused the two deletes, the second reaching past the Doc's last newline)
+        md = MINUTES.split('## 四、行動方案')[0] + '## 五、其他建議\n\n下次再談。\n\n## 六、參考附件\n\n無\n'
+        for gone in ('## 六、參考附件\n\n無\n', '\n無\n', '## 五、其他建議\n\n下次再談。\n\n## 六、參考附件\n\n無\n',
+                     '## 三、初步共識\n\n1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n\n## 五、其他建議\n\n下次再談。\n\n'
+                     '## 六、參考附件\n\n無\n'):
+            new = md.replace('# 週會', '# 營運處週會').replace(gone, '')
+            plan = ds.plan_push(fake_doc(md), md, new)
+            self.assertEqual(plan.conflicts, [])
+            self.assertEqual(docsim.after_push(fake_doc(md), plan), docsim.want(new), gone[:8])
+
     def test_a_paragraph_with_a_picture_can_still_be_edited(self):
         md = '# 標題\n\n![圖](data:image/png;base64,iVBORw0KGgo=)圖一：流量\n\n結尾\n'
         doc = fake_doc(md)
@@ -1979,6 +1991,28 @@ class ListCorner(Flows):
         finally:
             check_update.fetch = saved
         self.assertEqual(self.outs[-1], {'version': '1.0.0', 'newest': '', 'update': False})
+
+    def test_check_for_updates_asks_github_now_and_says_when_it_could_not(self):
+        # Settings > 檢查更新 (Vin 2026-10-30: a version out at 22:31 waited for the 23:31 look-up)
+        import check_update
+        saved = check_update.fetch
+        answers = ['version: "1.3.0"\n']
+
+        def fetch(name):
+            if not answers:
+                raise OSError('no network')
+            return answers.pop()
+        check_update.fetch = fetch
+        minutes_app.APP_UPDATE.write_text(json.dumps({'checked_at': datetime.now().timestamp() - 60,
+                                                      'newest': '1.2.0'}), encoding='utf-8')
+        try:
+            minutes_app.cmd_version('1.2.0', now=True)            # looked up a minute ago: asked again all the same
+            self.assertEqual(self.outs[-1], {'version': '1.2.0', 'newest': '1.3.0', 'update': True, 'checked': True})
+            minutes_app.cmd_version('1.2.0', now=True)            # offline: the last answer stands, and it says so
+            self.assertEqual(self.outs[-1], {'version': '1.2.0', 'newest': '1.3.0', 'update': True, 'checked': False})
+        finally:
+            check_update.fetch = saved
+            minutes_app.APP_UPDATE.unlink(missing_ok=True)
 
 
 class ArchiveDelete(Flows):

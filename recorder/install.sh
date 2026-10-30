@@ -120,9 +120,11 @@ step "Building $APP"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION" 2>/dev/null || true)"
 MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
 SIGN_ID="$(signing_identity || true)"
+shopt -s nullglob   # an icon file that is missing is left out of the sum instead of stopping the install
 SOURCE_SUM="$(cat "$ROOT/recorder/MeetingRecorder.swift" "$ROOT/recorder/Capture.swift" "$ROOT/recorder/MenuPanel.swift" "$ROOT/recorder/Captions.swift" "$ROOT/recorder/Info.plist" \
-              "$ROOT"/icon/macos/*.icns "$ROOT"/recorder/app/* \
+              "$ROOT"/icon/macos/*.icns "$ROOT"/icon/macos/MenuBarIcon*.png "$ROOT"/recorder/app/* \
               "$ROOT"/recorder/l10n/*.lproj/* | shasum -a 256 | cut -c1-16)-${VERSION:-0}-${SIGN_ID:0:8}-$MACOS_MAJOR"   # a new certificate or a new macOS builds again
+shopt -u nullglob
 if [[ -x "$APP/Contents/MacOS/MeetingRecorder" && "$(cat "$APP/Contents/Resources/source.sum" 2>/dev/null)" == "$SOURCE_SUM" ]]; then
   echo "unchanged (version ${VERSION:-unknown})"
 else
@@ -146,6 +148,8 @@ else
   # the icon is drawn ahead of time by icon/make_icons.py: macOS 26 rounds a square icon itself, older ones need the corners drawn
   if (( MACOS_MAJOR >= 26 )); then ICNS="AppIcon.icns"; else ICNS="AppIcon-legacy.icns"; fi
   cp "$ROOT/icon/macos/$ICNS" "$NEW/Contents/Resources/AppIcon.icns" 2>/dev/null || echo "(no icon: $ICNS is missing; the app works without one)"
+  # the menu bar's V; without it the menu bar shows a microphone
+  cp "$ROOT"/icon/macos/MenuBarIcon*.png "$NEW/Contents/Resources/" 2>/dev/null || echo "(no menu bar icon: the microphone instead)"
   echo "$SOURCE_SUM" > "$NEW/Contents/Resources/source.sum"
   if [[ -n "$SIGN_ID" ]] && codesign --force --timestamp=none --sign "$SIGN_ID" "$NEW" >/dev/null 2>&1; then
     :
@@ -215,5 +219,5 @@ if [[ -n "${COUNT:-}" && -z "${VINUTES_NO_COUNT:-}" && ! -e "$MINUTES_HOME/no-co
   curl -fsSL --max-time 5 -o /dev/null "https://github.com/miou1107/Vinutes/releases/download/counter/$COUNT.txt" || true
 fi
 echo
-echo "DONE: Vinutes is in the menu bar (the microphone icon at the top right of the screen)."
+echo "DONE: Vinutes is in the menu bar (the calligraphic V at the top right of the screen)."
 echo "The first recording asks for microphone permission; the first finished job asks to show notifications."

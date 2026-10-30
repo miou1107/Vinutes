@@ -607,7 +607,7 @@ def cmd_version(installed: str, now: bool = False):
             newest = check_update.version_of(check_update.fetch('VERSION'))
             state = {'checked_at': datetime.now().timestamp(), 'newest': '.'.join(map(str, newest)) if newest else ''}
             APP_UPDATE.write_text(json.dumps(state), encoding='utf-8')
-            checked = True
+            checked = bool(newest)              # GitHub answered with something that is not a version: not checked
         except Exception:                         # offline, GitHub down: no button today, try again later
             pass
     have = check_update.version_of(f'version: "{installed}"') if installed else \

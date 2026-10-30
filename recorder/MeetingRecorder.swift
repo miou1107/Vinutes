@@ -569,19 +569,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 return self.showError(tr("check.failTitle"), tr("check.failText"))
             }
             let current = String(format: tr("check.current"), obj["version"] as? String ?? mine)
+            let newer = obj["update"] as? Bool == true
+            let offered = newer && !self.recording           // looked at once: a recording ending meanwhile changes nothing
             let alert = NSAlert()
-            if obj["update"] as? Bool == true {
+            if newer {
                 alert.messageText = String(format: tr("check.newTitle"), obj["newest"] as? String ?? "")
-                alert.informativeText = self.recording ? current + "\n" + tr("check.recording") : current
-                if !self.recording { alert.addButton(withTitle: tr("check.update")) }
-                alert.addButton(withTitle: self.recording ? tr("btn.ok") : tr("check.later"))
+                alert.informativeText = offered ? current : current + "\n" + tr("check.recording")
+                if offered { alert.addButton(withTitle: tr("check.update")) }
+                alert.addButton(withTitle: offered ? tr("check.later") : tr("btn.ok"))
             } else {
                 alert.messageText = tr("check.latestTitle")
                 alert.informativeText = current
                 alert.addButton(withTitle: tr("btn.ok"))
             }
             NSApp.activate(ignoringOtherApps: true)
-            let update = alert.runModal() == .alertFirstButtonReturn && obj["update"] as? Bool == true && !self.recording
+            let update = alert.runModal() == .alertFirstButtonReturn && offered
             if update { self.updateApp() }   // the panel reads the new answer the next time it opens
         }
     }

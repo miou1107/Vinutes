@@ -982,11 +982,13 @@ def plan_push(doc: dict, base_md: str, new_md: str) -> Plan:
         if u.end >= body_end:                        # the Doc's last newline cannot go; take the one before it
             # the paragraphs right before it go too (a heading and its line): one delete for them all, since
             # theirs, run first, would leave this one reaching past the end (Google refused it, 2026-10-30)
+            # (only paragraphs next to each other: a picture between them stays)
             k = j - 1
-            while k >= 0 and k in cut:
+            while k >= 0 and k in cut and us[k].end == us[k + 1].start:
                 ops.remove(cut.pop(k))
                 k -= 1
-            prev, first = (us[k] if k >= 0 else None), us[k + 1]
+            first = us[k + 1]
+            prev = max((x for x in every if x.end <= first.start), key=lambda x: x.end, default=None)
             if prev is None or prev.kind == 'cell' or prev.kind != u.kind:
                 # joining `prev` to the last newline would give it the last paragraph's look (a numbered item
                 # turned plain): empty the last paragraph instead and make it plain

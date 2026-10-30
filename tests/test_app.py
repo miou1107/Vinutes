@@ -808,6 +808,26 @@ class SentForReal(unittest.TestCase):
             self.assertEqual(plan.conflicts, [])
             self.assertEqual(docsim.after_push(fake_doc(md), plan), docsim.want(new), gone[:8])
 
+    def test_removing_the_last_lines_keeps_a_picture_between_them(self):
+        # one, a paragraph that is only a picture (not in the Markdown), two, three at the end: the three lines go,
+        # the picture stays, and nothing reaches past the Doc's last newline
+        md = '# Title\n\nEnd\n\nAttachment one\n\nAttachment two\n\nAttachment three\n'
+        doc = fake_doc(md)
+        content = doc['body']['content']
+        i = next(k for k, el in enumerate(content) if 'paragraph' in el
+                 and el['paragraph']['elements'][0]['textRun']['content'].startswith('Attachment one'))
+        at = content[i]['endIndex']
+        for el in content[i + 1:]:
+            shift(el, 2)
+        content.insert(i + 1, {'startIndex': at, 'endIndex': at + 2, 'paragraph': {'elements': [
+            {'startIndex': at, 'endIndex': at + 1, 'inlineObjectElement': {}},
+            {'startIndex': at + 1, 'endIndex': at + 2, 'textRun': {'content': '\n', 'textStyle': {}}}],
+            'paragraphStyle': {'namedStyleType': 'NORMAL_TEXT'}}})
+        plan = ds.plan_push(doc, md, '# Title\n\nEnd\n')
+        after = docsim.apply(docsim.flatten(doc), plan.requests)
+        self.assertEqual(sum(t[0] == 'o' for t in after), 1)
+        self.assertNotIn('Attachment', ''.join(t[1] for t in after if t[0] == 'c'))
+
     def test_a_paragraph_with_a_picture_can_still_be_edited(self):
         md = '# 標題\n\n![圖](data:image/png;base64,iVBORw0KGgo=)圖一：流量\n\n結尾\n'
         doc = fake_doc(md)
@@ -2010,6 +2030,9 @@ class ListCorner(Flows):
             self.assertEqual(self.outs[-1], {'version': '1.2.0', 'newest': '1.3.0', 'update': True, 'checked': True})
             minutes_app.cmd_version('1.2.0', now=True)            # offline: the last answer stands, and it says so
             self.assertEqual(self.outs[-1], {'version': '1.2.0', 'newest': '1.3.0', 'update': True, 'checked': False})
+            answers.append('<html>rate limited</html>')                # an answer that is not a version: not checked
+            minutes_app.cmd_version('1.2.0', now=True)
+            self.assertFalse(self.outs[-1]['checked'])
         finally:
             check_update.fetch = saved
             minutes_app.APP_UPDATE.unlink(missing_ok=True)

@@ -1202,7 +1202,8 @@ function renderBanners() {
   const ok = $('#alertOk');
   if (ok) ok.addEventListener('click', () => { S.alert = null; renderBanners(); });
   const again = $('#reloadDoc');
-  if (again) again.addEventListener('click', () => { S.docFailed = false; renderMain(); });   // the window loads the Doc anew
+  // what was typed into the minutes here is saved first: the Doc taking their place would leave the save nowhere
+  if (again) again.addEventListener('click', async () => { await flush(); if (S.dirty) return; S.docFailed = false; renderMain(); });
 }
 
 function showAlert(text) { S.alert = text; renderBanners(); }

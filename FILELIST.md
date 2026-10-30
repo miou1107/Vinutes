@@ -22,7 +22,8 @@
 | `recorder/app/strings.js` | Every word the meeting window shows, in English and Traditional Chinese |
 | `recorder/Info.plist` | The app's name, version and microphone permission text |
 | `recorder/l10n/` | The microphone permission text in English and Chinese (`en.lproj`, `zh-Hant.lproj`) |
-| `recorder/make_icon.swift` | Draws the app icon at install time |
+| `icon/make_icons.py` | Draws the app icon (a calligraphic V with a quill on cream card) from `icon/glyph.png`: `macos/AppIcon.icns` (macOS 26 and later) and `macos/AppIcon-legacy.icns` (older), one of which install.sh puts in the app, `ios/AppIcon.appiconset/` for Xcode, and `web/` favicons and touch icons |
+| `icon/glyph.png` | The V and the quill as a mask, traced from the logo; the one drawing every icon size starts from |
 | `recorder/install.sh` | Installs or updates Vinutes: Python packages, speech and voice models, builds and opens the app |
 | `scripts/auto_minutes.py` | After a recording: transcript, calendar match, minutes by the chosen AI, Google Doc, draft email; also sends the email when the user presses Send |
 | `scripts/briefs.py` | Each project's brief: its people with what they do, terms and how the transcript mishears them, background; what the AI reads before writing minutes |

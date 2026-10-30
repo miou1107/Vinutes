@@ -2,7 +2,7 @@
 
 ## v0.4.30 (2026-10-30)
 
-- A new app icon: a brown calligraphic V whose right stroke ends in a quill, on cream card, in place of the white microphone on navy. The Dock and Finder show it after this update. The same drawing comes as an iOS app icon and as web favicons under `icon/`, for a phone app or a web page later. The menu-bar icon stays the microphone.
+- A new app icon: a brown calligraphic V whose right stroke ends in a quill, on cream card, in place of the white microphone on navy. The Dock and Finder show it after this update. The same drawing comes as an iOS app icon and as web favicons under `icon/`, for a phone app or a web page later. The menu-bar icon stays the microphone. If the icon file is missing, the update still goes through, without an icon.
 
 ## v0.4.29 (2026-10-29)
 

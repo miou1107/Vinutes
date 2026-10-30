@@ -145,7 +145,7 @@ else
   sed "s/__VERSION__/${VERSION:-0}/g" "$ROOT/recorder/Info.plist" > "$NEW/Contents/Info.plist"
   # the icon is drawn ahead of time by icon/make_icons.py: macOS 26 rounds a square icon itself, older ones need the corners drawn
   if (( MACOS_MAJOR >= 26 )); then ICNS="AppIcon.icns"; else ICNS="AppIcon-legacy.icns"; fi
-  cp "$ROOT/icon/macos/$ICNS" "$NEW/Contents/Resources/AppIcon.icns"
+  cp "$ROOT/icon/macos/$ICNS" "$NEW/Contents/Resources/AppIcon.icns" 2>/dev/null || echo "(no icon: $ICNS is missing; the app works without one)"
   echo "$SOURCE_SUM" > "$NEW/Contents/Resources/source.sum"
   if [[ -n "$SIGN_ID" ]] && codesign --force --timestamp=none --sign "$SIGN_ID" "$NEW" >/dev/null 2>&1; then
     :

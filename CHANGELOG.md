@@ -2,7 +2,7 @@
 
 ## v0.4.32 (2026-10-30)
 
-- The menu bar shows the app icon's calligraphic V with its quill in place of the microphone, black or white to suit the menu bar. While the minutes are being written it still shows the waveform, and while recording the red dot and the time. If the V's file is missing, the menu bar shows the microphone as before.
+- The menu bar shows the app icon's calligraphic V with its quill in place of the microphone, black or white to suit the menu bar. While the minutes are being written it still shows the waveform, and while recording the red dot and the time. If the V's file is missing, the update still goes through and the menu bar shows the microphone as before. The message at the end of an install and the setup steps name the V.
 
 ## v0.4.31 (2026-10-30)
 

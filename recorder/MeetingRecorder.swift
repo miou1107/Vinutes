@@ -1,6 +1,6 @@
 // The menu-bar recorder for vin-meeting-minutes-zh (macOS 13+, built by recorder/install.sh).
 //
-// Record from the microphone icon, the floating bar or the shortcuts ⌃⌥R (start / stop) and ⌃⌥P (pause /
+// Record from the menu bar icon, the floating bar or the shortcuts ⌃⌥R (start / stop) and ⌃⌥P (pause /
 // resume). When a recording stops, the app starts scripts/auto_minutes.py in the background: transcript,
 // minutes, Google Doc. When the job is done the app posts a notification.
 //

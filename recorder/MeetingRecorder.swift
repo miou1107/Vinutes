@@ -405,6 +405,13 @@ struct Job {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
+    /// The menu bar's icon when nothing is recording: the app icon's V and quill in one colour, which macOS
+    /// draws black or white to suit the bar (icon/make_icons.py draws it). Without the file, the microphone.
+    lazy var idleIcon: NSImage? = {
+        guard let v = Bundle.main.image(forResource: "MenuBarIcon") else { return symbol("mic", 14) }
+        v.isTemplate = true
+        return v
+    }()
     var bar: RecordingBar!
     var panel: MenuPanel!
     var recorder: MeetingCapture?
@@ -737,7 +744,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             button.imagePosition = .imageLeading
         } else {
             let busy = recentJobs(limit: 6).contains { !$0.finished }
-            button.image = symbol(busy ? "waveform" : "mic", 14)
+            button.image = busy ? symbol("waveform", 14) : idleIcon
             button.contentTintColor = nil
             button.title = ""
         }

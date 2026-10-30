@@ -36,8 +36,9 @@ jobs:
             node -e 'const AF = (async () => {}).constructor; new AF(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
           done
           bash -n recorder/install.sh
-          # install.sh copies one of these into the app, by the Mac's macOS version
+          # install.sh copies one of these into the app, by the Mac's macOS version, and the menu bar's V
           test -s icon/macos/AppIcon.icns && test -s icon/macos/AppIcon-legacy.icns
+          test -s icon/macos/MenuBarIcon.png && test -s icon/macos/MenuBarIcon@2x.png
           plutil -lint recorder/Info.plist recorder/l10n/*.lproj/*.strings
 
       # the same two builds install.sh makes; the captions helper needs the macOS 26 SDK, so it is tried only

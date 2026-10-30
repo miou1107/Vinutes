@@ -12,6 +12,8 @@ way every run, so the files below change only when the drawing does:
                                                clear 1024 px canvas; install.sh copies the one that suits the Mac
   ios/AppIcon.appiconset/                      one 1024 px square with no corners and no transparency (iOS
                                                rounds it); drop the folder into an Xcode asset catalogue
+  macos/MenuBarIcon.png, MenuBarIcon@2x.png    the menu bar's icon: the V and the quill, black on clear, 17 points
+                                               tall; the app marks it a template, so macOS draws it black or white
   web/                                         favicon.ico (16, 32, 48), favicon-32.png, apple-touch-icon.png
                                                (180, square), icon-192.png and icon-512.png (rounded),
                                                icon-maskable-512.png (square, for Android's own shapes)
@@ -123,6 +125,17 @@ def build_mac(folder):
     icns(mac, os.path.join(folder, 'AppIcon-legacy.icns'))
 
 
+def build_menubar(folder):
+    g = glyph(bold=True)
+    g = g.crop(g.getbbox())
+    for scale, name in ((1, 'MenuBarIcon.png'), (2, 'MenuBarIcon@2x.png')):
+        h = 17 * scale
+        mask = g.resize((round(g.width * h / g.height), h), Image.LANCZOS)
+        im = Image.new('RGBA', mask.size, (0, 0, 0, 0))
+        im.putalpha(mask)
+        im.save(os.path.join(folder, name))
+
+
 def build_ios(folder):
     shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(folder)
@@ -147,6 +160,7 @@ def build_web(folder):
 
 if __name__ == '__main__':
     build_mac(os.path.join(HERE, 'macos'))
+    build_menubar(os.path.join(HERE, 'macos'))
     build_ios(os.path.join(HERE, 'ios', 'AppIcon.appiconset'))
     build_web(os.path.join(HERE, 'web'))
     print('icon/: macos, ios, web written')

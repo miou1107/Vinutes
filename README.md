@@ -26,7 +26,7 @@ Vinutes records your meetings on a Mac and turns them into formal, well-structur
 
 ## What it looks like
 
-**The menu bar.** Click the microphone at the top of the screen to open this panel. The red button starts a recording; while it runs, the same button stops it. The last three meetings open from here too.
+**The menu bar.** Click the calligraphic V at the top of the screen to open this panel. The red button starts a recording; while it runs, the same button stops it. The last three meetings open from here too.
 
 ![The panel under the menu-bar icon, before and while recording](docs/screenshots/menu-panel.png)
 
@@ -72,7 +72,7 @@ git clone https://github.com/miou1107/Vinutes ~/Vinutes
 ~/Vinutes/recorder/install.sh
 ```
 
-The first run downloads the speech model (about 1.6 GB), so it can take a while. When it finishes, a microphone icon appears in the menu bar. Open the meeting window and go through the setup checklist once.
+The first run downloads the speech model (about 1.6 GB), so it can take a while. When it finishes, a calligraphic V appears in the menu bar. Open the meeting window and go through the setup checklist once.
 
 ## Use your meetings in Claude Code and other AI tools
 

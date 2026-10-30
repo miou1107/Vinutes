@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.32 (2026-10-30)
+
+- The menu bar shows the app icon's calligraphic V with its quill in place of the microphone, black or white to suit the menu bar. While the minutes are being written it still shows the waveform, and while recording the red dot and the time. If the V's file is missing, the menu bar shows the microphone as before.
+
 ## v0.4.31 (2026-10-30)
 
 - Editing the minutes in the preview saves to the Google Doc again when the last section of the minutes was removed too. On 2026-10-30 a title was changed while 「七、參考附件」 and the 無 under it at the very end were gone; Vinutes sent Google two deletes, the second reaching past the end of the Doc, and Google refused the whole save, so the edit stayed on this Mac only (先存在這台電腦). The paragraphs at the end now go in one delete, a picture between them stays, and the paragraph left last keeps its own look. An edit held that way goes to the Doc the next time the meeting is opened.

@@ -210,7 +210,7 @@ h2 { margin: 32px 0 10px; font-size: 16px; }
     <div class="rail"><div class="railhead"><span class="tab">待處理</span><span class="tab on">人員</span><span class="tab">紀錄</span></div>
       <div class="railbody"><div class="vcard"><div class="vtop"><span class="vtag">講者 C</span><span class="vmin">1 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
         <div class="vpick">選擇是誰<span>▾</span></div>
-        <div class="vmenu"><div>Vin</div><div>主管（營運處處長 Pitt）</div><div class="vline"></div><div class="vlink">其他人⋯</div></div></div></div></div>
+        <div class="vmenu"><div>Vin</div><div>主管（部門主管 Leo）</div><div class="vline"></div><div class="vlink">其他人⋯</div></div></div></div></div>
     <p class="cap">選單裡只有人名。講者 C 是誤判出來的聲音時，這張卡片無法移除，會一直留在人員分頁。</p>
   </div>
   <div class="frame tobe"><span class="flag">調整後的畫面</span>
@@ -225,7 +225,7 @@ h2 { margin: 32px 0 10px; font-size: 16px; }
   <li>切換到別場會議時，待修改的要求仍會繼續改完。</li>
   <li>Codex、Antigravity 也看得到貼上的截圖。</li>
   <li>略過的項目記在「紀錄」分頁，之後不會再出現在待處理。</li>
-  <li>講者 C 其實是 Vin 或 Pitt 時，選他的名字即可，兩個聲音會算成同一個人。</li>
+  <li>講者 C 其實是 Vin 或 Leo 時，選他的名字即可，兩個聲音會算成同一個人。</li>
   <li>移除講者時，待確認裡關於這個講者的項目一併收起。</li>
 </ul></section>
 
@@ -367,7 +367,7 @@ function drawVoices() {
     ? `<div class="vgone">已移除：講者 C<button class="btn2 ghost" id="vBack">復原</button></div>`
     : `<div class="vcard"><div class="vtop"><span class="vtag">講者 C</span><span class="vmin">1 分鐘</span><span class="vlisten">▶ 聽錄音</span></div>
         <div class="vpick" id="vPick">選擇是誰<span>▾</span></div>
-        ${V.open ? `<div class="vmenu"><div>Vin</div><div>主管（營運處處長 Pitt）</div><div class="vline"></div><div class="vlink">其他人⋯</div>
+        ${V.open ? `<div class="vmenu"><div>Vin</div><div>主管（部門主管 Leo）</div><div class="vline"></div><div class="vlink">其他人⋯</div>
           <div class="vline"></div><div class="vdrop" id="vDrop">移除講者 C</div></div>` : ''}</div>`;
   const back = $('#vBack');
   if (back) back.addEventListener('click', () => { V.removed = false; V.open = false; drawVoices(); });

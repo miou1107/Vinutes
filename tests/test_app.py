@@ -796,6 +796,38 @@ class SentForReal(unittest.TestCase):
         plan = ds.plan_push(fake_doc(MINUTES), MINUTES, new)
         self.assertEqual(docsim.after_push(fake_doc(MINUTES), plan), docsim.want(new))
 
+    def test_removing_the_last_section_of_the_doc(self):
+        # the heading and the line under it at the very end go together, with an edit at the top (Vin 2026-10-30:
+        # Google refused the two deletes, the second reaching past the Doc's last newline)
+        md = MINUTES.split('## 四、行動方案')[0] + '## 五、其他建議\n\n下次再談。\n\n## 六、參考附件\n\n無\n'
+        for gone in ('## 六、參考附件\n\n無\n', '\n無\n', '## 五、其他建議\n\n下次再談。\n\n## 六、參考附件\n\n無\n',
+                     '## 三、初步共識\n\n1. 預算 10 萬元。\n2. KOL 合作先找兩位試行。\n\n## 五、其他建議\n\n下次再談。\n\n'
+                     '## 六、參考附件\n\n無\n'):
+            new = md.replace('# 週會', '# 部門週會').replace(gone, '')
+            plan = ds.plan_push(fake_doc(md), md, new)
+            self.assertEqual(plan.conflicts, [])
+            self.assertEqual(docsim.after_push(fake_doc(md), plan), docsim.want(new), gone[:8])
+
+    def test_removing_the_last_lines_keeps_a_picture_between_them(self):
+        # one, a paragraph that is only a picture (not in the Markdown), two, three at the end: the three lines go,
+        # the picture stays, and nothing reaches past the Doc's last newline
+        md = '# Title\n\nEnd\n\nAttachment one\n\nAttachment two\n\nAttachment three\n'
+        doc = fake_doc(md)
+        content = doc['body']['content']
+        i = next(k for k, el in enumerate(content) if 'paragraph' in el
+                 and el['paragraph']['elements'][0]['textRun']['content'].startswith('Attachment one'))
+        at = content[i]['endIndex']
+        for el in content[i + 1:]:
+            shift(el, 2)
+        content.insert(i + 1, {'startIndex': at, 'endIndex': at + 2, 'paragraph': {'elements': [
+            {'startIndex': at, 'endIndex': at + 1, 'inlineObjectElement': {}},
+            {'startIndex': at + 1, 'endIndex': at + 2, 'textRun': {'content': '\n', 'textStyle': {}}}],
+            'paragraphStyle': {'namedStyleType': 'NORMAL_TEXT'}}})
+        plan = ds.plan_push(doc, md, '# Title\n\nEnd\n')
+        after = docsim.apply(docsim.flatten(doc), plan.requests)
+        self.assertEqual(sum(t[0] == 'o' for t in after), 1)
+        self.assertNotIn('Attachment', ''.join(t[1] for t in after if t[0] == 'c'))
+
     def test_a_paragraph_with_a_picture_can_still_be_edited(self):
         md = '# 標題\n\n![圖](data:image/png;base64,iVBORw0KGgo=)圖一：流量\n\n結尾\n'
         doc = fake_doc(md)
@@ -1392,13 +1424,13 @@ class Attach(Flows):
         self.assertEqual(md.count('## 七、參考附件'), 1)
 
     def test_each_item_is_led_by_its_own_note_and_the_row_above_the_minutes_lists_them(self):
-        r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Pitt 要的\n各通路業績 '},
+        r = self.attach('', {'kind': 'file', 'path': str(self.files / '9月流量報表.xlsx'), 'note': ' Leo 要的\n各通路業績 '},
                         {'kind': 'link', 'url': 'https://example.com/post', 'note': ''})
         tail = self.md_path.read_text(encoding='utf-8').split('## 七、參考附件', 1)[1].strip().splitlines()
-        self.assertEqual(tail, ['- Pitt 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
+        self.assertEqual(tail, ['- Leo 要的 各通路業績：[9月流量報表.xlsx](https://drive.google.com/file/d/id1/view)',
                                 '- [https://example.com/post](https://example.com/post)'])
         self.assertEqual(r['attachments'], [
-            {'name': '9月流量報表.xlsx', 'link': 'https://drive.google.com/file/d/id1/view', 'note': 'Pitt 要的 各通路業績',
+            {'name': '9月流量報表.xlsx', 'link': 'https://drive.google.com/file/d/id1/view', 'note': 'Leo 要的 各通路業績',
              'kind': 'file'},
             {'name': 'https://example.com/post', 'link': 'https://example.com/post', 'note': '', 'kind': 'link'}])
 
@@ -1979,6 +2011,31 @@ class ListCorner(Flows):
         finally:
             check_update.fetch = saved
         self.assertEqual(self.outs[-1], {'version': '1.0.0', 'newest': '', 'update': False})
+
+    def test_check_for_updates_asks_github_now_and_says_when_it_could_not(self):
+        # Settings > 檢查更新 (Vin 2026-10-30: a version out at 22:31 waited for the 23:31 look-up)
+        import check_update
+        saved = check_update.fetch
+        answers = ['version: "1.3.0"\n']
+
+        def fetch(name):
+            if not answers:
+                raise OSError('no network')
+            return answers.pop()
+        check_update.fetch = fetch
+        minutes_app.APP_UPDATE.write_text(json.dumps({'checked_at': datetime.now().timestamp() - 60,
+                                                      'newest': '1.2.0'}), encoding='utf-8')
+        try:
+            minutes_app.cmd_version('1.2.0', now=True)            # looked up a minute ago: asked again all the same
+            self.assertEqual(self.outs[-1], {'version': '1.2.0', 'newest': '1.3.0', 'update': True, 'checked': True})
+            minutes_app.cmd_version('1.2.0', now=True)            # offline: the last answer stands, and it says so
+            self.assertEqual(self.outs[-1], {'version': '1.2.0', 'newest': '1.3.0', 'update': True, 'checked': False})
+            answers.append('<html>rate limited</html>')                # an answer that is not a version: not checked
+            minutes_app.cmd_version('1.2.0', now=True)
+            self.assertFalse(self.outs[-1]['checked'])
+        finally:
+            check_update.fetch = saved
+            minutes_app.APP_UPDATE.unlink(missing_ok=True)
 
 
 class ArchiveDelete(Flows):
@@ -4500,7 +4557,7 @@ class VoiceOff(unittest.TestCase):
         r['check'] = ['講者 B 推測是主管，請補姓名', '講者 C 只有附和，未列與會']
         (self.job_dir / 'result.json').write_text(json.dumps(r, ensure_ascii=False))
         data = json.loads((self.job_dir / '講者.json').read_text(encoding='utf-8'))
-        data['groups']['B']['name'] = '主管（營運處處長 Pitt）'
+        data['groups']['B']['name'] = '主管（部門主管 Leo）'
         (self.job_dir / '講者.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
         items = minutes_app.check_items(self.job())
         self.assertEqual([(c['label'], c.get('voice')) for c in items], [('講者 C 只有附和，未列與會', 'C')])

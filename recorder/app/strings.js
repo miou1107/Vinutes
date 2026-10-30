@@ -151,6 +151,8 @@ const STRINGS = {
     next_meeting: 'Next meeting',
     open_doc_tip: 'Open the Google Doc in your browser',
     got_it: 'Got it',
+    doc_failed: "The Google Doc didn't load. Showing the copy on this Mac.",
+    reload_doc: 'Reload',
 
     // the editable minutes
     unsaved: 'Not saved',
@@ -579,6 +581,8 @@ const STRINGS = {
     next_meeting: '下次會議',
     open_doc_tip: '在瀏覽器打開 Google 文件',
     got_it: '知道了',
+    doc_failed: 'Google 文件載入失敗，目前顯示這台電腦上的版本',
+    reload_doc: '重新載入',
 
     // the editable minutes
     unsaved: '未儲存',

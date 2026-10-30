@@ -588,7 +588,7 @@ ROOT = Path(__file__).resolve().parent.parent
 APP_UPDATE = CONFIG / 'vinutes-update.json'   # the newest version on GitHub and when it was looked up
 
 
-def cmd_version(installed: str):
+def cmd_version(installed: str, now: bool = False):
     """The list's corner: the version this app was built from, and whether GitHub has a newer one. GitHub is asked
     at most once an hour, so a version released today shows today (Vin 2026-10-19); offline, the last answer stands.
     Only the public VERSION file is fetched."""
@@ -599,19 +599,22 @@ def cmd_version(installed: str):
         state = {}
     if not isinstance(state, dict):
         state = {}
-    # the window asks every hour and the time is stamped after the download: a little under an hour counts too
-    if datetime.now().timestamp() - float(state.get('checked_at') or 0) > 3600 - 300:
+    # the window asks every hour and the time is stamped after the download: a little under an hour counts too;
+    # Settings > Check for Updates (now) asks at once
+    checked = False
+    if now or datetime.now().timestamp() - float(state.get('checked_at') or 0) > 3600 - 300:
         try:
             newest = check_update.version_of(check_update.fetch('VERSION'))
             state = {'checked_at': datetime.now().timestamp(), 'newest': '.'.join(map(str, newest)) if newest else ''}
             APP_UPDATE.write_text(json.dumps(state), encoding='utf-8')
+            checked = bool(newest)              # GitHub answered with something that is not a version: not checked
         except Exception:                         # offline, GitHub down: no button today, try again later
             pass
     have = check_update.version_of(f'version: "{installed}"') if installed else \
         check_update.version_of((ROOT / 'VERSION').read_text(encoding='utf-8'))
     newest = check_update.version_of(f'version: "{state.get("newest") or ""}"')
     out({'version': '.'.join(map(str, have)) if have else installed, 'newest': state.get('newest') or '',
-         'update': bool(have and newest and newest > have)})
+         'update': bool(have and newest and newest > have), **({'checked': checked} if now else {})})
 
 
 def cmd_update():
@@ -3158,7 +3161,7 @@ def main():
     if cmd == 'list':
         return cmd_list()
     if cmd == 'version':
-        return cmd_version(argv[1] if len(argv) > 1 else '')
+        return cmd_version(argv[1] if len(argv) > 1 else '', now='now' in argv[2:])
     if cmd == 'update':
         return cmd_update()
     if cmd == 'usage':                                # every meeting's, not one job's

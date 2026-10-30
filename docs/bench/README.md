@@ -162,7 +162,7 @@ known voice heard in under 20 s of lines of 1.5 s or more is not there):
 |---|---|---|---|
 | 2026-10-16 15:30 | Vin, Phyllis, 小婷 | 7 (Vin split in two, 小婷 in three, Alma 26 s, a second Vin 20 s) | 3 |
 | 2026-10-19 10:53 | Phyllis, 小婷, Vin, Alma, two unnamed | 8 (Vin split in two, a third Vin 16 s, Phyllis's 87 s apart) | 5 (one of the unnamed was Phyllis, 0.13 from her) |
-| 2026-10-19 17:04 | Vin, Pitt, one removed | 4 | 3 |
+| 2026-10-19 17:04 | Vin, Leo, one removed | 4 | 3 |
 | 2026-10-20 11:03 | Vin, Alan, one removed | 4 | 3 |
 | 2026-10-20 15:00 | Vin, Alan, Evan, two removed | 5 | 4 (Alan, 0.33 from Vin, stays apart) |
 | 2026-10-21 10:07 | alan, Alma, Vin, two unnamed, one removed | 6 | 3 (the 967 s unnamed voice was Alma, 0.09 from her) |

@@ -1,0 +1,77 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google 文件載入失敗原型</title><style>
+/* Prototype: what the meeting window says when the Google Doc in it does not load (2026-10-30). Colours from hide-tags.html. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --panel: #f6f6f8; --line: #ececf0; --line2: #d6d6db;
+  --text: #1d1d1f; --text2: #3a3a3c; --muted: #6e6e73; --faint: #8a8a90; --field-line: #cfcfd6;
+  --link: #2a6dd6; --blue: #0a64d8; --blue-ink: #1c4f9e; --blue-bg: #f3f7ff; --blue-line: #c9d6ee;
+  --red-bg: #fde2e1; --warn-bg: #fff4d6; --yellow-ink: #7a5300;
+  --asis-bg: #fff6f5; --asis-line: #e6a29c; --asis-ink: #9b1c1c;
+  --tobe-bg: #f1f6ff; --tobe-line: #8fb0e6; --tobe-ink: #1c4f9e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e20; --panel: #232326; --line: #333338; --line2: #3a3a40;
+    --text: #ececf0; --text2: #d4d4d8; --muted: #a1a1a8; --faint: #8a8a92; --field-line: #46464c;
+    --link: #7fb0ff; --blue: #2f7ef0; --blue-ink: #a9c6ff; --blue-bg: #24304a; --blue-line: #36507a;
+    --red-bg: #4a2020; --warn-bg: #3a3220; --yellow-ink: #f3d27a;
+    --asis-bg: #2e2020; --asis-line: #7a3a36; --asis-ink: #ffb4ad;
+    --tobe-bg: #1c2638; --tobe-line: #3f5f94; --tobe-ink: #a9c6ff;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.55 -apple-system, BlinkMacSystemFont, "PingFang TC", sans-serif; }
+main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+.lead { margin: 0 0 24px; color: var(--muted); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 16px; align-items: start; }
+.frame { border-radius: 12px; padding: 12px; min-width: 0; }
+.frame.asis { background: var(--asis-bg); border: 2px dashed var(--asis-line); }
+.frame.tobe { background: var(--tobe-bg); border: 2px solid var(--tobe-line); }
+.flag { display: inline-block; margin-bottom: 10px; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.asis .flag { color: var(--asis-ink); background: var(--red-bg); }
+.tobe .flag { color: var(--tobe-ink); background: var(--blue-bg); border: 1px solid var(--blue-line); }
+.cap { margin: 10px 2px 0; color: var(--text2); }
+.screen { background: var(--bg); border: 1px solid var(--line2); border-radius: 8px; overflow: hidden; }
+/* the window */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.top b { color: var(--link); font-weight: 500; }
+.top .held { margin-left: auto; color: var(--muted); font-size: 12px; }
+.send { padding: 3px 10px; border-radius: 6px; background: var(--blue); color: #fff; font-size: 12px; }
+.body { display: flex; min-height: 190px; }
+.paper { flex: 1; padding: 12px 16px; min-width: 0; }
+.paper i { display: block; height: 8px; margin: 10px 0; border-radius: 4px; background: var(--line); }
+.banner { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--yellow-ink); line-height: 1.5; }
+.banner span { flex: 1; }
+.banner u { text-decoration: none; font-size: 12px; font-weight: 600; cursor: pointer; }
+.rail { width: 150px; flex: none; border-left: 1px solid var(--line); padding: 10px 12px; background: var(--panel); }
+.tabs { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
+.tabs .on { color: var(--link); font-weight: 600; }
+.empty { margin-top: 30px; text-align: center; color: var(--faint); font-size: 12px; }
+</style></head><body><main>
+<h1>Google 文件載入失敗的提示</h1>
+<p class="lead">左邊是目前的畫面，右邊是調整後的畫面。</p>
+<div class="pair">
+  <div class="frame asis"><span class="flag">目前的畫面</span>
+    <div class="screen">
+      <div class="top"><b>官網改版</b>　›　10/28（官網流量檢討）<span class="held">先存在這台電腦 22:45</span><span class="send">發送信件</span></div>
+      <div class="body">
+        <div class="paper"><i style="width:55%"></i><i style="width:90%"></i><i style="width:80%"></i><i style="width:70%"></i><i style="width:85%"></i></div>
+        <div class="rail"><div class="tabs"><span class="on">留言</span><span>紀錄</span><span>評分</span></div><div class="empty">沒有留言</div></div>
+      </div>
+    </div>
+    <p class="cap">畫面直接換成這台電腦上的版本，右欄的待處理不見了，畫面上沒有任何說明。</p>
+  </div>
+  <div class="frame tobe"><span class="flag">調整後的畫面</span>
+    <div class="screen">
+      <div class="top"><b>官網改版</b>　›　10/28（官網流量檢討）<span class="held">先存在這台電腦 22:45</span><span class="send">發送信件</span></div>
+      <div class="body">
+        <div class="paper"><div class="banner"><span>Google 文件載入失敗，目前顯示這台電腦上的版本</span><u>重新載入</u></div>
+          <i style="width:55%"></i><i style="width:90%"></i><i style="width:80%"></i><i style="width:70%"></i></div>
+        <div class="rail"><div class="tabs"><span class="on">留言</span><span>紀錄</span><span>評分</span></div><div class="empty">沒有留言</div></div>
+      </div>
+    </div>
+    <p class="cap">上方多一行黃色提示。按「重新載入」會再開一次 Google 文件，成功後右欄回到待處理、人員、紀錄。</p>
+  </div>
+</div>
+</main></body></html>

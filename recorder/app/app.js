@@ -1193,12 +1193,17 @@ function renderBanners() {
   if (S.banner) rows.push(`<div class="banner news">${ICON.sync}<span>${esc(newsText(S.banner))}</span><button id="seen">${esc(t('got_it'))}</button></div>`);
   if (S.d.warning) rows.push(`<div class="banner warn"><span>${esc(S.d.warning)}</span></div>`);
   if (S.docWarning && S.docWarning !== S.d.warning) rows.push(`<div class="banner warn"><span>${esc(S.docWarning)}</span></div>`);
+  // the Doc did not load in the window: say so, or the minutes here look like the Doc with 待處理 gone (Vin 2026-10-30)
+  if (S.docFailed) rows.push(`<div class="banner warn"><span>${esc(t('doc_failed'))}</span><button id="reloadDoc">${esc(t('reload_doc'))}</button></div>`);
   if (S.alert) rows.push(`<div class="banner err"><span>${esc(S.alert)}</span><button id="alertOk">${esc(t('got_it'))}</button></div>`);
   el.innerHTML = rows.join('');
   const seen = $('#seen');
   if (seen) seen.addEventListener('click', () => { clearTimeout(S.bannerTimer); S.banner = null; renderBanners(); });
   const ok = $('#alertOk');
   if (ok) ok.addEventListener('click', () => { S.alert = null; renderBanners(); });
+  const again = $('#reloadDoc');
+  // what was typed into the minutes here is saved first: the Doc taking their place would leave the save nowhere
+  if (again) again.addEventListener('click', async () => { await flush(); if (S.dirty) return; S.docFailed = false; renderMain(); });
 }
 
 function showAlert(text) { S.alert = text; renderBanners(); }

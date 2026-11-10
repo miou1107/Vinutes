@@ -2758,19 +2758,26 @@ function renderMail() {
   $('#tokens').querySelectorAll('.token[data-fill]').forEach((c) => c.addEventListener('click', (e) => {   // no address: type one for this name
     if (e.target.closest('button')) return;
     m.rcpts.splice(m.rcpts.findIndex((r) => r.name === c.dataset.fill && !r.mail), 1);
-    m.typed = c.dataset.fill; m.sugg = []; again(); suggestRcpts();
+    m.typed = c.dataset.fill; m.filling = c.dataset.fill; m.sugg = []; again(); suggestRcpts();   // keep this name on the pick, so it is remembered
   }));
   const add = $('#addTo');
   const addTokens = () => {
     const parts = add.value.split(/[,，、;\s]+/).map((t) => t.trim().toLowerCase()).filter((t) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t));
     if (!parts.length) return false;
     for (const a of parts) if (!m.rcpts.some((r) => r.mail === a)) m.rcpts.push({ name: a, mail: a });
-    m.typed = ''; m.sugg = [];
+    m.typed = ''; m.sugg = []; m.filling = '';
     again();
     return true;
   };
   // while an input method is composing (注音, 拼音) nothing is asked and nothing is redrawn: the menu comes after the word
-  add.addEventListener('input', (e) => { m.typed = add.value; m.at = 0; if (!inputMethod(e)) suggestRcpts(); });
+  add.addEventListener('input', (e) => {
+    m.typed = add.value; m.at = 0;
+    if (m.filling) {                                 // still filling that name only while the text is a refinement of it, not a new name
+      const v = add.value.trim().toLowerCase(), f = m.filling.toLowerCase();
+      if (!v || !(f.startsWith(v) || v.startsWith(f))) m.filling = '';
+    }
+    if (!inputMethod(e)) suggestRcpts();
+  });
   add.addEventListener('compositionend', () => { m.typed = add.value; m.at = 0; suggestRcpts(); });
   add.addEventListener('keydown', (e) => {
     if (inputMethod(e)) return;
@@ -2856,8 +2863,9 @@ function pickRcpt(i) {
   const m = S.mail;
   const p = m.sugg[i];
   if (!p) return;
-  if (!m.rcpts.some((r) => r.mail === p.mail)) m.rcpts.push({ name: p.name, mail: p.mail });
-  m.typed = ''; m.sugg = []; m.at = 0; m.seq++;
+  const name = m.filling || p.name;                 // a filled-in name (Eric) stays the chip's, so sending remembers it for that address
+  if (!m.rcpts.some((r) => r.mail === p.mail)) m.rcpts.push({ name, mail: p.mail });
+  m.typed = ''; m.sugg = []; m.at = 0; m.seq++; m.filling = '';
   renderMailKeepingFocus();
   const input = $('#addTo'); if (input) input.focus();
 }

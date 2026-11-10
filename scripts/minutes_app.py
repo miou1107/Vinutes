@@ -882,6 +882,12 @@ MEETING_PEOPLE = '人員.json'
 DEPARTMENTS, roster = briefs.DEPARTMENTS, briefs.roster
 
 
+def project_roster_key(project: str) -> str:
+    """The roster kept for a project's mail recipients, under a key a calendar's department name can never take
+    (a control character), so a project named like a department does not mix with that department's roster."""
+    return f'project\x1f{project}' if project else ''
+
+
 def calendar_of(job: Job) -> dict:
     """What the picked calendar event's note said (workspace.describe), as 行事曆.json keeps it."""
     data = read_json(job.dir / '行事曆.json')
@@ -966,7 +972,9 @@ def meeting_people(job: Job) -> list[str]:
                 names[twin] = n
     else:                                             # first time: from the invitation and the minutes
         names = []
-        roster_names, _ = roster(calendar_of(job)['departments'], before=job_label(job)[:10])   # the department's people, confirmed at an earlier meeting
+        project = project_of(job)                     # a booking or an ambient recording invites nobody: start from
+        seats = calendar_of(job)['departments'] + ([project_roster_key(project)] if project else [])   # whoever this project's last mail went to
+        roster_names, _ = roster(seats, before=job_label(job)[:10])   # the department's or project's people, confirmed earlier
         for n in invited(job) + roster_names + attendees(job.md if not job.missing else ''):   # 以當場會議邀請的人為主
             names = add_name(names, n)
     for n in speakers_shown(job).values():          # a voice with a name was there
@@ -2956,13 +2964,25 @@ def cmd_suggest(job: Job, query: str):
 
 
 def cmd_contacts(job: Job, raw: str):
-    """The recipients a mail just went to, kept with their names for the next mail's menu (contacts.py)."""
+    """The recipients a mail just went to. Each is kept with its name for the next mail's menu (contacts.py); the
+    name the user settled on is kept as a shortcut to that exact address, so a name two people's addresses start the
+    same way (two Erics) resolves straight to the one picked next time (learn_alias). The names also start the next
+    meeting of this project (briefs roster), since a room booking or an ambient recording invites nobody."""
     import contacts
     try:
         rows = json.loads(raw)
     except ValueError:
         rows = []
-    contacts.learn_many([(r.get('mail', ''), r.get('name', ''), 'mail') for r in rows if isinstance(r, dict)])
+    rows = [r for r in rows if isinstance(r, dict)]
+    contacts.learn_many([(r.get('mail', ''), r.get('name', ''), 'mail') for r in rows])
+    for r in rows:                                     # keep the name->address only where it is new: not for a name that
+        name, mail = r.get('name', ''), (r.get('mail') or '').strip().lower()   # already resolves there (no soft guess fixed in)
+        if name and mail and contacts.address_of(name).lower() != mail:
+            contacts.learn_alias(name, mail)
+    names = [r.get('name', '') for r in rows if (r.get('name') or '').strip() and r.get('name') != r.get('mail')]
+    project = project_of(job)
+    if project and names:
+        briefs.save_roster(project_roster_key(project), names, job_label(job))
     out({'ok': True})
 
 

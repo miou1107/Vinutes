@@ -96,13 +96,50 @@ def tokens(name: str) -> set[str]:
     return {p for p in parts if len(p) >= 2}
 
 
+def local_parts(address: str) -> list[str]:
+    """The pieces of an address's own name a person may be called by: pitt@… -> pitt; eric.hsu@… -> eric.hsu, eric,
+    hsu. The whole piece before @ and the parts a dot, dash or underscore splits it into (one character is dropped)."""
+    local = (address or '').split('@')[0].casefold()
+    out = [local] if len(local) >= 2 else []
+    return out + [p for p in re.split(r'[._-]+', local) if len(p) >= 2 and p != local]
+
+
+def _aliases() -> dict[str, str]:
+    """The name -> exact address the user settled by sending (learn_alias): their own choice, which wins over a
+    name match."""
+    found = _data().get('aliases')
+    return {k: v for k, v in found.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(found, dict) else {}
+
+
+def learn_alias(name: str, address: str):
+    """Keep this name as a shortcut to this exact address (the user picked it in the mail sheet and sent): next time
+    the name resolves straight to it, even when two people's addresses start the same way (two Erics)."""
+    address = (address or '').strip().lower()
+    key = ' '.join((name or '').split()).casefold()
+    if not ADDRESS.match(address) or len(key) < 2 or key == address:   # a bare address typed as its own name is not an alias
+        return
+    with _locked():
+        data = _data()
+        aliases = data.setdefault('aliases', {})
+        if not isinstance(aliases, dict):
+            aliases = data['aliases'] = {}
+        if aliases.get(key) != address:
+            aliases[key] = address
+            _save(data)
+
+
 ALIAS = re.compile(r'^(?P<outside>.*?)\s*[（(]\s*(?P<inside>[^（）()]*?)\s*[）)]\s*$')
 
 
 def address_of(name: str) -> str:
     """The one address whose contact is called this, else '' (nobody, or more than one). The name is taken whole;
     a bracket holding an English alias (陳怡君（Jessie）) also tries the two parts, a bracket holding anything else
-    (Amy（悠遊卡）, 陳小姐（台灣 PASS）) is an explanation of which person, so only the whole name counts."""
+    (Amy（悠遊卡）, 陳小姐（台灣 PASS）) is an explanation of which person, so only the whole name counts.
+
+    An address the user settled by sending (learn_alias) wins first. Then a contact called this by its display name
+    (許志明 Evan). Only when the display names know nobody of this name is the address's own name tried (Pitt finds
+    pitt@…, Sophie finds sophiehuang@…), so a clear name match is never upset by an address that merely starts the
+    same way. Either way, more than one match leaves '' for the user to pick."""
     whole = ' '.join((name or '').split()).casefold()
     keys = {whole} if len(whole) >= 2 else set()
     m = ALIAS.match(whole)
@@ -110,12 +147,18 @@ def address_of(name: str) -> str:
         keys |= {k for k in (m.group('outside'), m.group('inside')) if len(k) >= 2}
     if not keys:
         return ''
-    hits = []
-    for address, p in people().items():
-        called = tokens(p.get('name', '')) | {(p.get('name') or '').casefold()}
-        if keys & called:
-            hits.append(address)
-    return hits[0] if len(hits) == 1 else ''
+    aliases = _aliases()
+    if whole in aliases:                              # a pick for the whole name wins, not undone by a loose part alias
+        return aliases[whole]
+    picked = {aliases[k] for k in keys if k in aliases}
+    if picked:
+        return next(iter(picked)) if len(picked) == 1 else ''
+    folks = people()
+    named = [a for a, p in folks.items() if keys & (tokens(p.get('name', '')) | {(p.get('name') or '').casefold()})]
+    if named:
+        return named[0] if len(named) == 1 else ''
+    by_address = [a for a in folks if any(part.startswith(k) for k in keys for part in local_parts(a))]
+    return by_address[0] if len(by_address) == 1 else ''
 
 
 def suggest(query: str, exclude=()) -> list[dict]:

@@ -2722,6 +2722,39 @@ class Departments(unittest.TestCase):
         self.assertEqual(minutes_app.calendar_payload(self.job('20261021-150000', {})), self.EMPTY)
         self.assertEqual(minutes_app.roster(['數據經濟發展課']), ([], ''))
 
+    def test_a_mail_sent_starts_the_next_meeting_of_the_project_with_its_recipients(self):
+        import contacts
+        contacts.CONTACTS.unlink(missing_ok=True)
+        try:
+            # a meeting with no calendar invitees (an ERP booking / ambient recording): who it went to is only known
+            # once the user corrects the recipients and sends
+            first = self.job('20261020-150000', {'guests': [], 'host': '', 'departments': [], 'participants': []})
+            minutes_app.save_sorting(first, project='社群專案')
+            minutes_app.cmd_contacts(first, json.dumps([{'name': 'Amy Chen', 'mail': 'amy@example.com'},
+                                                        {'name': 'Kai Lee', 'mail': 'kai@example.com'}]))
+            later = self.job('20261027-150000', {'guests': [], 'host': '', 'departments': [], 'participants': []},
+                             md=MINUTES.replace('Amy、Kai', '[__]'))
+            minutes_app.save_sorting(later, project='社群專案')
+            self.assertEqual(minutes_app.meeting_people(later), ['Amy Chen', 'Kai Lee'])
+            # a meeting of another project does not get them
+            other = self.job('20261028-150000', {'guests': [], 'host': '', 'departments': [], 'participants': []},
+                             md=MINUTES.replace('Amy、Kai', '[__]'))
+            minutes_app.save_sorting(other, project='別的專案')
+            self.assertEqual(minutes_app.meeting_people(other), [])
+        finally:
+            contacts.CONTACTS.unlink(missing_ok=True)
+
+    def test_a_project_named_like_a_department_does_not_pollute_the_department_roster(self):
+        import contacts
+        contacts.CONTACTS.unlink(missing_ok=True)
+        try:
+            first = self.job('20261020-150000', {'guests': [], 'host': '', 'departments': [], 'participants': []})
+            minutes_app.save_sorting(first, project='數據經濟發展課')               # a project named like a real department
+            minutes_app.cmd_contacts(first, json.dumps([{'name': '陳大文', 'mail': 'chen@example.com'}]))
+            self.assertEqual(minutes_app.roster(['數據經濟發展課']), ([], ''))      # the department's own roster is untouched
+        finally:
+            contacts.CONTACTS.unlink(missing_ok=True)
+
 
 class Contacts(unittest.TestCase):
     """contacts.py: the addresses Vinutes knows (directory, calendar invitees, people mailed before), a name to an
@@ -2772,6 +2805,38 @@ class Contacts(unittest.TestCase):
         self.c.learn_many([('guest@partner.example.com', '王小姐', 'mail'), ('bad address', 'x', 'mail')])
         self.assertIn({'name': '王小姐', 'mail': 'guest@partner.example.com', 'src': 'mail'}, self.c.suggest('王'))
         self.assertEqual(self.c.suggest('e')[0]['mail'], 'evanhsu@example.com')   # a name part starting with it comes first
+
+    def test_an_english_nickname_only_in_the_address_finds_a_chinese_named_contact(self):
+        # the directory shows these people by their Chinese name; the English nickname is only in the address
+        self.c.learn('pitt@example.com', '趙致緯', 'directory')
+        self.c.learn('sophiehuang@example.com', '黃頌婷', 'directory')
+        self.assertEqual(self.c.address_of('Pitt'), 'pitt@example.com')          # pitt@ -> pitt
+        self.assertEqual(self.c.address_of('Sophie'), 'sophiehuang@example.com')  # sophiehuang@ starts with sophie
+
+    def test_a_nickname_two_people_share_is_left_until_the_user_picks_one_and_then_remembered(self):
+        self.c.learn('ericzhuang@example.com', '莊宗庭', 'directory')
+        self.c.learn('erichsu@example.com', '許恩碩', 'directory')
+        self.assertEqual(self.c.address_of('Eric'), '')                          # two Erics: not guessed
+        self.c.learn_alias('Eric', 'erichsu@example.com')                        # the user picked one, once
+        self.assertEqual(self.c.address_of('Eric'), 'erichsu@example.com')       # and it is remembered
+
+    def test_a_learned_alias_wins_over_a_name_match(self):
+        self.c.learn_alias('Evan', 'chen@partner.example.com')                   # on purpose, not 許志明 Evan
+        self.assertEqual(self.c.address_of('Evan'), 'chen@partner.example.com')
+
+    def test_a_clear_name_match_is_not_upset_by_a_lookalike_address(self):
+        self.c.learn('ada@example.com', 'Ada Wang', 'directory')                 # 'Ada' is this person
+        self.c.learn('adam@example.com', '林志明', 'directory')                   # adam@ also starts with 'ada'
+        self.assertEqual(self.c.address_of('Ada'), 'ada@example.com')            # the name match wins, no false tie
+
+    def test_an_alias_for_the_whole_name_wins_over_an_unrelated_part_alias(self):
+        self.c.learn_alias('Evan', 'loose@example.com')                          # a loose 'Evan' learned elsewhere
+        self.c.learn_alias('張(Evan)', 'zhang@example.com')                      # the user picked this exact person once
+        self.assertEqual(self.c.address_of('張(Evan)'), 'zhang@example.com')     # the whole-name pick wins, no self-made tie
+
+    def test_an_address_typed_as_its_own_name_is_not_learned_as_an_alias(self):
+        self.c.learn_alias('bob@example.com', 'bob@example.com')                 # a bare address, name == mail
+        self.assertEqual(self.c._aliases(), {})                                  # nothing learned
 
 
 MINUTES_WITH_PURPOSE = MINUTES.replace('## 二、討論摘要', '## 二、會議目的\n\n確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n## 三、討論摘要')
@@ -2828,6 +2893,17 @@ class MailDefaults(Flows):
         self.assertEqual(mail['people'][3], {'name': '陳小姐', 'mail': ''})
         self.assertEqual(mail['missing'], ['陳小姐', 'Evan'])                 # two Erics: the user picks one
         self.assertNotIn('', mail['to'])
+
+    def test_sending_remembers_a_corrected_name_to_its_address(self):
+        self.c.learn('ericzhuang@example.com', '莊宗庭', 'directory')
+        self.c.learn('erichsu@example.com', '許恩碩', 'directory')
+        self.assertEqual(self.c.address_of('Eric'), '')                       # two Erics, so Eric was missing
+        minutes_app.cmd_contacts(self.job(), json.dumps([{'name': 'Eric', 'mail': 'erichsu@example.com'}]))
+        self.assertEqual(self.c.address_of('Eric'), 'erichsu@example.com')    # the user's pick is remembered
+
+    def test_sending_does_not_relearn_an_alias_for_a_name_that_already_resolves(self):
+        minutes_app.cmd_contacts(self.job(), json.dumps([{'name': '李國豪 Kai', 'mail': 'kai@example.com'}]))
+        self.assertEqual(self.c._aliases(), {})                               # Kai already resolves; no soft guess fixed in
 
     def test_the_body_gets_the_purpose_and_the_highlights_after_the_link(self):
         self.md_path.write_text(MINUTES_WITH_PURPOSE, encoding='utf-8')

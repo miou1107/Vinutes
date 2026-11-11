@@ -103,6 +103,21 @@ enum CaptureTests {
             check(RateWatch.nearest(37_000) == nil, "37 000 a second matches no usual rate")
         }
 
+        // 9. The system tap is rebuilt only when it has gone quiet during a live meeting, and not right after a rebuild.
+        //    A healthy aggregate device delivers buffers every callback (zeros when the far side is quiet), so "no
+        //    buffer at all for a while" means the tap died, not that the room is quiet. This is the 2026-11-11 case:
+        //    on Bluetooth earphones the tap stopped after ~5.5 min and the other side was lost for the rest.
+        do {
+            check(MeetingCapture.shouldRetapSystem(sinceLastBuffer: 10, meetingActive: true, sinceLastRetap: 30),
+                  "a tap with no sound for 10 s during a meeting is restarted")
+            check(!MeetingCapture.shouldRetapSystem(sinceLastBuffer: 1, meetingActive: true, sinceLastRetap: 30),
+                  "a tap that is still delivering buffers is left alone")
+            check(!MeetingCapture.shouldRetapSystem(sinceLastBuffer: 10, meetingActive: false, sinceLastRetap: 30),
+                  "with no meeting app on the microphone the tap is not restarted")
+            check(!MeetingCapture.shouldRetapSystem(sinceLastBuffer: 10, meetingActive: true, sinceLastRetap: 3),
+                  "a tap is not restarted again in the seconds right after a restart")
+        }
+
         print(fails == 0 ? "\nALL PASSED" : "\n\(fails) FAILED")
         exit(fails == 0 ? 0 : 1)
     }

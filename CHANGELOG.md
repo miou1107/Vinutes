@@ -1,10 +1,13 @@
 # Changelog
 
+## v0.4.34 (2026-11-11)
+
+- The recording keeps the other side when the system tap stops in the middle of a meeting on Bluetooth earphones. On 2026-11-11 a call through Bluetooth earphones recorded the other side clearly for about five and a half minutes, then the tap on the Mac's sound stopped and the rest of the meeting had no other side at all. The Mac's output device had not changed, so the listener that re-taps on an output change never fired. Vinutes now watches the tap during a call (while another app holds the microphone): when no sound from the Mac arrives for several seconds, it builds the tap again, so the other side comes back on its own. A quiet other side is left alone, since a working tap still delivers silent sound and only a stopped one delivers nothing. The rebuild keeps being tried through a failed attempt (a Bluetooth mode-switch can make one fail) and only stands down where the tap never worked at all.
+
 ## v0.4.33 (2026-11-10)
 
 - Fewer attendees come up as 找不到信箱 in the mail sheet. Someone the company directory lists by their Chinese name but whom colleagues write to by an English nickname (Pitt, Sophie) is now matched by the nickname in their address, not only by the display name; a clear match by name is never upset by an address that merely starts the same way. When one nickname fits two people's addresses (two Erics), it is still left for you to pick in the recipient box, and the one you fill in and send to is remembered with that name, so next time the name resolves to it on its own.
 - The next meeting of a project starts with the people its last mail went to. A room booking or an ambient recording invites nobody through the calendar, so until now the recipient list was often the wrong people; the recipients you corrected and sent to are kept with the project, and the next meeting of that project begins its 人員 from them.
-
 ## v0.4.32 (2026-10-30)
 
 - The menu bar shows the app icon's calligraphic V with its quill in place of the microphone, black or white to suit the menu bar. While the minutes are being written it still shows the waveform, and while recording the red dot and the time. If the V's file is missing, the update still goes through and the menu bar shows the microphone as before. The message at the end of an install and the setup steps name the V.

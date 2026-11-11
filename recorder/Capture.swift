@@ -368,9 +368,28 @@ final class MeetingCapture {
     private var observer: NSObjectProtocol?
     private var outputListener: AudioObjectPropertyListenerBlock?
     private(set) var hearsSystem = false
+    // The system tap can stop delivering while the Mac's output device stays the same — seen on Bluetooth earphones
+    // (2026-11-11): the tap died after ~5.5 min and the output-device listener never fired, so the other side was lost
+    // for the rest. A healthy aggregate device delivers a buffer every callback (zeros when the far side is quiet), so
+    // "no buffer at all for a while" tells a dead tap from a quiet room. `watchdog` watches these two times and rebuilds.
+    private var lastSystemBufferAt = CACurrentMediaTime()
+    private var lastRetapAt = CACurrentMediaTime()
+    private var tapWorkedOnce = false      // once the tap has delivered, a later failure is transient: keep recovering
+    private let tapLock = NSLock()
+    private var watchdog: DispatchSourceTimer?
+    private let watchQueue = DispatchQueue(label: "vinutes.tap-watchdog")
     /// the microphone to record, by uid; "" records the one macOS uses now (自動)
     var microphone = ""
     var note: (String) -> Void = { _ in }
+
+    /// Whether a silent system tap should be rebuilt. `sinceLastBuffer` is how long no tap buffer has arrived (a healthy
+    /// device delivers every callback, so this stays small even when the far side is quiet); `meetingActive` is whether
+    /// another app holds the microphone (a live call — when there is a far side to lose); `sinceLastRetap` is how long
+    /// since the last rebuild. Rebuild only a tap that has truly gone quiet in a call, and not again right after a rebuild.
+    static func shouldRetapSystem(sinceLastBuffer: TimeInterval, meetingActive: Bool, sinceLastRetap: TimeInterval,
+                                  deadAfter: TimeInterval = 8, minBetween: TimeInterval = 12) -> Bool {
+        meetingActive && sinceLastBuffer >= deadAfter && sinceLastRetap >= minBetween
+    }
 
     init(url: URL) throws {
         self.url = url
@@ -401,6 +420,37 @@ final class MeetingCapture {
         }
         outputListener = listener
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, .main, listener)
+        // and when the tap stops delivering without the output device changing (a Bluetooth earphone's call mode), notice
+        // it and start the tap again — the output-device listener above does not fire for that
+        let timer = DispatchSource.makeTimerSource(queue: watchQueue)
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler { [weak self] in self?.checkSystemTap() }
+        watchdog = timer
+        timer.resume()
+    }
+
+    /// Rebuilds the tap when it has gone quiet during a live meeting (see `shouldRetapSystem`). Runs on `watchQueue`;
+    /// the rebuild itself is dispatched to main, like the output-device and microphone-change paths.
+    private func checkSystemTap() {
+        if stopped { return }
+        tapLock.lock()
+        let worked = tapWorkedOnce
+        let sinceBuffer = CACurrentMediaTime() - lastSystemBufferAt
+        let sinceRetap = CACurrentMediaTime() - lastRetapAt
+        tapLock.unlock()
+        // only a tap that has delivered before is worth rebuilding: this rules out an old Mac or a refused permission,
+        // and keeps recovering even if one rebuild throws mid Bluetooth mode-switch (hearsSystem would latch off)
+        guard worked, sinceBuffer >= 8 else { return }         // pay for the process-object scan only once it is quiet
+        guard otherAppUsesMicrophone() else { return }
+        guard Self.shouldRetapSystem(sinceLastBuffer: sinceBuffer, meetingActive: true, sinceLastRetap: sinceRetap) else { return }
+        // close the once-per-minBetween gate here, on this queue — a rebuild can hold main past the next tick, and the
+        // gate must not re-open from a stale lastRetapAt and stack rebuilds behind it
+        tapLock.lock(); lastRetapAt = CACurrentMediaTime(); tapLock.unlock()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.stopped else { return }
+            self.note("the other side stopped coming in (\(Int(sinceBuffer)) s); starting the tap again")
+            self.listenToSystem()
+        }
     }
 
     /// (again) the sound the Mac plays, when macOS lets Vinutes tap it
@@ -411,9 +461,14 @@ final class MeetingCapture {
             system.clear()
             do {
                 systemSound = try SystemSound(Self.format, note: { [weak self] in self?.note($0) }) { [weak self] in
-                    self?.system.push($0)
+                    guard let self else { return }
+                    self.tapLock.lock(); self.lastSystemBufferAt = CACurrentMediaTime(); self.tapLock.unlock()
+                    self.system.push($0)
                 }
                 hearsSystem = true
+                // the fresh tap gets `deadAfter` seconds of grace before the watchdog calls it dead
+                tapLock.lock(); lastSystemBufferAt = CACurrentMediaTime(); lastRetapAt = CACurrentMediaTime()
+                tapWorkedOnce = true; tapLock.unlock()
                 note("asked for the Mac's sound too (silent if macOS was not allowed to share it)")
             } catch {
                 hearsSystem = false
@@ -590,6 +645,8 @@ final class MeetingCapture {
     static func decibels(_ rms: Float) -> Float { rms > 0 ? 20 * log10(rms) : -160 }
 
     func stop() {
+        watchdog?.cancel()
+        watchdog = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
         if let outputListener {

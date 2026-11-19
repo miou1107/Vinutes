@@ -57,9 +57,40 @@ def same_name(a: str, b: str) -> bool:
     return bool(name_keys(a) & name_keys(b))
 
 
+def _address_of(name: str) -> str:
+    """The company address this name resolves to, or '' (offline, unknown, or more than one person). Imported late
+    so contacts.py can import this module."""
+    try:
+        import contacts
+        return contacts.address_of(name)
+    except Exception:                                  # noqa: BLE001  a contacts hiccup must not stop a list building
+        return ''
+
+
 def add_name(names: list[str], name: str) -> list[str]:
     name = one_line(name, LIMITS['name'])
-    return names if not name or any(same_name(n, name) for n in names) else names + [name]
+    if not name:
+        return names
+    address = _address_of(name)                        # the same person written two ways (林岳穎 and Phoebe) is one
+
+    def same_person(other: str) -> bool:
+        if same_name(other, name):
+            return True
+        return bool(address) and _address_of(other) == address
+
+    here = [n for n in names if same_person(n)]
+    if not here:
+        return names + [name]
+    best = max(here + [name], key=lambda s: len(name_keys(s)))   # the fuller spelling (林岳穎(phoebe) over Phoebe)
+    out, placed = [], False
+    for n in names:                                    # one entry for this person, where the first spelling was; no straggler
+        if same_person(n):
+            if not placed:
+                out.append(best)
+                placed = True
+        else:
+            out.append(n)
+    return out
 
 
 @contextmanager

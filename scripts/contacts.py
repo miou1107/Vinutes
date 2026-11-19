@@ -141,24 +141,46 @@ def address_of(name: str) -> str:
     pitt@…, Sophie finds sophiehuang@…), so a clear name match is never upset by an address that merely starts the
     same way. Either way, more than one match leaves '' for the user to pick."""
     whole = ' '.join((name or '').split()).casefold()
-    keys = {whole} if len(whole) >= 2 else set()
-    m = ALIAS.match(whole)
-    if m and re.fullmatch(r"[a-z.'-]+", m.group('inside')):
-        keys |= {k for k in (m.group('outside'), m.group('inside')) if len(k) >= 2}
-    if not keys:
+    if len(whole) < 2:
         return ''
+    # the name as a whole, and the part outside a nickname bracket, are the specific keys; the nickname inside and
+    # the other parts of the name only broaden the search when the specific keys find nobody, so a clear name match
+    # (林岳穎) is never tied by a nickname a second person shares (phoebe). A bracket whose inside is not a nickname
+    # (Amy（悠遊卡）, 林采瑤(采瑤)) is an explanation of which person: only the whole name counts.
+    m = ALIAS.match(whole)
+    nickname = bool(m and re.fullmatch(r"[a-z0-9.'-]+", m.group('inside')))
+    specific = {whole}
+    broad = set()
+    if m and not nickname:                            # an explanation beside a name, not an alias
+        pass
+    else:
+        if nickname:
+            specific |= {k for k in (m.group('outside'),) if len(k) >= 2}
+            broad |= {k for k in (m.group('inside'),) if len(k) >= 2}
+        broad |= {t for t in tokens(whole) if len(t) >= 2}
+    broad -= specific
     aliases = _aliases()
     if whole in aliases:                              # a pick for the whole name wins, not undone by a loose part alias
         return aliases[whole]
-    picked = {aliases[k] for k in keys if k in aliases}
-    if picked:
-        return next(iter(picked)) if len(picked) == 1 else ''
     folks = people()
-    named = [a for a, p in folks.items() if keys & (tokens(p.get('name', '')) | {(p.get('name') or '').casefold()})]
-    if named:
-        return named[0] if len(named) == 1 else ''
-    by_address = [a for a in folks if any(part.startswith(k) for k in keys for part in local_parts(a))]
-    return by_address[0] if len(by_address) == 1 else ''
+
+    def by_alias(keys):
+        return {aliases[k] for k in keys if k in aliases}
+
+    def by_name(keys):
+        return {a for a, p in folks.items() if keys & (tokens(p.get('name', '')) | {(p.get('name') or '').casefold()})}
+
+    def by_local(keys):
+        return {a for a in folks if any(part.startswith(k) for k in keys for part in local_parts(a))}
+
+    # the specific keys decide before the broad ones, so a nickname an alias or a second person shares never
+    # outranks a clear match on the real name; within one step an alias (the user's own pick) comes before a
+    # directory name, and an address that merely starts the same way is the last resort.
+    for found in (by_alias(specific), by_name(specific), by_alias(broad), by_name(broad),
+                  by_local(specific), by_local(broad)):
+        if found:                                     # the first step with any match decides; more than one leaves ''
+            return next(iter(found)) if len(found) == 1 else ''
+    return ''
 
 
 def suggest(query: str, exclude=()) -> list[dict]:

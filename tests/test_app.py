@@ -2838,6 +2838,61 @@ class Contacts(unittest.TestCase):
         self.c.learn_alias('bob@example.com', 'bob@example.com')                 # a bare address, name == mail
         self.assertEqual(self.c._aliases(), {})                                  # nothing learned
 
+    def test_a_real_name_is_not_dragged_into_a_tie_by_a_shared_english_nickname(self):
+        self.c.learn('phoebelin@example.com', '林岳穎', 'directory')              # the directory shows her Chinese name
+        self.c.learn('phoebecheng@example.com', 'Phoebe Cheng', 'directory')     # a second Phoebe
+        self.assertEqual(self.c.address_of('林岳穎(phoebe)'), 'phoebelin@example.com')  # the name wins, the nickname does not tie it
+        self.assertEqual(self.c.address_of('林岳穎'), 'phoebelin@example.com')
+        self.assertEqual(self.c.address_of('Phoebe'), 'phoebecheng@example.com')  # the one whose name holds "Phoebe"
+        self.c.learn_alias('Phoebe', 'phoebelin@example.com')                     # until the user picks the other one
+        self.assertEqual(self.c.address_of('Phoebe'), 'phoebelin@example.com')
+
+    def test_a_bracket_nickname_with_digits_still_finds_the_real_name(self):
+        self.c.learn('jessiechen@example.com', '陳昱穎', 'directory')
+        self.assertEqual(self.c.address_of('陳昱穎(BA0Z)'), 'jessiechen@example.com')
+
+    def test_a_dropped_first_part_of_a_name_still_finds_the_one_person(self):
+        self.c.learn('amieekuo@example.com', 'Amiee Kuo', 'directory')
+        self.assertEqual(self.c.address_of('小 Amiee'), 'amieekuo@example.com')
+
+    def test_a_bare_nickname_alias_does_not_hijack_a_precise_name(self):
+        self.c.learn('phoebelin@example.com', '林岳穎', 'directory')
+        self.c.learn('phoebecheng@example.com', '成玟儀', 'directory')            # her name holds no "phoebe"
+        self.c.learn_alias('Phoebe', 'phoebecheng@example.com')                   # the user's pick for the bare nickname
+        self.assertEqual(self.c.address_of('林岳穎(phoebe)'), 'phoebelin@example.com')  # the real name wins over the alias
+        self.assertEqual(self.c.address_of('成玟儀(phoebe)'), 'phoebecheng@example.com')
+        self.assertEqual(self.c.address_of('Phoebe'), 'phoebecheng@example.com')  # the bare pick still stands
+
+
+class MergePeopleByEmail(unittest.TestCase):
+    """briefs.add_name: two spellings that resolve to the same company address are one person, kept under the
+    fuller spelling; names with no address, or different addresses, are never merged (2026-11-19)."""
+
+    def setUp(self):
+        import contacts
+        import briefs
+        self.c, self.b = contacts, briefs
+        contacts.CONTACTS.unlink(missing_ok=True)
+        contacts.learn('phoebelin@example.com', '林岳穎', 'directory')
+
+    def tearDown(self):
+        self.c.CONTACTS.unlink(missing_ok=True)
+
+    def test_same_address_different_spellings_collapse_to_the_fuller_name(self):
+        self.c.learn_alias('phoebe', 'phoebelin@example.com')                    # the user's pick for the bare nickname
+        self.assertEqual(self.b.add_name(['林岳穎'], 'Phoebe'), ['林岳穎'])       # merged; the fuller spelling stays
+        self.assertEqual(self.b.add_name(['Phoebe'], '林岳穎(phoebe)'), ['林岳穎(phoebe)'])  # the one with more keys wins
+
+    def test_unresolved_or_different_people_are_not_merged(self):
+        self.assertEqual(self.b.add_name(['Unknown A'], 'Unknown B'), ['Unknown A', 'Unknown B'])
+        self.c.learn('other@example.com', '王大明', 'directory')
+        self.assertEqual(self.b.add_name(['林岳穎'], '王大明'), ['林岳穎', '王大明'])
+
+    def test_a_duplicate_already_in_the_list_is_collapsed_when_a_third_spelling_is_added(self):
+        self.c.learn_alias('phoebe', 'phoebelin@example.com')
+        start = ['Phoebe', '林岳穎']                                             # two spellings of one person, e.g. added offline
+        self.assertEqual(self.b.add_name(start, '林岳穎(phoebe)'), ['林岳穎(phoebe)'])  # all collapse to one, the fuller
+
 
 MINUTES_WITH_PURPOSE = MINUTES.replace('## 二、討論摘要', '## 二、會議目的\n\n確認 10 月社群活動的預算與 KOL 名單，作為下週對外報價的依據。\n\n## 三、討論摘要')
 

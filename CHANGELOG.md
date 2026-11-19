@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.35 (2026-11-19)
+
+- Fewer duplicates in the 人員 list and fewer 找不到信箱 in the mail sheet. The same colleague written several ways — 林岳穎, Phoebe, 林岳穎(phoebe) — is now kept as one person wherever two spellings point to the same company address, under the fuller spelling. A name is also no longer left without an address because an English nickname it carries happens to fit a second colleague too: 林岳穎(phoebe) finds 林岳穎's address instead of tying with another Phoebe, a bracketed nickname with digits like 陳昱穎(BA0Z) finds the name in front of it, and a name missing its first part like 小 Amiee still finds the one person. A bare first name two people share (two Erics) is still left for you to pick, and that pick — remembered for the bare name — never overrides a clear match on someone's full name. Two spellings of one person already sitting in a list collapse into one as soon as a third is added. Builds on v0.4.33's nickname-in-address matching.
+
 ## v0.4.34 (2026-11-11)
 
 - The recording keeps the other side when the system tap stops in the middle of a meeting on Bluetooth earphones. On 2026-11-11 a call through Bluetooth earphones recorded the other side clearly for about five and a half minutes, then the tap on the Mac's sound stopped and the rest of the meeting had no other side at all. The Mac's output device had not changed, so the listener that re-taps on an output change never fired. Vinutes now watches the tap during a call (while another app holds the microphone): when no sound from the Mac arrives for several seconds, it builds the tap again, so the other side comes back on its own. A quiet other side is left alone, since a working tap still delivers silent sound and only a stopped one delivers nothing. The rebuild keeps being tried through a failed attempt (a Bluetooth mode-switch can make one fail) and only stands down where the tap never worked at all.

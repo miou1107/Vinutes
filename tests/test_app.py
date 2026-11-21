@@ -4104,6 +4104,22 @@ class ProjectBrief(unittest.TestCase):
         with mock.patch.object(project_folders, 'MOST_BYTES', 250):
             self.assertEqual([p.name for p, _ in project_folders.files(folder)], ['4.txt', '3.txt'])
 
+    def test_data_files_never_crowd_out_the_projects_documents(self):
+        # a folder of crawled pages or backups: hundreds of new .json files beside a few older proposals and minutes
+        import project_folders
+        folder = self.root / '專案'
+        (folder / 'serp').mkdir(parents=True)
+        names = ['提案.md', '時程.pdf', '紀錄.docx'] + [f'serp/{i}.json' for i in range(4)] + ['名單.csv']
+        for i, name in enumerate(names):
+            f = folder / name
+            f.write_text('x' * 100, encoding='utf-8')
+            os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))          # the data is the newest
+        with mock.patch.object(project_folders, 'MOST_FILES', 4):
+            self.assertEqual([p.relative_to(folder).as_posix() for p, _ in project_folders.files(folder)],
+                             ['名單.csv', '紀錄.docx', '時程.pdf', '提案.md'])   # documents first, then the newest data
+        with mock.patch.object(project_folders, 'MOST_BYTES', 250):
+            self.assertEqual([p.name for p, _ in project_folders.files(folder)], ['紀錄.docx', '時程.pdf'])
+
     def test_the_brief_commands_answer_and_refuse_a_broken_brief(self):
         minutes_app.cmd_save_brief('官網改版', json.dumps({'people': [{'name': 'Amy'}]}))
         self.assertEqual(self.outs[-1]['brief']['people'][0]['name'], 'Amy')

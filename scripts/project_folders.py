@@ -29,6 +29,7 @@ LIST = '檔案清單.md'
 CACHE = CONFIG / 'folder-text'
 OFFICE = {'.doc', '.docx', '.rtf', '.odt', '.xlsx', '.pptx'}      # made into text
 KINDS = references.AS_IS | OFFICE
+DATA = {'.json', '.csv', '.tsv'}             # read only when the documents leave room
 SKIP = {'node_modules', '__pycache__'}
 MOST_FILES = 200                 # files from one project's folder
 MOST_BYTES = 60_000_000          # of them, as the files on disk
@@ -37,7 +38,8 @@ MOST_SEEN = 20_000               # entries looked at in one folder
 
 
 def files(folder: Path) -> list[tuple[Path, os.stat_result]]:
-    """The folder's files the AI can read with what stat said of them, newest first, within the limits."""
+    """The folder's files the AI can read with what stat said of them, newest first, within the limits; when the
+    limits leave some out, documents go before data files (DATA)."""
     found, seen = [], 0
     library = Path.home() / 'Library'
     for top, dirs, names in os.walk(folder):
@@ -56,13 +58,16 @@ def files(folder: Path) -> list[tuple[Path, os.stat_result]]:
             found.append((path, st))
         if seen > MOST_SEEN:
             break
-    found.sort(key=lambda f: f[1].st_mtime, reverse=True)
+    # documents first, then data, each newest first: a folder of crawled pages or backups holds hundreds of new
+    # .json files, and taken by date alone they used the whole limit and left out every proposal and minutes
+    found.sort(key=lambda f: (f[0].suffix.lower() in DATA, -f[1].st_mtime))
     kept, total = [], 0
     for path, st in found:
         if len(kept) >= MOST_FILES or total + st.st_size > MOST_BYTES:
             continue
         kept.append((path, st))
         total += st.st_size
+    kept.sort(key=lambda f: f[1].st_mtime, reverse=True)
     return kept
 
 

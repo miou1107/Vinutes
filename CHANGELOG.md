@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.36 (2026-11-21)
+
+- A project folder full of data no longer hides the project's documents from the AI that writes the minutes. Only the newest 200 files of a folder are read, and a folder that also holds crawled pages, exports or backups filled that limit with them: a website project's folder gave 187 crawled-page files and 2 of its 86 notes, a client project's folder gave its JSON backups and none of its 6 PDFs or 5 slide decks. Proposals, minutes, schedules and other documents now come first and data files (JSON, CSV, TSV) fill what room is left, so the same folders give 46 notes and every PDF and deck. The list the AI reads is still newest first.
+- A bench script, `docs/bench/folders.py`, writes past meetings' minutes again with and without the project folders and scores each run against the minutes as they were sent.
+
 ## v0.4.35 (2026-11-19)
 
 - Fewer duplicates in the 人員 list and fewer 找不到信箱 in the mail sheet. The same colleague written several ways — 林岳穎, Phoebe, 林岳穎(phoebe) — is now kept as one person wherever two spellings point to the same company address, under the fuller spelling. A name is also no longer left without an address because an English nickname it carries happens to fit a second colleague too: 林岳穎(phoebe) finds 林岳穎's address instead of tying with another Phoebe, a bracketed nickname with digits like 陳昱穎(BA0Z) finds the name in front of it, and a name missing its first part like 小 Amiee still finds the one person. A bare first name two people share (two Erics) is still left for you to pick, and that pick — remembered for the bare name — never overrides a clear match on someone's full name. Two spellings of one person already sitting in a list collapse into one as soon as a third is added. Builds on v0.4.33's nickname-in-address matching.

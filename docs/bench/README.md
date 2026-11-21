@@ -204,3 +204,23 @@ A line whose stretch runs past its piece is left for after Stop, so no print is 
 ```bash
 $PY docs/bench/live_voices.py ~/.config/vin-meeting-minutes-zh/recordings/20261021-134441 /tmp/bench/lv 0,320,646,932,1259,1585,1859,2179,2477,2805
 ```
+
+## Do project folders make the minutes better? (`folders.py`, issue #2, 2026-11-21)
+
+Three meetings already sent (a client project's 47-minute review, a campaign meeting, a data-platform meeting),
+each written again six times by Claude: three times without the project folders and three times with them,
+every run scored against the minutes as they were sent (the window's "edits" score). Only what existed before
+each meeting was given to the AI; the folders were read with the documents-before-data rule of v0.4.36.
+
+| Meeting | Without folders | With folders |
+|---|---|---|
+| 1 | 69, 64, 70 (avg 68) | 64, 71, 67 (avg 67) |
+| 2 | 69, 79, 68 (avg 72) | 70, 70, 77 (avg 72) |
+| 3 | 68, 63, 61 (avg 64) | 77, 66, 67 (avg 70) |
+
+The folders move the average by 2 points over the 18 runs, and one run differs from the next by up to 11 points
+under the same condition, so the folders make no difference that can be told from the noise. Points were lost, on
+average per run, on the basics (place, attendees, attachments: 9.4 of 25), action items' owners and deadlines
+(6.8 of 20), people (6.0 of 20), decisions (4.6 of 15) and numbers (4.4 of 20). The basics are lost where the
+calendar holds no event the user is on (a discussion after the meeting, a room booked by a colleague without an
+invitation); no project document holds them either.

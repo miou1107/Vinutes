@@ -3723,7 +3723,7 @@ class McpServer(unittest.TestCase):
     def test_the_tools_and_which_ones_write(self):
         tools = self.mcp.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'})['result']['tools']
         writes = {t['name'] for t in tools if not t['annotations']['readOnlyHint']}
-        self.assertEqual(writes, {'name_speaker', 'add_note', 'replace_text', 'set_tags', 'set_project'})
+        self.assertEqual(writes, {'name_speaker', 'add_note', 'replace_text', 'set_tags', 'set_project', 'add_to_brief'})
         self.assertFalse([t['name'] for t in tools if re.search(r'delete|send|mail', t['name'])])
         init = self.mcp.handle({'jsonrpc': '2.0', 'id': 0, 'method': 'initialize',
                                 'params': {'protocolVersion': '2025-06-18'}})['result']
@@ -3824,6 +3824,54 @@ class McpServer(unittest.TestCase):
         self.assertEqual(replies[2]['error']['code'], -32602)
         self.assertEqual(replies[4]['error']['code'], -32700)
         self.assertIn('tools', replies[3]['result'])
+
+    def test_the_draft_brief_prompt(self):
+        init = self.mcp.handle({'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {}})['result']
+        self.assertIn('prompts', init['capabilities'])
+        listed = self.mcp.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'prompts/list'})['result']['prompts']
+        self.assertEqual([p['name'] for p in listed], ['draft_brief'])
+        got = self.mcp.handle({'jsonrpc': '2.0', 'id': 2, 'method': 'prompts/get',
+                               'params': {'name': 'draft_brief', 'arguments': {'project': '官網改版'}}})['result']
+        text = got['messages'][0]['content']['text']
+        self.assertIn('project set to "官網改版"', text)
+        self.assertIn(self.mcp.TYPED, text)
+        self.assertIn('add_to_brief', text)
+        self.assertNotIn('{', text.replace(self.mcp.TYPED, ''))      # every blank filled
+        bare = self.mcp.handle({'jsonrpc': '2.0', 'id': 3, 'method': 'prompts/get',
+                                'params': {'name': 'draft_brief'}})['result']['messages'][0]['content']['text']
+        self.assertNotIn('project set to', bare)
+        self.assertEqual(self.mcp.handle({'jsonrpc': '2.0', 'id': 4, 'method': 'prompts/get',
+                                          'params': {'name': 'nope'}})['error']['code'], -32602)
+
+    def test_the_drafting_script_prints_only_what_the_user_typed(self):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        folder = home / 'Projects' / '春季 活動'
+        folder.mkdir(parents=True)
+        logs = home / '.claude' / 'projects' / re.sub(r'[^A-Za-z0-9]', '-', str(folder.resolve()))
+        logs.mkdir(parents=True)
+        here = str(folder.resolve())
+        said = lambda content, **more: {'type': 'user', 'timestamp': '2026-11-20T10:00:00Z', 'cwd': here,  # noqa: E731
+                                        'message': {'role': 'user', 'content': content}, **more}
+        lines = [said('客戶窗口是 Mia，負責報價'),
+                 said([{'type': 'text', 'text': '文案交給 Ben\n<system-reminder>sk-secret-key</system-reminder>'}]),
+                 said([{'type': 'tool_result', 'content': 'API_KEY=abc'}]),
+                 {'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': '好的'}]}},
+                 said('skill text', isMeta=True),
+                 said('summary', isCompactSummary=True),
+                 said('x' * 2001),
+                 said('<command-name>/compact</command-name>'),
+                 said('<local-command-stdout>password=1</local-command-stdout>'),
+                 said('看這份\n\n<pasted_content id="a1">\nAPI_KEY=sk-pasted\n</pasted_content id="a1">'),
+                 said('<pasted_content id="b2">\n合約全文\n</pasted_content id="b2">\n\n照這份改日期'),
+                 said('別的客戶的事', cwd=str(home / 'Projects' / '秋季 活動'))]
+        (logs / 'a.jsonl').write_text('\n'.join(json.dumps(l, ensure_ascii=False) for l in lines) + '\nnot json\n',
+                                      encoding='utf-8')
+        done = subprocess.run([sys.executable, '-c', self.mcp.TYPED], cwd=folder, capture_output=True, text=True,
+                              env={**os.environ, 'HOME': str(home)}, timeout=60)
+        self.assertEqual(done.stderr, '')
+        self.assertEqual(done.stdout.splitlines(), ['2026-11-20 客戶窗口是 Mia，負責報價', '2026-11-20 文案交給 Ben',
+                                                    '2026-11-20 看這份', '2026-11-20 照這份改日期'])
 
 
 class AgentEdit(Flows):
@@ -4119,6 +4167,61 @@ class ProjectBrief(unittest.TestCase):
                              ['名單.csv', '紀錄.docx', '時程.pdf', '提案.md'])   # documents first, then the newest data
         with mock.patch.object(project_folders, 'MOST_BYTES', 250):
             self.assertEqual([p.name for p, _ in project_folders.files(folder)], ['紀錄.docx', '時程.pdf'])
+
+    def test_an_approved_draft_adds_to_the_brief_and_takes_nothing_off(self):
+        self.briefs.save('官網改版', {'people': [{'name': 'Amy', 'role': 'PM'}, {'name': 'Kai', 'role': '工程'}],
+                                      'terms': [{'word': 'POC'}], 'background': '十二月底結案。'})
+        draft = {'people': [{'name': 'Amy', 'role': '專案經理'}, {'name': 'Mia', 'role': '客戶窗口' * 9},
+                            {'name': ''}],
+                 'terms': [{'word': 'poc', 'meaning': '概念驗證'}, {'word': 'KV', 'meaning': '主視覺'}]}
+        for _ in range(2):                                    # the same draft saved twice adds nothing twice
+            b = self.briefs.merge('官網改版', draft['people'], draft['terms'])
+        self.assertEqual([(p['name'], p['role']) for p in b['people']],
+                         [('Amy', '專案經理'), ('Kai', '工程'), ('Mia', ('客戶窗口' * 9)[:20])])
+        self.assertEqual([(t['word'], t['meaning']) for t in b['terms']], [('POC', '概念驗證'), ('KV', '主視覺')])
+        self.assertEqual(b['background'], '十二月底結案。')       # left out: the user's own stays
+        self.assertEqual(minutes_app.project_people('官網改版'), ['Amy', 'Kai', 'Mia'])
+        b = self.briefs.merge('官網改版', background='  二期官網，十二月底結案。  ')
+        self.assertEqual(b['background'], '二期官網，十二月底結案。')
+        self.assertEqual(len(b['people']), 3)
+
+    def test_an_approved_role_reaches_the_person_under_another_spelling(self):
+        addresses = {'王小美': 'mei@example.com', 'Mimi': 'mei@example.com'}
+        with mock.patch.object(self.briefs, '_address_of', lambda n: addresses.get(n, '')):
+            self.briefs.add_person('官網改版', '王小美', '設計')
+            b = self.briefs.merge('官網改版', [{'name': 'Mimi', 'role': '美術指導'}])
+        self.assertEqual([(p['name'], p['role']) for p in b['people']], [('王小美', '美術指導')])
+        self.assertEqual(list(json.loads(self.briefs.BRIEFS.read_text())['官網改版']['people']), ['王小美'])
+
+    def test_a_folder_finds_its_project(self):
+        site, event = self.root / '官網', self.root / '活動' / '春季'
+        (site / '提案').mkdir(parents=True)
+        event.mkdir(parents=True)
+        self.briefs.save('官網改版', {'folder': str(site)})
+        self.assertEqual(self.briefs.project_for_folder(str(site)), '官網改版')
+        self.assertEqual(self.briefs.project_for_folder(str(site / '提案')), '官網改版')   # a subfolder of it
+        self.assertEqual(self.briefs.project_for_folder(str(self.root)), '官網改版')       # the one project below
+        self.briefs.save('春季活動', {'folder': str(event)})
+        self.assertIsNone(self.briefs.project_for_folder(str(self.root)))                # two below: ask
+        self.assertIsNone(self.briefs.project_for_folder(str(self.root / '沒有')))
+
+    def test_claude_reads_and_adds_to_the_brief_through_vinutes(self):
+        import mcp_server
+        ask = lambda tool, **a: mcp_server.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',  # noqa: E731
+                                                   'params': {'name': tool, 'arguments': a}})['result']
+        folder = self.root / '官網'
+        folder.mkdir()
+        self.briefs.save('官網改版', {'folder': str(folder)})
+        found = json.loads(ask('get_brief', folder=str(folder))['content'][0]['text'])
+        self.assertEqual(found['brief']['project'], '官網改版')
+        lost = json.loads(ask('get_brief', folder=str(self.root / '別的'))['content'][0]['text'])
+        self.assertFalse(lost['found'])
+        self.assertIn('官網改版', lost['projects'])
+        self.assertTrue(ask('add_to_brief', project='官網改版')['isError'])                 # nothing to add
+        saved = json.loads(ask('add_to_brief', project='官網改版',
+                               people=[{'name': 'Mia', 'role': '客戶窗口'}])['content'][0]['text'])
+        self.assertEqual([p['name'] for p in saved['brief']['people']], ['Mia'])
+        self.assertEqual(self.briefs.load('官網改版')['folder'], str(folder.resolve()))
 
     def test_the_brief_commands_answer_and_refuse_a_broken_brief(self):
         minutes_app.cmd_save_brief('官網改版', json.dumps({'people': [{'name': 'Amy'}]}))

@@ -84,6 +84,10 @@ Vinutes is also an MCP server. Installing or updating Vinutes connects it to the
 
 Then, in any folder, ask Claude Code (or any of them) "what did last week's project meeting decide?" and it searches your minutes and transcripts and answers with the meeting's date and title. When you ask it to, it can also name a speaker, add a paragraph to Attachments, change words in the minutes, and set tags or the project; the Google Doc follows, and the meeting's history says Claude Code made the change. Deleting a meeting and sending mail stay in Vinutes.
 
+### Draft a project brief from your past conversations
+
+If you have worked on a project with Claude Code in its folder, Claude can draft the project's brief (people, terms and background, in Project settings) from what you typed there. Open Claude Code in the project's folder and type `/mcp__vinutes__draft_brief`. Claude reads only your own messages, not its replies, tool output or anything you pasted, and shows the draft next to what the brief already has. Nothing is saved until you say so, and nothing already in the brief is taken off. Prices, budgets and opinions about people stay out, since the minutes go to clients. Vinutes itself never reads your conversations.
+
 ## Update
 
 When a newer version is on GitHub, the meeting window shows an update button. Settings > Check for Updates in the menu bar looks at once. You can also update by hand:

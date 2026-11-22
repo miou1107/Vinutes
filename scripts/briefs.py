@@ -299,6 +299,69 @@ def save(project: str, brief: dict) -> dict:
         return load(project)
 
 
+def merge(project: str, people=None, terms=None, background=None) -> dict:
+    """A draft the user approved, from Claude in the project's folder (/mcp__vinutes__draft_brief, issue #2): its
+    people and terms join the brief, a role or meaning it gives replaces the one kept, and nothing already in the
+    brief is taken off. A background given replaces the user's; leave it out to keep it."""
+    project = one_line(project, 30)
+    if not project:
+        return load(project)
+    with _locked():
+        names = people_of(project)
+        entry = _entry(project)
+        for p in people if isinstance(people, list) else []:
+            name = one_line(p.get('name'), LIMITS['name']) if isinstance(p, dict) else ''
+            if not name:
+                continue
+            names = add_name(names, name)
+            address = _address_of(name)
+
+            def same_person(other: str) -> bool:      # the match add_name makes: a spelling, or one address
+                return same_name(other, name) or bool(address) and _address_of(other) == address
+
+            listed = next((n for n in names if same_person(n)), name)
+            kept = next((k for k, v in entry['people'].items() if isinstance(v, dict) and same_person(k)), None)
+            info = dict(entry['people'].pop(kept, None) or {}) if kept else {}
+            role = one_line(p.get('role'), LIMITS['role'])
+            info['role'] = role or one_line(info.get('role'), LIMITS['role'])
+            info.setdefault('added', _today())
+            entry['people'][listed] = info               # kept under the list's spelling, where load() finds it
+        for t in terms if isinstance(terms, list) else []:
+            word = one_line(t.get('word'), LIMITS['word']) if isinstance(t, dict) else ''
+            if not word:
+                continue
+            meaning = one_line(t.get('meaning'), LIMITS['meaning'])
+            same = next((x for x in entry['terms'] if _key(x.get('word')) == _key(word)), None)
+            if same is None:
+                entry['terms'].append({'word': word, 'meaning': meaning, 'heard': [], 'added': _today()})
+            elif meaning:
+                same['meaning'] = meaning
+                same.pop('learned', None)            # the user stands behind it now: remove_heard leaves it
+        if isinstance(background, str) and background.strip():
+            entry['background'] = background.strip()[:LIMITS['background']]
+        save_people(project, names)
+        _save_entry(project, entry)
+        return load(project)
+
+
+def project_for_folder(folder: str) -> str | None:
+    """The project whose folder this is, or the nearest one above or below it (a subfolder of the project, or a
+    project kept in a subfolder of this one)."""
+    try:
+        here = Path(folder).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return None
+    found = [(p, f.resolve()) for p, f in folders().items()]
+    exact = [p for p, f in found if f == here]
+    if exact:
+        return exact[0]
+    above = [(len(f.parts), p) for p, f in found if f in here.parents]
+    if above:
+        return max(above)[1]                         # the deepest project folder this one is inside
+    below = [p for p, f in found if here in f.parents]
+    return below[0] if len(below) == 1 else None     # two projects below: the user says which
+
+
 def add_person(project: str, name: str, role: str = ''):
     """A name the user confirmed: on the project's list, and what they do if the brief has nothing yet."""
     name = one_line(name, LIMITS['name'])

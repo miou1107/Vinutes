@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.37 (2026-11-22)
+
+- Claude Code can draft a project's brief (專案背景) from what you typed in past conversations in the project's folder: type `/mcp__vinutes__draft_brief` there. Claude reads only your own messages, not its replies, tool output or anything longer than 2,000 characters, and shows the draft next to what the brief already has. Only the rows you approve are saved; nothing in the brief is taken off, and the background changes only when you approve a new one. Prices, budgets and opinions about people are left out, since the minutes go to clients. Vinutes never reads the conversations itself: Claude does, in the folder. Two new tools for agents, `get_brief` and `add_to_brief`, back it (issue #2).
+
 ## v0.4.36 (2026-11-21)
 
 - A project folder full of data no longer hides the project's documents from the AI that writes the minutes. Only the newest 200 files of a folder are read, and a folder that also holds crawled pages, exports or backups filled that limit with them: a website project's folder gave 187 crawled-page files and 2 of its 86 notes, a client project's folder gave its JSON backups and none of its 6 PDFs or 5 slide decks. Proposals, minutes, schedules and other documents now come first and data files (JSON, CSV, TSV) fill what room is left, so the same folders give 46 notes and every PDF and deck. The list the AI reads is still newest first.

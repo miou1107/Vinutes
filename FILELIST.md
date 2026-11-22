@@ -34,7 +34,7 @@
 | `scripts/transcribe.py` | Turns a recording into a transcript on the Mac (Whisper, or Qwen3-ASR for Chinese meetings when the user chose it and downloaded it); audio is not uploaded. Reuses the pieces transcribed during the recording and does only the rest |
 | `scripts/live_transcribe.py` | Runs beside the recording: transcribes it in pieces of about five minutes, cut at quiet moments, while the meeting goes on, with the voice prints of each piece's lines, so little is left to do after Stop |
 | `scripts/connect_agents.py` | Adds Vinutes' MCP server to the AI tools installed on the Mac (Claude Code, Codex, Gemini CLI, Claude's app, Antigravity, Cursor); install.sh runs it |
-| `scripts/mcp_server.py` | Vinutes as an MCP server: Claude Code searches and reads past meetings, and names speakers, adds notes, changes words, tags and projects when asked |
+| `scripts/mcp_server.py` | Vinutes as an MCP server: Claude Code searches and reads past meetings, and names speakers, adds notes, changes words, tags and projects when asked; reads and adds to project briefs, and serves the prompt that drafts one from past conversations |
 | `scripts/speakers.py` | Tells speakers apart by voice and remembers the names the user gives them |
 | `scripts/doc_sync.py` | Keeps the Markdown minutes and the Google Doc in step, paragraph by paragraph, so comments stay put |
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |

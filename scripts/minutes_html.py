@@ -105,7 +105,7 @@ class Back(HTMLParser):
             self.link.append(a.get('href', '') + (f' "{title}"' if title else ''))
             self.put('[')
         elif tag == 'img':
-            src = a.get('src', '')
+            src = a.get('data-src') or a.get('src', '')   # a chart shown as data keeps its file's address
             self.put(f'![{a.get("alt", "")}]({"<" + src + ">" if " " in src else src})')
         elif tag == 'table':
             self.flush(); self.blank()

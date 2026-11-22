@@ -612,8 +612,14 @@ def run(job: Path):
             shutil.copy(work / BODY, job / BODY)
         md = Path(result['minutes_md'])
         shutil.copy(work / DRAFT, md)
+        import charts                                # the AI's 圖表.json drawn under their lines (card #20), while the
+        drawn = charts.place(job, work, md, lang, log=lambda words: log(job, words))   # lines read as the AI wrote them
+        if drawn:
+            log(job, f'charts: {drawn}')
         import speakers
         md.write_text(speakers.guesses_into(job, md.read_text(encoding='utf-8'), result.get('check')), encoding='utf-8')
+        if drawn:
+            charts.settle(job, md.read_text(encoding='utf-8'))   # naming the voices is no edit that redraws
         if (job / BODY).is_file():                   # the mail names the voices the same way
             (job / BODY).write_text(speakers.named_letters(job, (job / BODY).read_text(encoding='utf-8')), encoding='utf-8')
         base = next((md.stem.removesuffix(end) for end, _ in SUFFIX.values() if md.stem.endswith(end)), md.stem)

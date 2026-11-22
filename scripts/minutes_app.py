@@ -1171,7 +1171,7 @@ def wrap_in_lines(lines: list[str], first: int, last: int, words: str, opener: s
     return False
 
 
-def preview(md: str, marks: list[dict], anchors: list[dict]) -> str:
+def preview(md: str, marks: list[dict], anchors: list[dict], at: Path | None = None) -> str:
     """The minutes as HTML for the window's editor: colleagues' changes underlined, commented words highlighted,
     blanks tinted. Raw HTML in the Markdown is shown as text, never run."""
     from markdown_it import MarkdownIt
@@ -1202,9 +1202,26 @@ def preview(md: str, marks: list[dict], anchors: list[dict]) -> str:
                   body, flags=re.S)
     for ch in (MARK_OPEN, MARK_MID, MARK_CLOSE, ANCHOR_OPEN, ANCHOR_MID, ANCHOR_CLOSE):
         body = body.replace(ch, '')
+    if at:                                           # the charts beside the minutes show, as data the window can load
+        body = re.sub(r'<img src="([^"]+)"', lambda m: chart_img(m, at), body)
     # pictures from the internet are not loaded in the window; data: images and nothing else
-    body = re.sub(r'<img [^>]*src="(?!data:)[^"]*"[^>]*>', '', body)
+    body = re.sub(r'<img (?:[^>]*\s)?src="(?!data:)[^"]*"[^>]*>', '', body)   # src itself, not data-src
     return body
+
+
+
+def pictures_at(job: Job) -> Path | None:
+    return job.md_path.parent if job.md_path else None
+
+def chart_img(m, at: Path) -> str:
+    """A chart's picture (charts.py) as a data: image; data-src keeps its address for the read-back."""
+    import base64
+    src = html.unescape(m.group(1))
+    path = (at / urllib.parse.unquote(src)).resolve()
+    if not re.fullmatch(r'圖表-\d+\.png', path.name) or not path.is_relative_to(at.resolve()) or not path.is_file():
+        return m.group(0)
+    data = base64.b64encode(path.read_bytes()).decode()
+    return f'<img src="data:image/png;base64,{data}" data-src="{html.escape(urllib.parse.unquote(src), quote=True)}"'
 
 
 # --- sync with the Google Doc ----------------------------------------------------------------
@@ -1870,7 +1887,135 @@ def push_edit(job: Job, new_md: str, who: str | None = None) -> dict:
     """Keep the edit on this computer first, then send the Doc exactly the paragraphs that changed."""
     if new_md.strip() != job.md.strip():
         job.write_md(new_md)
-    return sync_up(job, who)
+    result = sync_up(job, who)
+    charts_after_edit(job)
+    return result
+
+
+def charts_after_edit(job: Job):
+    """A chart whose words the user changed (in the window or in the Doc) is drawn again in the background
+    (charts.redraw, Vin 2026-11-22 「存檔時重畫」): asking the AI takes longer than a save may."""
+    import charts
+    if job.missing or not job.md_path or not (job.dir / charts.FILE).is_file() or not charts.stale(job.dir, job.md):
+        return
+    subprocess.Popen([sys.executable, str(SCRIPTS / 'minutes_app.py'), 'redraw_charts', str(job.dir)],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def cmd_redraw_charts(job: Job):
+    """The charts whose words changed: the AI's new data, drawn again, and each new picture put in the Doc where
+    the old one was. The AI is asked outside the meeting's turn; only the Doc's change waits for it."""
+    import ai_runner
+    import auto_minutes
+    import charts
+    if job.missing or not job.md_path:
+        return
+
+    def ask(prompt: str, work: Path) -> str:
+        try:
+            done = ai_runner.run(prompt, work, write=False, read_only=True, timeout=180, env=auto_minutes.env(),
+                                 task='edit')
+        except (SystemExit, subprocess.TimeoutExpired):
+            return ''
+        return done.stdout if not done.returncode else ''
+
+    def replace(n: int, picture: Path) -> bool:
+        lock = wait_for_turn(job)
+        try:
+            now = Job(job.dir)
+            warning = chart_into_doc(now, f'圖表-{n}.png', picture)
+            if warning:
+                import vlog
+                vlog.log(f'chart {n}: {warning[:200]}')
+            now.save_state()
+            return not warning
+        finally:
+            lock.close()
+
+    charts.redraw(job.dir, job.md_path, job.md, job.lang, ask, replace, log=lambda words: None)
+
+
+def chart_into_doc(job: Job, name: str, picture: Path) -> str:
+    """The new picture in the Doc in place of the chart's old one: the k-th picture of the minutes is the k-th
+    picture of the Doc (the Doc's pictures all come from the minutes' lines). '' when it went in or there is no Doc;
+    else a few words on why not."""
+    import attachments
+    import charts
+    if not job.doc_id:
+        return ''
+    lines = job.md.split('\n')
+    ours = [i for i, line in enumerate(lines) if charts.picture_line(line)]
+    mine = next((k for k, i in enumerate(ours) if charts.picture_line(lines[i], name)), None)
+    above = next((charts.plain_line(line) for line in reversed(lines[:ours[mine]])
+                  if line.strip() and not charts.picture_line(line)), '') if mine is not None else ''
+    try:
+        doc = doc_sync.get_doc_inline(job.doc_id)    # positions with colleagues' suggestions in place
+    except SystemExit as err:
+        return str(err)
+    if doc_sync.has_suggestions(doc):
+        return 'chart not replaced: a colleague\'s suggestion is waiting in the Doc'
+    found = doc_pictures(doc)
+    if mine is None or len(found) != len(ours) or re.sub(r'\s+', '', found[mine][3]) != above:
+        return 'chart not replaced: the Doc\'s pictures no longer match the minutes'   # tried again at the next save
+    start, end, width, _ = found[mine]
+    try:
+        folder = attachments.folder_for(job.state, job.doc_id, job.lang)
+        up = attachments.upload(picture, folder, name, 'image/png')
+    except SystemExit as err:
+        return str(err)
+    try:
+        opened = attachments.call(doc_sync.DRIVE + up['id'] + '/permissions?fields=id', {'type': 'anyone', 'role': 'reader'})
+    except SystemExit as err:
+        attachments.throw_away([up['id']])
+        return str(err)
+    try:
+        done = doc_sync.batch_update(job.doc_id, [
+            {'deleteContentRange': {'range': {'startIndex': start, 'endIndex': end}}},
+            {'insertInlineImage': {'location': {'index': start},
+                                   'uri': f'https://drive.google.com/uc?export=view&id={up["id"]}',
+                                   'objectSize': {'width': {'magnitude': width, 'unit': 'PT'}}}},
+        ], doc.get('revisionId'))
+        revision = (done.get('writeControl') or {}).get('requiredRevisionId', '')
+        if revision and doc.get('revisionId') == job.state.get('revision'):
+            own_write(job, revision)                  # our own change: not a colleague's
+    except SystemExit as err:
+        attachments.throw_away([up['id']])            # the Doc refused it: the upload is not kept
+        return str(err)
+    finally:
+        if not attachments.close_link(up['id'], opened.get('id', 'anyoneWithLink')):
+            job.state.setdefault('open_links', []).append({'file': up['id'], 'perm': opened.get('id', 'anyoneWithLink')})
+    old = job.state.get('chart_files', {}).get(name)
+    if old:
+        attachments.throw_away([old])                 # the picture drawn before this one
+    job.state.setdefault('chart_files', {})[name] = up['id']
+    return ''
+
+
+def doc_pictures(doc: dict) -> list[tuple[int, int, float, str]]:
+    """Every picture in the Doc's body, in order (in tables too): (start, end, width in points, the words of the
+    last paragraph with words before it)."""
+    objects = doc.get('inlineObjects') or {}
+    found, last = [], ['']
+
+    def walk(content):
+        for el in content or []:
+            words = ''.join((r.get('textRun') or {}).get('content', '')
+                            for r in (el.get('paragraph') or {}).get('elements', [])).strip()
+            for run in (el.get('paragraph') or {}).get('elements', []):
+                ref = run.get('inlineObjectElement')
+                if ref:
+                    size = (((objects.get(ref.get('inlineObjectId')) or {}).get('inlineObjectProperties') or {})
+                            .get('embeddedObject') or {}).get('size') or {}
+                    width = (size.get('width') or {}).get('magnitude') or 451
+                    found.append((run['startIndex'], run['endIndex'], width, last[0]))
+            if words:
+                last[0] = words
+            for row in (el.get('table') or {}).get('tableRows', []):
+                for cell in row.get('tableCells', []):
+                    walk(cell.get('content'))
+    walk((doc.get('body') or {}).get('content'))
+    return found
 
 
 def sync_up(job: Job, who: str | None = None, again: bool = True) -> dict:
@@ -2027,7 +2172,7 @@ def page_token(job: Job, html_text: str) -> str:
 
 
 def shown_token(job: Job, md: str) -> str:
-    return page_token(job, preview(md, [], []))
+    return page_token(job, preview(md, [], [], pictures_at(job)))
 
 
 def shown_md(job: Job, token: str) -> str | None:
@@ -2046,7 +2191,7 @@ def answer(job: Job, result: dict, html: bool = False, **extra):
             'people': meeting_people(job), 'speakers': speakers_shown(job), 'silent': silent_people(job),
             'calendar': calendar_payload(job), 'check': check_items(job), 'attachments': attachments_listed(md), **extra}
     if result['reload'] or skipped or html:
-        data['html'] = preview(md, result['marks'], current_anchors(job, md))
+        data['html'] = preview(md, result['marks'], current_anchors(job, md), pictures_at(job))
         data['shown'] = page_token(job, data['html'])
     data['can_undo'] = (job.dir / '復原.md').is_file() and (job.dir / '復原後.md').is_file()
     data['reload_doc'] = bool(result.get('whole'))
@@ -2061,7 +2206,7 @@ def cmd_save(job: Job, edited: Path, token: str = ''):
     md = job.md
     shown = shown_md(job, token)
     after = minutes_html.back(edited.read_text(encoding='utf-8'))
-    before = shown if shown is not None else minutes_html.back(preview(md, [], []))
+    before = shown if shown is not None else minutes_html.back(preview(md, [], [], pictures_at(job)))
     try:
         new_md, skipped = doc_sync.carry(md, before, after)
     except doc_sync.Structural:
@@ -2071,7 +2216,7 @@ def cmd_save(job: Job, edited: Path, token: str = ''):
         return
     typed = remember_shown(job, after)               # the page as saved: the next save starts from here
     result = push_edit(job, new_md)
-    if minutes_html.back(preview(job.md, [], [])) != after:
+    if minutes_html.back(preview(job.md, [], [], pictures_at(job))) != after:
         result['reload'] = True                       # the page shows something the minutes no longer say
     answer(job, result, skipped=[t for _, t in skipped], typed=typed)
 
@@ -3034,7 +3179,7 @@ def open_missing(job: Job, base: dict):
             md = ''
     warning = (t('missing_file', name=where.name) + (t('missing_showing_doc') if md else '')
                + t('missing_put_back', folder=folder))
-    out(page(job, base, md, preview(md, [], []) if md else '', warning=warning, readonly=True, offline=not md,
+    out(page(job, base, md, preview(md, [], [], pictures_at(job)) if md else '', warning=warning, readonly=True, offline=not md,
              todo=[], can_undo=False))
 
 
@@ -3083,7 +3228,7 @@ def cmd_open(job: Job):
     md = job.md
     if not (job.dir / '學習基準.md').is_file() and md:
         (job.dir / '學習基準.md').write_text(md, encoding='utf-8')
-    out(page(job, base, md, preview(md, info['marks'], anchors), learned=learned, comments=comments,
+    out(page(job, base, md, preview(md, info['marks'], anchors, pictures_at(job)), learned=learned, comments=comments,
              news={'editors': info['editors'], 'edits': info['edits'], 'new_comments': new},
              warning=info['warning'], offline=offline))
 
@@ -3103,6 +3248,7 @@ def cmd_refresh(job: Job):
                 raise SystemExit(sent['why'] or sent['held'])
             info = pull(job, patient=True)
             placed = after_sync(job, info.get('doc'))
+            charts_after_edit(job)
             learned = cmd_learn(job, log=False)
             warning = ' '.join(w for w in (sent['warning'], info['warning'], *placed) if w)
         except SystemExit as err:
@@ -3201,6 +3347,8 @@ def main():
         return cmd_suggest(job, ' '.join(rest))
     if cmd == 'mail_summary':                        # only reads the minutes: saving them goes on while the AI writes
         return cmd_mail_summary(job)
+    if cmd == 'redraw_charts':                       # asks the AI first; waits for the meeting's turn only for the Doc
+        return cmd_redraw_charts(job)
     if cmd == 'locate':                              # only reads the Doc: no turn to wait for
         return cmd_locate(job, ' '.join(rest).strip())
     if cmd in ('archive', 'unarchive'):              # only a marker file: no turn to wait for either

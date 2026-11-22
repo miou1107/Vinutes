@@ -4964,3 +4964,272 @@ class NameWhileTheAiWrites(unittest.TestCase):
             self.assertNotIn('Zed', self.md_path.read_text(encoding='utf-8'))   # not a voice letter
         finally:
             MeetingPeople.tearDown(self)
+
+
+class Charts(unittest.TestCase):
+    """Charts in the minutes (OwnMind card #20): the AI describes a chart under a line, Vinutes draws it beside the
+    minutes and puts its picture under that line; a saved edit to the words above it draws it again (Vin
+    2026-11-22 「存檔時重畫」). All names and numbers here are made up."""
+
+    MD = ('# 春季會員促銷檢討\n\n## 三、討論摘要\n\n### （一）各通路成效\n\n'
+          '- 林佳慧說明：官網訂單 1,240 筆、App 860 筆、LINE 官方帳號 420 筆。\n'
+          '- 周建宏提出：LINE 官方帳號可以加碼。\n\n### （二）退貨流程\n\n'
+          '陳雅婷說明：會員申請後，客服審核，倉庫收回，財務退款。\n\n## 四、初步共識\n\n1. 採方案 A。\n')
+    BAR = {'type': 'bar', 'after': '林佳慧說明：官網訂單 1,240 筆、App 860 筆、LINE 官方帳號 420 筆。',
+           'title': '各通路訂單數', 'unit': '筆',
+           'items': [{'label': '官網', 'value': '1,240'}, {'label': 'App', 'value': 860},
+                     {'label': 'LINE 官方帳號', 'value': 420}]}
+
+    def setUp(self):
+        import charts
+        self.charts = charts
+        self.root = Path(tempfile.mkdtemp())
+        self.job, self.work = self.root / 'job', self.root / 'work'
+        self.job.mkdir()
+        self.work.mkdir()
+        self.md_path = self.root / '紀錄' / '20260414_春季會員促銷檢討_會議紀錄.md'
+        self.md_path.parent.mkdir()
+        self.md_path.write_text(self.MD, encoding='utf-8')
+        self.drawn = []
+        self.saved_render = charts.render
+
+        def fake_render(c, n, out, lang='zh-TW'):
+            self.drawn.append((n, c))
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b'\x89PNG fake ' + json.dumps(c, ensure_ascii=False).encode())
+            return True
+        charts.render = fake_render
+
+    def tearDown(self):
+        self.charts.render = self.saved_render
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def ask_for(self, *charts_):
+        (self.work / self.charts.FILE).write_text(json.dumps({'charts': list(charts_)}, ensure_ascii=False),
+                                                  encoding='utf-8')
+
+    def test_only_charts_it_can_draw_are_kept(self):
+        c = self.charts.checked(self.BAR)
+        self.assertEqual([i['value'] for i in c['items']], [1240, 860, 420])        # '1,240' read as a number
+        self.assertIsNone(self.charts.checked({**self.BAR, 'type': 'line'}))
+        self.assertIsNone(self.charts.checked({**self.BAR, 'items': self.BAR['items'][:1]}))   # one bar is no chart
+        self.assertIsNone(self.charts.checked({**self.BAR, 'items': [{'label': 'x', 'value': 'abc'}] * 3}))
+        self.assertIsNone(self.charts.checked({'type': 'arch', 'nodes': ['A', 'B'], 'links': [['A', 'C']]}))
+        flow = self.charts.checked({'type': 'flow', 'steps': ['申請', {'label': '審核', 'note': '1 天'}]})
+        self.assertEqual(flow['steps'], [{'label': '申請', 'note': ''}, {'label': '審核', 'note': '1 天'}])
+
+    def test_the_picture_goes_under_the_list_its_line_is_in(self):
+        self.ask_for(self.BAR, {**self.BAR, 'after': '這一行不在紀錄裡'})
+        self.assertEqual(self.charts.place(self.job, self.work, self.md_path), 1)
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('- 周建宏提出：LINE 官方帳號可以加碼。\n\n'
+                      '![圖 1　各通路訂單數](<20260414_春季會員促銷檢討_會議紀錄_附件/圖表-1.png>)\n\n### （二）', md)
+        self.assertTrue((self.md_path.parent / '20260414_春季會員促銷檢討_會議紀錄_附件' / '圖表-1.png').is_file())
+        kept = json.loads((self.job / self.charts.FILE).read_text(encoding='utf-8'))['charts']
+        self.assertEqual(kept[0]['file'], '圖表-1.png')
+        self.assertIn('LINE官方帳號420筆', kept[0]['words'])
+        self.assertEqual(self.charts.stale(self.job, md), [])
+
+    def test_a_paragraph_gets_its_picture_right_under_it(self):
+        self.ask_for({'type': 'flow', 'after': '陳雅婷說明：會員申請後，客服審核，倉庫收回，財務退款。', 'title': '退貨流程',
+                      'steps': ['會員申請', '客服審核', '倉庫收回', '財務退款']}, self.BAR, self.BAR, self.BAR)
+        self.assertEqual(self.charts.place(self.job, self.work, self.md_path), 3)   # at most three
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertIn('財務退款。\n\n![圖 1　退貨流程](<', md)
+
+    def test_no_chart_file_leaves_the_minutes_alone(self):
+        self.assertEqual(self.charts.place(self.job, self.work, self.md_path), 0)
+        self.assertEqual(self.md_path.read_text(encoding='utf-8'), self.MD)
+        self.assertFalse((self.job / self.charts.FILE).exists())
+
+    def test_only_an_edit_to_the_words_above_a_chart_makes_it_stale(self):
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertEqual(self.charts.stale(self.job, md.replace('1. 採方案 A。', '1. 採方案 B。')), [])
+        edited = md.replace('LINE 官方帳號 420 筆', 'LINE 官方帳號 520 筆')
+        self.assertEqual([k['file'] for k in self.charts.stale(self.job, edited)], ['圖表-1.png'])
+        gone = re.sub(r'!\[圖 1[^\n]*\n', '', md)
+        self.assertEqual(self.charts.stale(self.job, gone), [])          # the user took the picture out
+
+    def test_an_edit_draws_the_chart_again_once(self):
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8').replace('LINE 官方帳號 420 筆', 'LINE 官方帳號 520 筆')
+        self.md_path.write_text(md, encoding='utf-8')
+        asked, replaced = [], []
+
+        def ask(prompt, work):
+            asked.append((work / '段落.txt').read_text(encoding='utf-8'))
+            old = json.loads((work / self.charts.FILE).read_text(encoding='utf-8'))
+            old['items'][2]['value'] = 520
+            return '好的，更新如下：\n```json\n' + json.dumps(old, ensure_ascii=False) + '\n```'
+        for _ in range(2):                                                # the second save changes nothing
+            self.charts.redraw(self.job, self.md_path, md, 'zh-TW', ask, lambda n, p: replaced.append(n) or True)
+        self.assertEqual(len(asked), 1)
+        self.assertIn('520筆', asked[0])
+        self.assertEqual(replaced, [1])
+        kept = json.loads((self.job / self.charts.FILE).read_text(encoding='utf-8'))['charts'][0]
+        self.assertEqual(kept['chart']['items'][2]['value'], 520)
+        self.assertEqual(kept['chart']['type'], 'bar')
+
+    def test_an_answer_with_nothing_to_draw_keeps_the_picture(self):
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8').replace('官網訂單 1,240 筆、', '')
+        replaced = []
+        for answer in ('{}', 'not json'):
+            self.charts.redraw(self.job, self.md_path, md, 'zh-TW', lambda p, w: answer,
+                               lambda n, p: replaced.append(n))
+            md += ' '                                                     # words changed again: asked again
+            md = md.replace('可以加碼。', '可以加碼。 ')
+        self.assertEqual(replaced, [])
+        self.assertEqual(len(self.drawn), 1)                              # only the first drawing
+
+    def test_the_window_shows_the_chart_and_reads_it_back_as_its_line(self):
+        import minutes_html
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8')
+        page = minutes_app.preview(md, [], [], self.md_path.parent)
+        self.assertIn('src="data:image/png;base64,', page)
+        back = minutes_html.back(page)
+        self.assertRegex(back, r'!\[圖 1　各通路訂單數\]\(<?20260414_春季會員促銷檢討_會議紀錄_附件/圖表-1\.png>?\)')
+        self.assertEqual(self.charts.section(back, '圖表-1.png'), self.charts.section(md, '圖表-1.png'))
+        self.assertNotIn('<img', minutes_app.preview(md, [], []))            # without the folder: as before
+        other = md + '\n![截圖](../../etc/圖表-1.png)\n'
+        self.assertEqual(minutes_app.preview(other, [], [], self.md_path.parent).count('data:image'), 1)
+
+    def test_the_docs_pictures_are_found_in_order(self):
+        pic = lambda i, s: {'startIndex': s, 'endIndex': s + 1, 'inlineObjectElement': {'inlineObjectId': i}}  # noqa: E731
+        doc = {'body': {'content': [
+            {'paragraph': {'elements': [{'startIndex': 1, 'endIndex': 5, 'textRun': {'content': 'abc\n'}}]}},
+            {'paragraph': {'elements': [pic('a', 5)]}},
+            {'table': {'tableRows': [{'tableCells': [{'content': [{'paragraph': {'elements': [pic('b', 20)]}}]}]}]}}]},
+            'inlineObjects': {'a': {'inlineObjectProperties': {'embeddedObject': {'size': {'width': {'magnitude': 300}}}}}}}
+        self.assertEqual(minutes_app.doc_pictures(doc), [(5, 6, 300, 'abc'), (20, 21, 451, 'abc')])
+
+    @unittest.skipUnless(shutil.which('qlmanage') and shutil.which('sips'), 'macOS draws the picture')
+    def test_macos_draws_each_kind(self):
+        self.charts.render = self.saved_render
+        specs = [self.BAR, {**self.BAR, 'type': 'pie'},
+                 {'type': 'flow', 'steps': ['申請', '審核', '收回', '退款', '通知', '結案']},
+                 {'type': 'arch', 'nodes': ['官網', 'App', '會員系統', '點數系統'],
+                  'links': [['官網', '會員系統'], ['App', '會員系統'], ['會員系統', '點數系統'], ['點數系統', '官網']]}]
+        for n, spec in enumerate(specs, 1):
+            out = self.root / f'{n}.png'
+            self.assertTrue(self.charts.render(self.charts.checked(spec), n, out), spec['type'])
+            w, h = (int(re.search(rf'{k}: (\d+)', subprocess.run(['sips', '-g', k, str(out)], capture_output=True,
+                                                                 text=True).stdout).group(1))
+                    for k in ('pixelWidth', 'pixelHeight'))
+            self.assertEqual(w, self.charts.WIDTH)
+            self.assertLess(h, w)                                         # cut to the drawing, not square
+
+    def test_the_new_picture_takes_the_old_ones_place_in_the_doc(self):
+        import types
+        import attachments
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8')
+        job = types.SimpleNamespace(doc_id='doc1', md=md, lang='zh-TW', state={'revision': 'r1'})
+        doc = {'revisionId': 'r1', 'body': {'content': [
+            {'paragraph': {'elements': [{'startIndex': 1, 'endIndex': 39,
+                                         'textRun': {'content': '周建宏提出：LINE 官方帳號可以加碼。\n'}}]}},
+            {'paragraph': {'elements': [
+                {'startIndex': 40, 'endIndex': 41, 'inlineObjectElement': {'inlineObjectId': 'k'}}]}}]},
+            'inlineObjects': {'k': {'inlineObjectProperties': {'embeddedObject': {'size': {'width': {'magnitude': 400}}}}}}}
+        sent, trashed, uploads = [], [], iter(['f1', 'f2'])
+        with mock.patch.object(ds, "get_doc_inline", lambda d: doc), \
+                mock.patch.object(ds, "batch_update", lambda d, r, rev: sent.append((r, rev)) or
+                                  {'writeControl': {'requiredRevisionId': 'r2'}}), \
+                mock.patch.object(attachments, 'folder_for', lambda *a: 'folder'), \
+                mock.patch.object(attachments, 'upload', lambda *a: {'id': next(uploads), 'link': ''}), \
+                mock.patch.object(attachments, 'call', lambda *a, **k: {'id': 'perm'}), \
+                mock.patch.object(attachments, 'close_link', lambda f, p: True), \
+                mock.patch.object(attachments, 'throw_away', lambda ids: trashed.extend(ids)):
+            picture = self.md_path.parent / '20260414_春季會員促銷檢討_會議紀錄_附件' / '圖表-1.png'
+            self.assertEqual(minutes_app.chart_into_doc(job, '圖表-1.png', picture), '')
+            requests, revision = sent[0]
+            self.assertEqual(revision, 'r1')
+            self.assertEqual(requests[0], {'deleteContentRange': {'range': {'startIndex': 40, 'endIndex': 41}}})
+            self.assertEqual(requests[1]['insertInlineImage']['location'], {'index': 40})
+            self.assertEqual(requests[1]['insertInlineImage']['objectSize']['width']['magnitude'], 400)
+            self.assertIn('id=f1', requests[1]['insertInlineImage']['uri'])
+            self.assertEqual(job.state['revision'], 'r2')               # our own write, not a colleague's
+            doc['revisionId'] = 'r2'
+            minutes_app.chart_into_doc(job, '圖表-1.png', picture)        # drawn again: the picture before goes
+            self.assertEqual(trashed, ['f1'])
+            job.md = md + '\n![截圖](a.png)\n'                            # the Doc has fewer pictures than the minutes
+            self.assertIn('no longer match', minutes_app.chart_into_doc(job, '圖表-1.png', picture))
+            job.md = md                                                   # same count, but the Doc's picture is
+            doc['body']['content'][0]['paragraph']['elements'][0]['textRun']['content'] = '同事貼的圖\n'   # not ours
+            self.assertIn('no longer match', minutes_app.chart_into_doc(job, '圖表-1.png', picture))
+            self.assertEqual(len(sent), 2)
+
+    def test_a_save_starts_a_redraw_only_when_a_charts_words_changed(self):
+        import types
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8')
+        job = types.SimpleNamespace(dir=self.job, md=md, md_path=self.md_path, missing=False)
+        with mock.patch.object(minutes_app.subprocess, 'Popen') as started:
+            minutes_app.charts_after_edit(job)
+            self.assertFalse(started.called)
+            job.md = md.replace('420 筆', '520 筆')
+            minutes_app.charts_after_edit(job)
+            self.assertEqual(started.call_args[0][0][-2:], ['redraw_charts', str(self.job)])
+
+    def test_two_charts_under_one_line_keep_their_order_and_words(self):
+        self.ask_for(self.BAR, {**self.BAR, 'type': 'pie', 'title': '訂單占比'})
+        self.assertEqual(self.charts.place(self.job, self.work, self.md_path), 2)
+        md = self.md_path.read_text(encoding='utf-8')
+        self.assertLess(md.index('圖表-1.png'), md.index('圖表-2.png'))
+        kept = json.loads((self.job / self.charts.FILE).read_text(encoding='utf-8'))['charts']
+        self.assertEqual(kept[0]['words'], kept[1]['words'])
+        self.assertIn('LINE官方帳號420筆', kept[0]['words'])
+
+    def test_naming_the_voices_after_drawing_is_no_edit(self):
+        md = self.MD.replace('林佳慧說明', '講者 B 說明')
+        self.md_path.write_text(md, encoding='utf-8')
+        self.ask_for({**self.BAR, 'after': self.BAR['after'].replace('林佳慧說明', '講者 B 說明')})
+        self.assertEqual(self.charts.place(self.job, self.work, self.md_path), 1)
+        named = self.md_path.read_text(encoding='utf-8').replace('講者 B 說明', '林佳慧說明')
+        self.assertTrue(self.charts.stale(self.job, named))
+        self.charts.settle(self.job, named)
+        self.assertEqual(self.charts.stale(self.job, named), [])
+
+    def test_what_did_not_reach_the_doc_is_tried_again_and_a_typo_draws_nothing(self):
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8').replace('420 筆', '520 筆')
+        self.md_path.write_text(md, encoding='utf-8')
+        asked, tries = [], iter([False, True])
+
+        def ask(prompt, work):
+            asked.append(1)
+            old = json.loads((work / self.charts.FILE).read_text(encoding='utf-8'))
+            old['items'][2]['value'] = 520
+            return json.dumps(old, ensure_ascii=False)
+        self.charts.redraw(self.job, self.md_path, md, 'zh-TW', ask, lambda n, p: next(tries))
+        self.assertTrue(self.charts.stale(self.job, md))                  # the Doc still has the old picture
+        self.charts.redraw(self.job, self.md_path, md, 'zh-TW', ask, lambda n, p: next(tries))
+        self.assertEqual((len(asked), self.charts.stale(self.job, md)), (1, []))   # put in without asking again
+        typo = md.replace('可以加碼', '可已加碼')
+        self.md_path.write_text(typo, encoding='utf-8')
+        drawn = len(self.drawn)
+        self.charts.redraw(self.job, self.md_path, typo, 'zh-TW', ask, lambda n, p: self.fail('no new picture'))
+        self.assertEqual(len(self.drawn), drawn)                          # the same chart: not drawn again
+
+    def test_an_ai_that_does_not_answer_is_asked_again_later(self):
+        self.ask_for(self.BAR)
+        self.charts.place(self.job, self.work, self.md_path)
+        md = self.md_path.read_text(encoding='utf-8').replace('420 筆', '520 筆')
+        self.md_path.write_text(md, encoding='utf-8')
+        self.charts.redraw(self.job, self.md_path, md, 'zh-TW', lambda p, w: '', lambda n, p: True)
+        self.assertTrue(self.charts.stale(self.job, md))
+
+    def test_an_architecture_too_tall_for_the_picture_is_left_out(self):
+        nodes = ['閘道'] + [f'服務{i}' for i in range(7)]
+        self.assertIsNone(self.charts.checked({'type': 'arch', 'nodes': nodes, 'links': [['閘道', n] for n in nodes[1:]]}))
+        self.assertTrue(self.charts.checked({'type': 'arch', 'nodes': nodes[:7],
+                                             'links': [['閘道', n] for n in nodes[1:7]]}))

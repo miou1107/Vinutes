@@ -38,6 +38,7 @@
 | `scripts/speakers.py` | Tells speakers apart by voice and remembers the names the user gives them |
 | `scripts/doc_sync.py` | Keeps the Markdown minutes and the Google Doc in step, paragraph by paragraph, so comments stay put |
 | `scripts/minutes_html.py` | Turns what was edited in the window's preview back into Markdown |
+| `scripts/charts.py` | Charts in the minutes: checks the AI's 圖表.json, draws bar, pie, flow and architecture charts as pictures under their paragraphs, and draws one again when the words above it change |
 | `scripts/attachments.py` | Files, links and pictures from Add attachments: uploads them to Google Drive and lists them, each with its note, in the minutes' last section; reads that section back for the row under the title |
 | `scripts/project_folders.py` | Each project's folder (Project settings), copied for the AI that writes the minutes: PDF and text as they are, Word, Excel and PowerPoint as text, with a list of the files; documents before data files when the limits leave some out |
 | `scripts/references.py` | Files and links handed to the AI with a sentence: copied or read as text into its folder (Word, Excel, PowerPoint, web pages, Google files) |

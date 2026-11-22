@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.38 (2026-11-22)
+
+- The minutes can carry charts. When a paragraph of the discussion has numbers worth comparing, steps in order, or systems and how they connect, the AI may describe a bar, pie, flow or architecture chart for it, at most three per meeting; Vinutes draws it on the Mac (nothing to install) and puts it under that paragraph, in the Google Doc, the Word file and the meeting window. A comparison of two or three options is written as a table the Doc can edit. When you change the words above a chart and save, in the Doc or in the window, Vinutes asks the AI for the chart's new numbers in the background and puts the new picture in the Doc where the old one was. A chart is a picture because Google Docs' own charts come from a spreadsheet and cannot be put into a Doc by a program. The design is `prototypes/minutes-charts.html`.
+
 ## v0.4.37 (2026-11-22)
 
 - Claude Code can draft a project's brief (專案背景) from what you typed in past conversations in the project's folder: type `/mcp__vinutes__draft_brief` there. Claude reads only your own messages, not its replies, tool output or anything longer than 2,000 characters, and shows the draft next to what the brief already has. Only the rows you approve are saved; nothing in the brief is taken off, and the background changes only when you approve a new one. Prices, budgets and opinions about people are left out, since the minutes go to clients. Vinutes never reads the conversations itself: Claude does, in the folder. Two new tools for agents, `get_brief` and `add_to_brief`, back it (issue #2).

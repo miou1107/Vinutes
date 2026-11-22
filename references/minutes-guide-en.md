@@ -50,6 +50,15 @@ The prompt gives you the job folder (written `job` below), the recording's start
    PowerPoint files as text. Read its `檔案清單.md` (the list of files, newest first) and the files that bear on this
    meeting, such as earlier minutes, proposals and schedules, to fill in background and check names, dates and action
    items. Something the folder says but the transcript doesn't is never a decision or action item of this meeting.
+   Charts (optional): when a paragraph of the discussion has three or more numbers worth comparing, four or more
+   steps in order, or three or more systems or teams and how they connect, you may describe a chart in
+   `job/圖表.json`, at most three in all; the program draws it under that line. A comparison of two or three options
+   is a Markdown table, not a chart. Use only numbers, names and steps the minutes state, and copy the minutes' line
+   into `after` (without its list mark). Shape:
+   `{"charts": [{"type": "bar", "after": "…", "title": "Orders by channel", "unit": "orders", "items": [{"label": "Website", "value": 1240}]}]}`;
+   `pie` takes `items` like `bar`, `flow` takes `"steps": [{"label": "Support review", "note": "1 working day"}]`,
+   `arch` takes `"nodes": ["Website", "Members"], "links": [["Website", "Members"]]`. With no such paragraph, leave
+   the file out.
 4. Prepare the mail: recipients are the attendees in the 「這場會議」 section on the user's own company domain, plus
    the user; when no meeting matched or it lists nobody, only the user. People in the other sections are not
    recipients (the app adds the meeting's people from its own contacts when the user opens the mail). After the
